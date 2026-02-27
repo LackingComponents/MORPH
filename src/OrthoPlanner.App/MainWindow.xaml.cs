@@ -720,29 +720,26 @@ public partial class MainWindow : Window
                     
                 lookDirection.Normalize();
                 
-                // Fetch the dynamic mathematical exact pivot center mapped in the ViewModel
+                // Fetch the absolute model centroid
                 var centroid = VM.ModelCenter;
 
-                // Calculate an appropriate safe viewing distance 
+                // Obtain the true spatial bounding box of only the dicom mesh, modified by NHP.
                 var worldBounds = VM.BoneModel.Transform != null 
                     ? VM.BoneModel.Transform.TransformBounds(VM.BoneModel.Bounds) 
                     : VM.BoneModel.Bounds;
-                    
-                double distance = Math.Max(worldBounds.SizeX, Math.Max(worldBounds.SizeY, worldBounds.SizeZ)) * 1.5;
-                if (distance < 100) distance = 300.0;
+
+                // Animate the camera angle mathematically based on the clicked Cube face.
+                HelixToolkit.Wpf.CameraHelper.ChangeDirection(cam, lookDirection, new Vector3D(0, 0, 1), 500);
                 
-                // Calculate the exact target offset relative to the absolute grid center
-                var targetPosition = new Point3D(
-                    centroid.X - lookDirection.X * distance, 
-                    centroid.Y - lookDirection.Y * distance, 
-                    centroid.Z - lookDirection.Z * distance);
+                // Instruct Helix to completely discard all panning translations internally, 
+                // calculate the mathematically perfect focal distance, and snap the camera squarely onto the 3D model.
+                Viewport3D.ZoomExtents(worldBounds, 500);
 
-                // The camera's look direction vector MUST have a magnitude equal to the distance to the target!
-                // Otherwise, Helix sets its internal focal/rotation point 1 unit in front of the camera lens, breaking orbits!
-                var scaledLookDirection = new Vector3D(lookDirection.X * distance, lookDirection.Y * distance, lookDirection.Z * distance);
-
-                // Use the HelixToolkit CameraHelper to animate firmly to our model center!
-                HelixToolkit.Wpf.CameraHelper.AnimateTo(cam, targetPosition, scaledLookDirection, new Vector3D(0, 0, 1), 500);
+                // Override hidden spatial tracking mechanic
+                if (Viewport3D.CameraController != null)
+                {
+                    Viewport3D.CameraController.CameraTarget = centroid;
+                }
 
                 // FATAL OVERRIDE: Prevent HelixToolkit from triggering its own ViewCube click logic entirely!
                 e.Handled = true;
