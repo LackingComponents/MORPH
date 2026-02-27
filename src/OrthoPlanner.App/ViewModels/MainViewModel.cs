@@ -1532,10 +1532,9 @@ public partial class MainViewModel : ObservableObject
         
         IsLoading = false;
         
-        // Set Baseline (Committed) Values to CURRENT so that UI Deltas = 0
-        _cLat = NhpLateral; _cAnt = NhpAnteroposterior; _cVert = NhpVertical;
-        _cRoll = NhpRoll; _cPitch = NhpPitch; _cYaw = NhpYaw;
         // NOTE: We DO NOT zero out NhpLateral, NhpPitch, etc. They must persist in the UI!
+        // We also DO NOT overwrite the baseline (_cLat, etc). Keeping the baseline at 0 
+        // ensures the 3D model visibly maintains its exact transformation relative to the MPR!
 
         await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => {
             Volume = resliced;

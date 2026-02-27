@@ -689,7 +689,7 @@ public partial class MainWindow : Window
             {
                 if (result is RayMeshGeometry3DHitTestResult meshHit)
                 {
-                    DependencyObject? current = meshHit.ModelHit;
+                    DependencyObject? current = meshHit.VisualHit;
                     while (current != null)
                     {
                         if (current is HelixToolkit.Wpf.ViewCubeVisual3D cube)
@@ -720,8 +720,8 @@ public partial class MainWindow : Window
                     
                 lookDirection.Normalize();
                 
-                // Fetch the dynamic mathematical exact pivot center mapped in the ViewModel
-                var centroid = VM.ModelCenter;
+                // Fetch the absolute grid origin (0,0,0) for the reference frame centering!
+                var originTarget = new Point3D(0, 0, 0);
 
                 // Calculate an appropriate safe viewing distance 
                 var worldBounds = VM.BoneModel.Transform != null 
@@ -731,22 +731,20 @@ public partial class MainWindow : Window
                 double distance = Math.Max(worldBounds.SizeX, Math.Max(worldBounds.SizeY, worldBounds.SizeZ)) * 1.5;
                 if (distance < 100) distance = 300.0;
                 
-                // Calculate the exact target offset
+                // Calculate the exact target offset relative to the absolute grid center
                 var targetPosition = new Point3D(
-                    centroid.X - lookDirection.X * distance, 
-                    centroid.Y - lookDirection.Y * distance, 
-                    centroid.Z - lookDirection.Z * distance);
+                    originTarget.X - lookDirection.X * distance, 
+                    originTarget.Y - lookDirection.Y * distance, 
+                    originTarget.Z - lookDirection.Z * distance);
 
-                // Use the HelixToolkit CameraHelper to animate firmly to our mathematical anchors, bypassing their bounds logic!
+                // Use the HelixToolkit CameraHelper to animate firmly to our origin anchors, bypassing their generic bounds logic!
                 HelixToolkit.Wpf.CameraHelper.AnimateTo(cam, targetPosition, lookDirection, new Vector3D(0, 0, 1), 500);
 
-                // 4. Force Override internal controller to target the exact object centroid
+                // 4. Force Override internal controller to target the absolute world origin
                 if (Viewport3D.CameraController != null)
                 {
-                    Viewport3D.CameraController.CameraTarget = centroid;
+                    Viewport3D.CameraController.CameraTarget = originTarget;
                 }
-                
-                Viewport3D.FixedRotationPoint = centroid;
 
                 // FATAL OVERRIDE: Prevent HelixToolkit from triggering its own ViewCube click logic entirely!
                 e.Handled = true;
