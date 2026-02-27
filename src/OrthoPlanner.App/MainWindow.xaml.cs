@@ -732,19 +732,18 @@ public partial class MainWindow : Window
                         // Keep current camera look-direction but normalize the vector
                         var dir = cam.LookDirection;
                         dir.Normalize();
-                        
-                        // Reset camera position to back out from the exact calculated centroid
+
+                        // Enforce the specific Face direction triggered by Helix Toolkit 
+                        // Instead of backing out from the 'current' position (which keeps the pan offset),
+                        // we completely discard translation offsets by looking strictly from the centroid outwards!
                         cam.Position = new Point3D(
                             centroid.X - dir.X * distance, 
                             centroid.Y - dir.Y * distance, 
                             centroid.Z - dir.Z * distance);
                         
-                        // Direct the camera array vector precisely at the centroid pivot
                         cam.LookDirection = new Vector3D(dir.X * distance, dir.Y * distance, dir.Z * distance);
                     }
                 }
-
-                Dispatcher.InvokeAsync(() => Viewport3D.ZoomExtents());
             }
         }
     }

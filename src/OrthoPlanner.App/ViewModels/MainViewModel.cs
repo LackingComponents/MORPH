@@ -193,17 +193,26 @@ public partial class MainViewModel : ObservableObject
         if (bounds.IsEmpty) return;
         var center = new Point3D(bounds.X + bounds.SizeX/2, bounds.Y + bounds.SizeY/2, bounds.Z + bounds.SizeZ/2);
 
+        // DELTA MATH: Only visually rotate/translate by the *difference* between the current UI values
+        // and the physically baked (committed) values. This prevents compounding geometry.
+        var dPitch = NhpPitch - _cPitch;
+        var dRoll = NhpRoll - _cRoll;
+        var dYaw = NhpYaw - _cYaw;
+        var dLat = NhpLateral - _cLat;
+        var dAnt = NhpAnteroposterior - _cAnt;
+        var dVert = NhpVertical - _cVert;
+
         var group = new Transform3DGroup();
         // Translate to local pivot
         group.Children.Add(new TranslateTransform3D(-center.X, -center.Y, -center.Z));
         
         // Rotate
-        group.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), NhpPitch)));
-        group.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), NhpRoll)));
-        group.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), NhpYaw)));
+        group.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), dPitch)));
+        group.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), dRoll)));
+        group.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), dYaw)));
 
         // Translate back + User Translation
-        group.Children.Add(new TranslateTransform3D(center.X + NhpLateral, center.Y + NhpAnteroposterior, center.Z + NhpVertical));
+        group.Children.Add(new TranslateTransform3D(center.X + dLat, center.Y + dAnt, center.Z + dVert));
 
         BoneModel.Transform = group;
     }
@@ -1478,19 +1487,21 @@ public partial class MainViewModel : ObservableObject
         
         IsLoading = false;
         
-        // Reset local NHP UI values (since they are now 'baked' into the volume)
-        NhpLateral = 0; NhpAnteroposterior = 0; NhpVertical = 0;
-        NhpPitch = 0; NhpRoll = 0; NhpYaw = 0;
-        _cLat = 0; _cAnt = 0; _cVert = 0; _cRoll = 0; _cPitch = 0; _cYaw = 0;
+        // Set Baseline (Committed) Values to CURRENT so that UI Deltas = 0
+        _cLat = NhpLateral; _cAnt = NhpAnteroposterior; _cVert = NhpVertical;
+        _cRoll = NhpRoll; _cPitch = NhpPitch; _cYaw = NhpYaw;
+        // NOTE: We DO NOT zero out NhpLateral, NhpPitch, etc. They must persist in the UI!
 
         await System.Windows.Application.Current.Dispatcher.InvokeAsync(async () => {
             Volume = resliced;
             
-            // Re-initialize segmentation volume for the new dimensions
+            // Re-initialize segmentation volume for the new dimensions (Air Padded array)
             _segVolume = new SegmentationVolume(Volume);
-            
-            // Clear current transforms and refresh visualizations
-            if (BoneModel != null) BoneModel.Transform = Transform3D.Identity;
+
+            // INTENTIONALLY NOT REBUILDING THE 3D MODEL
+            // The mesh remains strictly untouched so it doesn't snap, scale, or wipe colors.
+            // The Delta Transform applied in UpdateNhpTransform() perfectly holds its visual
+            // position relative to the new baked Array mathematically.
             
             // Refresh 2D Slices
             AxialMax = Volume.Depth - 1;
@@ -1500,10 +1511,7 @@ public partial class MainViewModel : ObservableObject
             UpdateAllSlices();
             UpdateHistograms();
             
-            // Re-generate main bone mesh from the new resliced volume
-            await GenerateSegmentMeshAsync(1);
-            
-            StatusText = "NHP Alignment Complete.";
+            StatusText = "NHP Alignment Complete. Model frozen.";
             OnPropertyChanged(nameof(IsNhpDirty));
         });
     }

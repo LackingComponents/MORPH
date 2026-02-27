@@ -814,11 +814,37 @@ public static class SegmentationEngine
     /// </summary>
     public static VolumeData ResliceVolume(VolumeData source, NhpTransform transform)
     {
-        // We use the transform to map from the Target grid to the Source.
-        // The calling side should pass the inverse if they want to pull from source.
-        int w = source.Width, h = source.Height, d = source.Depth;
-        var newVoxels = new short[w * h * d];
+        // 1. Find the 8 corners of the original volume in physical space
+        int wSrc = source.Width, hSrc = source.Height, dSrc = source.Depth;
         double sx = source.Spacing[0], sy = source.Spacing[1], sz = source.Spacing[2];
+
+        // The center of the original volume
+        double cx = wSrc * sx / 2.0;
+        double cy = hSrc * sy / 2.0;
+        double cz = dSrc * sz / 2.0;
+
+        // We want to apply the *inverse* transform to find where the box corners land
+        // in the global world, to see how big the bounding box must be.
+        // For simplicity (since the transform passed is already world-to-local), 
+        // we'll estimate worst case bounds by just rotating the physical dimensions.
+        // A sphere bounding the box is easiest:
+        double diag = Math.Sqrt((wSrc*sx)*(wSrc*sx) + (hSrc*sy)*(hSrc*sy) + (dSrc*sz)*(dSrc*sz));
+
+        // Let's use the exact 8 corners mapped through the *inverse* 
+        // We know `transform` is Target-to-Source. We need Source-to-Target to find max bounds.
+        // Instead of building a full matrix inverter, we will safely pad the bounding volume
+        // by the diagonal to guarantee no cropping, then recenter it.
+        int maxW = (int)Math.Ceiling(diag / sx);
+        int maxH = (int)Math.Ceiling(diag / sy);
+        int maxD = (int)Math.Ceiling(diag / sz);
+
+        int w = maxW, h = maxH, d = maxD;
+        var newVoxels = new short[w * h * d];
+
+        // The center of the new padded volume
+        double ncx = w * sx / 2.0;
+        double ncy = h * sy / 2.0;
+        double ncz = d * sz / 2.0;
 
         System.Threading.Tasks.Parallel.For(0, d, z =>
         {
@@ -827,7 +853,12 @@ public static class SegmentationEngine
                 for (int x = 0; x < w; x++)
                 {
                     // Map target voxel physical point back to source space
-                    var (ox, oy, oz) = transform.TransformPoint(x * sx, y * sy, z * sz);
+                    // Shift so we scan around the center of the NEW padded box
+                    double worldX = (x * sx) - ncx + cx;
+                    double worldY = (y * sy) - ncy + cy;
+                    double worldZ = (z * sz) - ncz + cz;
+
+                    var (ox, oy, oz) = transform.TransformPoint(worldX, worldY, worldZ);
                     
                     // Sample HU using trilinear interpolation
                     newVoxels[x + y * w + z * w * h] = SampleTrilinear(source, ox, oy, oz);
