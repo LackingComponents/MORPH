@@ -747,6 +747,34 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ResetCamera_Click(object sender, RoutedEventArgs e)
+    {
+        // 1. Rigorously purge all stored middle-click translation offsets from the CameraController
+        if (Viewport3D.CameraController != null)
+        {
+            Viewport3D.CameraController.ResetCamera();
+        }
+
+        // 2. Refocus the camera completely onto the active bounds
+        if (VM != null && VM.BoneModel != null && !VM.BoneModel.Bounds.IsEmpty)
+        {
+            var worldBounds = VM.BoneModel.Transform != null 
+                ? VM.BoneModel.Transform.TransformBounds(VM.BoneModel.Bounds) 
+                : VM.BoneModel.Bounds;
+            
+            Viewport3D.ZoomExtents(worldBounds, 500);
+            
+            if (Viewport3D.CameraController != null)
+            {
+                Viewport3D.CameraController.CameraTarget = VM.ModelCenter;
+            }
+        }
+        else
+        {
+            Viewport3D.ZoomExtents(500);
+        }
+    }
+
     private void NhpTextBox_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (e.Key == System.Windows.Input.Key.Up || e.Key == System.Windows.Input.Key.Down)
