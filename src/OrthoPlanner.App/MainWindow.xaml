@@ -624,9 +624,9 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <!-- Bind Star ratios directly to the scaled voxel spread for true 1:1 screen mapping -->
-                    <RowDefinition Height="{Binding AxialDisplayHeight, Converter={StaticResource LengthConverter}}" />
-                    <RowDefinition Height="{Binding CoronalDisplayHeight, Converter={StaticResource LengthConverter}}" />
-                    <RowDefinition Height="{Binding SagittalDisplayHeight, Converter={StaticResource LengthConverter}}" />
+                    <RowDefinition Height="{Binding AxialDisplayHeight}" />
+                    <RowDefinition Height="{Binding CoronalDisplayHeight}" />
+                    <RowDefinition Height="{Binding SagittalDisplayHeight}" />
                 </Grid.RowDefinitions>
 
                 <!-- MPR Toolbar -->

@@ -45,9 +45,9 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private int _sagittalMax = 1;
     
     // Proportional Heights for 1:1 Anatomical Scale in UI Viewports
-    [ObservableProperty] private double _axialDisplayHeight = 1.0;
-    [ObservableProperty] private double _coronalDisplayHeight = 1.0;
-    [ObservableProperty] private double _sagittalDisplayHeight = 1.0;
+    [ObservableProperty] private System.Windows.GridLength _axialDisplayHeight = new System.Windows.GridLength(1.0, System.Windows.GridUnitType.Star);
+    [ObservableProperty] private System.Windows.GridLength _coronalDisplayHeight = new System.Windows.GridLength(1.0, System.Windows.GridUnitType.Star);
+    [ObservableProperty] private System.Windows.GridLength _sagittalDisplayHeight = new System.Windows.GridLength(1.0, System.Windows.GridUnitType.Star);
 
     // ─── Windowing ───
     [ObservableProperty] private double _windowCenter = 40;
@@ -683,9 +683,9 @@ public partial class MainViewModel : ObservableObject
             
             // Push the physical aspect ratios to the Grid Rows so the UI enforces 1:1 squares visually
             // Because the Grid widths are uniform "*", we scale height directly mapping to Voxel spread.
-            AxialDisplayHeight = Volume.Height * Volume.Spacing[1];
-            CoronalDisplayHeight = Volume.Depth * Volume.Spacing[2];
-            SagittalDisplayHeight = Volume.Depth * Volume.Spacing[2];
+            AxialDisplayHeight = new System.Windows.GridLength(Volume.Height * Volume.Spacing[1], System.Windows.GridUnitType.Star);
+            CoronalDisplayHeight = new System.Windows.GridLength(Volume.Depth * Volume.Spacing[2], System.Windows.GridUnitType.Star);
+            SagittalDisplayHeight = new System.Windows.GridLength(Volume.Depth * Volume.Spacing[2], System.Windows.GridUnitType.Star);
 
             IsoMin = -1000; // Always start exactly at -1000 (air) for predictable UI
             IsoMax = Volume.MaxValue;
@@ -1542,9 +1542,9 @@ public partial class MainViewModel : ObservableObject
             SagittalMax = Volume.Width - 1;
             
             // Push updated aspect ratios out
-            AxialDisplayHeight = Volume.Height * Volume.Spacing[1];
-            CoronalDisplayHeight = Volume.Depth * Volume.Spacing[2];
-            SagittalDisplayHeight = Volume.Depth * Volume.Spacing[2];
+            AxialDisplayHeight = new System.Windows.GridLength(Volume.Height * Volume.Spacing[1], System.Windows.GridUnitType.Star);
+            CoronalDisplayHeight = new System.Windows.GridLength(Volume.Depth * Volume.Spacing[2], System.Windows.GridUnitType.Star);
+            SagittalDisplayHeight = new System.Windows.GridLength(Volume.Depth * Volume.Spacing[2], System.Windows.GridUnitType.Star);
             
             UpdateAllSlices();
             UpdateHistograms();
