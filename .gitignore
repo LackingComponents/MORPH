@@ -1,0 +1,51 @@
+## [NEW] [.gitignore](file:///c:/Users/Mirko/Documents/Orthoplanner/.gitignore)
+## [Git Initialization]
+### Initialize local Git repository and configure .gitignore
+#### Execute git init, add and commit initial files
+
+# .gitignore for OrthoPlanner (WPF / .NET)
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Aa]rm/
+[Aa]rm64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio files
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+
+# Visual Studio Code
+.vscode/
+
+# Packages
+*.nuget.props
+*.nuget.targets
+packages/
+
+# User-specific files
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# OrthoPlanner temp/data (if any)
+*.orthoplan
+temp/
+dcm_temp/

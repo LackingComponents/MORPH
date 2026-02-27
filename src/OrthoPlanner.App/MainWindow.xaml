@@ -1,0 +1,743 @@
+﻿<Window x:Class="OrthoPlanner.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:helix="http://helix-toolkit.org/wpf"
+        xmlns:vm="clr-namespace:OrthoPlanner.App.ViewModels"
+        xmlns:ctrl="clr-namespace:OrthoPlanner.App.Controls"
+        Title="OrthoPlanner — Orthognathic Surgery Planning"
+        WindowState="Maximized"
+        PreviewKeyDown="Window_PreviewKeyDown"
+        Style="{StaticResource MainWindowStyle}">
+
+    <Window.DataContext>
+        <vm:MainViewModel />
+    </Window.DataContext>
+
+    <Window.InputBindings>
+        <KeyBinding Key="O" Modifiers="Control" Command="{Binding OpenProjectCommand}" />
+        <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveProjectCommand}" />
+        <KeyBinding Key="Z" Modifiers="Control" Command="{Binding UndoCommand}" />
+        <KeyBinding Key="Y" Modifiers="Control" Command="{Binding RedoCommand}" />
+    </Window.InputBindings>
+
+    <Window.Resources>
+        <Style x:Key="DarkToggleButtonStyle" TargetType="ToggleButton">
+            <Setter Property="Background" Value="#FF30343D" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="4" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="border" Background="{TemplateBinding Background}" BorderThickness="{TemplateBinding BorderThickness}" BorderBrush="{TemplateBinding BorderBrush}" CornerRadius="3">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#FF404552" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#FF1E80B4" />
+                                <Setter Property="Foreground" Value="White" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ═══ TOP TOOLBAR ═══ -->
+        <Border Grid.Row="0" Background="{StaticResource BgMediumBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1"
+                Padding="8,6">
+            <DockPanel>
+                <!-- App Logo (click for project menu) -->
+                <Button DockPanel.Dock="Left" Background="Transparent" BorderThickness="0"
+                        Padding="0" Cursor="Hand" Click="LogoMenu_Click" ToolTip="Project Menu">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="⬡" FontSize="22" Foreground="{StaticResource AccentBrush}"
+                                   VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <TextBlock Text="ORTHO" FontSize="16" FontWeight="Bold"
+                                   Foreground="{StaticResource TextPrimaryBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text="PLANNER" FontSize="16" FontWeight="Light"
+                                   Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text=" ▾" FontSize="10" Foreground="{StaticResource TextSecondaryBrush}"
+                                   VerticalAlignment="Center" Margin="4,2,0,0" />
+                    </StackPanel>
+                    <Button.ContextMenu>
+                        <ContextMenu x:Name="ProjectMenu">
+                            <MenuItem Header="📂  New Project" Command="{Binding OpenDicomFolderCommand}" />
+                            <MenuItem Header="📁  Open Project" Command="{Binding OpenProjectCommand}" />
+                            <Separator />
+                            <MenuItem Header="💾  Save Project" Command="{Binding SaveProjectCommand}" />
+                            <Separator />
+                            <MenuItem Header="👁️  View" Margin="0,2,0,0">
+                                <MenuItem Header="💡 Configure Lighting..." Command="{Binding OpenLightingConfigCommand}" />
+                            </MenuItem>
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                </Button>
+
+                <!-- Toolbar Actions -->
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" Margin="16,0,0,0">
+                    <Button Content="💾 Save" Command="{Binding SaveProjectCommand}"
+                            Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextPrimaryBrush}"
+                            Cursor="Hand" Padding="8,4" Margin="4,0" ToolTip="Save Project (Ctrl+S)" />
+                    <Separator Width="1" Background="{StaticResource BorderBrush}" Margin="4,6" />
+                    <Button Content="↶ Undo" Command="{Binding UndoCommand}"
+                            Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextPrimaryBrush}"
+                            Cursor="Hand" Padding="8,4" Margin="4,0" ToolTip="Undo Action (Ctrl+Z)" />
+                    <Button Content="↷ Redo" Command="{Binding RedoCommand}"
+                            Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextPrimaryBrush}"
+                            Cursor="Hand" Padding="8,4" Margin="4,0" ToolTip="Redo Action (Ctrl+Y)" />
+                </StackPanel>
+
+                <!-- Right-side patient info -->
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
+                    
+                    <!-- NHP Button & Popup -->
+                    <ToggleButton x:Name="NhpToggleButton" Content="✛ NHP" Margin="0,0,16,0" Padding="8,4" 
+                                  VerticalAlignment="Center" FontWeight="SemiBold"
+                                  Style="{StaticResource DarkToggleButtonStyle}" />
+                    <Popup IsOpen="{Binding IsChecked, ElementName=NhpToggleButton, Mode=TwoWay}" StaysOpen="False" PlacementTarget="{Binding ElementName=NhpToggleButton}" Placement="Bottom" VerticalOffset="4">
+                        <Border Background="#FF21252B" BorderBrush="#FF30343D" BorderThickness="1" CornerRadius="4" Padding="12" Width="220">
+                            <StackPanel>
+                                <StackPanel.Resources>
+                                    <Style x:Key="DarkStepperButtonStyle" TargetType="Button">
+                                        <Setter Property="Background" Value="#FF30343D" />
+                                        <Setter Property="Foreground" Value="White" />
+                                        <Setter Property="Width" Value="24" />
+                                        <Setter Property="Height" Value="24" />
+                                        <Setter Property="BorderThickness" Value="0" />
+                                        <Setter Property="FontSize" Value="10" />
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="Button">
+                                                    <Border Background="{TemplateBinding Background}" CornerRadius="2">
+                                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Border>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </StackPanel.Resources>
+                                
+                                <TextBlock Text="NATURAL HEAD POSITION" Foreground="White" FontSize="11" FontWeight="Bold" Margin="0,0,0,10" />
+                                
+                                <!-- Translations -->
+                                <TextBlock Text="Translations (mm)" Foreground="#FFA0AAB5" FontSize="10" Margin="0,0,0,4" />
+                                
+                                <Grid Margin="0,0,0,4">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Lateral (X):" Foreground="White" FontSize="11" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <Button Content="&lt;" Style="{StaticResource DarkStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Lat-"/>
+                                        <TextBox Width="50" Text="{Binding NhpLateral, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Lat"/>
+                                        <Button Content="&gt;" Style="{StaticResource DarkStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Lat+"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid Margin="0,0,0,4">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Anterior (Y):" Foreground="White" FontSize="11" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <Button Content="&lt;" Style="{StaticResource DarkStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Ant-"/>
+                                        <TextBox Width="50" Text="{Binding NhpAnteroposterior, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Ant"/>
+                                        <Button Content="&gt;" Style="{StaticResource DarkStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Ant+"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Vertical (Z):" Foreground="White" FontSize="11" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <Button Content="&lt;" Style="{StaticResource DarkStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Vert-"/>
+                                        <TextBox Width="50" Text="{Binding NhpVertical, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Vert"/>
+                                        <Button Content="&gt;" Style="{StaticResource DarkStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Vert+"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- Rotations -->
+                                <TextBlock Text="Rotations (°)" Foreground="#FFA0AAB5" FontSize="10" Margin="0,0,0,4" />
+                                
+                                <Grid Margin="0,0,0,4">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Pitch (X):" Foreground="White" FontSize="11" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <Button Content="&lt;" Style="{StaticResource DarkStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Pitch-"/>
+                                        <TextBox Width="50" Text="{Binding NhpPitch, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Pitch"/>
+                                        <Button Content="&gt;" Style="{StaticResource DarkStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Pitch+"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid Margin="0,0,0,4">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Roll (Y):" Foreground="White" FontSize="11" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <Button Content="&lt;" Style="{StaticResource DarkStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Roll-"/>
+                                        <TextBox Width="50" Text="{Binding NhpRoll, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Roll"/>
+                                        <Button Content="&gt;" Style="{StaticResource DarkStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Roll+"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Yaw (Z):" Foreground="White" FontSize="11" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <Button Content="&lt;" Style="{StaticResource DarkStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Yaw-"/>
+                                        <TextBox Width="50" Text="{Binding NhpYaw, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Yaw"/>
+                                        <Button Content="&gt;" Style="{StaticResource DarkStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Yaw+"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <Separator Background="#FF30343D" Margin="0,0,0,12"/>
+
+                                <Button Content="DONE" Command="{Binding CommitNhpCommand}" 
+                                        IsEnabled="{Binding IsNhpDirty}"
+                                        Background="#FF1E80B4" Foreground="White" FontWeight="Bold" Padding="0,6" BorderThickness="0">
+                                    <Button.Style>
+                                        <Style TargetType="Button">
+                                            <Style.Triggers>
+                                                <Trigger Property="IsEnabled" Value="False">
+                                                    <Setter Property="Opacity" Value="0.4" />
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                            </StackPanel>
+                        </Border>
+                    </Popup>
+
+                    <TextBlock Text="{Binding PatientName}" Style="{StaticResource StatusText}"
+                               VerticalAlignment="Center" Margin="0,0,16,0" />
+                    <TextBlock Text="{Binding StudyDate}" Style="{StaticResource StatusText}"
+                               VerticalAlignment="Center" Margin="0,0,16,0" />
+                </StackPanel>
+
+                <TextBlock />
+            </DockPanel>
+        </Border>
+
+        <!-- ═══ MAIN CONTENT ═══ -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="230" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="4*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="1.5*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- ═══ LEFT: WORKFLOW SIDEBAR ═══ -->
+            <Border Grid.Column="0" Margin="4" Background="{StaticResource BgMediumBrush}"
+                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" Padding="6,4">
+                        <StackPanel>
+
+                            <!-- 1. SEGMENTATION -->
+                            <Expander Header="🦴  Segmentation" IsExpanded="True" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                                      Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
+                                <StackPanel Margin="4,6,4,4">
+                                    <!-- 1. BONE SEGMENTATION -->
+                                <Expander Header="🦴  Bone Model" IsExpanded="True" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                                          Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
+                                    <StackPanel Margin="4,6,4,4">
+                                        <TextBlock Text="BONE THRESHOLD (HU)" Style="{StaticResource PanelHeader}" FontSize="9" />
+                                        <Border Margin="0,4,0,2" CornerRadius="3" ClipToBounds="True" Background="#FF101418" Height="60">
+                                            <Image Source="{Binding BoneHistogramImage}" Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                                        </Border>
+                                        <ctrl:RangeSlider Minimum="{Binding IsoMin}" Maximum="{Binding IsoMax}" Height="20"
+                                                          LowerValue="{Binding BoneMinHU, Mode=TwoWay}" UpperValue="{Binding BoneMaxHU, Mode=TwoWay}" />
+                                        <DockPanel Margin="0,2,0,0">
+                                            <TextBox Width="45" FontSize="9" TextAlignment="Center" Text="{Binding BoneMinHU, UpdateSourceTrigger=LostFocus}" />
+                                            <TextBox DockPanel.Dock="Right" Width="45" FontSize="9" TextAlignment="Center" HorizontalAlignment="Right"
+                                                     Text="{Binding BoneMaxHU, UpdateSourceTrigger=LostFocus}" />
+                                            <TextBlock />
+                                        </DockPanel>
+                                        <CheckBox Content="Preview Overlay" IsChecked="{Binding ShowBoneOverlay}"
+                                                  Margin="0,4,0,0" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
+                                        <CheckBox Content="Enhance Segmentation (Thin Bone + Morphology)" IsChecked="{Binding EnhanceSegmentation}"
+                                                  Margin="0,4,0,4" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
+                                        <Button Content="🔧 Compute Bone Model" Command="{Binding RunBoneSegmentCommand}"
+                                                Margin="0,0,0,6" IsEnabled="{Binding IsVolumeLoaded}" />
+                                    </StackPanel>
+                                </Expander>
+
+                                <!-- 2. SOFT TISSUE SEGMENTATION -->
+                                <Expander Header="👤  Soft Tissue Model" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                                          Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
+                                    <StackPanel Margin="4,6,4,4">
+                                        <TextBlock Text="SOFT TISSUE THRESHOLD (HU)" Style="{StaticResource PanelHeader}" FontSize="9" />
+                                        <Border Margin="0,4,0,2" CornerRadius="3" ClipToBounds="True" Background="#FF101418" Height="60">
+                                            <Image Source="{Binding SoftHistogramImage}" Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                                        </Border>
+                                        <ctrl:RangeSlider Minimum="{Binding IsoMin}" Maximum="{Binding IsoMax}" Height="20"
+                                                          LowerValue="{Binding SoftMinHU, Mode=TwoWay}" UpperValue="{Binding SoftMaxHU, Mode=TwoWay}" />
+                                        <DockPanel Margin="0,2,0,0">
+                                            <TextBox Width="45" FontSize="9" TextAlignment="Center" Text="{Binding SoftMinHU, UpdateSourceTrigger=LostFocus}" />
+                                            <TextBox DockPanel.Dock="Right" Width="45" FontSize="9" TextAlignment="Center" HorizontalAlignment="Right"
+                                                     Text="{Binding SoftMaxHU, UpdateSourceTrigger=LostFocus}" />
+                                            <TextBlock />
+                                        </DockPanel>
+                                        <CheckBox Content="Preview Overlay" IsChecked="{Binding ShowSoftOverlay}"
+                                                  Margin="0,4,0,4" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
+                                        <Button Content="🔧 Compute Soft Model" Command="{Binding RunSoftTissueSegmentCommand}"
+                                                Margin="0,0,0,6" IsEnabled="{Binding IsVolumeLoaded}" />
+                                    </StackPanel>
+                                </Expander>
+
+                                <!-- 3. DENTAL SEGMENTATION -->
+                                <Expander Header="🦷  Dental Model" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                                          Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
+                                    <StackPanel Margin="4,6,4,4">
+                                        <TextBlock Text="DENTAL THRESHOLD (HU)" Style="{StaticResource PanelHeader}" FontSize="9" />
+                                        <Border Margin="0,4,0,2" CornerRadius="3" ClipToBounds="True" Background="#FF101418" Height="60">
+                                            <Image Source="{Binding DentalHistogramImage}" Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                                        </Border>
+                                        <ctrl:RangeSlider Minimum="{Binding IsoMin}" Maximum="{Binding IsoMax}" Height="20"
+                                                          LowerValue="{Binding DentalMinHU, Mode=TwoWay}" UpperValue="{Binding DentalMaxHU, Mode=TwoWay}" />
+                                        <DockPanel Margin="0,2,0,0">
+                                            <TextBox Width="45" FontSize="9" TextAlignment="Center" Text="{Binding DentalMinHU, UpdateSourceTrigger=LostFocus}" />
+                                            <TextBox DockPanel.Dock="Right" Width="45" FontSize="9" TextAlignment="Center" HorizontalAlignment="Right"
+                                                     Text="{Binding DentalMaxHU, UpdateSourceTrigger=LostFocus}" />
+                                            <TextBlock />
+                                        </DockPanel>
+                                        <CheckBox Content="Preview Overlay" IsChecked="{Binding ShowDentalOverlay}"
+                                                  Margin="0,4,0,4" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
+                                        <Button Content="🔧 Compute Dental Model" Command="{Binding RunDentalSegmentCommand}"
+                                                Margin="0,0,0,6" IsEnabled="{Binding IsVolumeLoaded}" />
+                                    </StackPanel>
+                                </Expander>
+
+                                <!-- 4. CUSTOM REGION SEGMENTATION -->
+                                <Expander Header="⚙️  Custom Region" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                                          Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
+                                    <StackPanel Margin="4,6,4,4">
+                                        <TextBlock Text="CUSTOM THRESHOLD (HU)" Style="{StaticResource PanelHeader}" FontSize="9" />
+                                        <Border Margin="0,4,0,2" CornerRadius="3" ClipToBounds="True" Background="#FF101418" Height="60">
+                                            <Image Source="{Binding CustomHistogramImage}" Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                                        </Border>
+                                        <ctrl:RangeSlider Minimum="{Binding IsoMin}" Maximum="{Binding IsoMax}" Height="20"
+                                                          LowerValue="{Binding CustomMinHU, Mode=TwoWay}" UpperValue="{Binding CustomMaxHU, Mode=TwoWay}" />
+                                        <DockPanel Margin="0,2,0,0">
+                                            <TextBox Width="45" FontSize="9" TextAlignment="Center" Text="{Binding CustomMinHU, UpdateSourceTrigger=LostFocus}" />
+                                            <TextBox DockPanel.Dock="Right" Width="45" FontSize="9" TextAlignment="Center" HorizontalAlignment="Right"
+                                                     Text="{Binding CustomMaxHU, UpdateSourceTrigger=LostFocus}" />
+                                            <TextBlock />
+                                        </DockPanel>
+                                        <CheckBox Content="Preview Overlay" IsChecked="{Binding ShowCustomOverlay}"
+                                                  Margin="0,4,0,4" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
+                                        <Button Content="➕ Compute Custom Part" Command="{Binding RunCustomSegmentCommand}"
+                                                Margin="0,0,0,6" IsEnabled="{Binding IsVolumeLoaded}" />
+                                    </StackPanel>
+                                </Expander>
+
+                                <!-- 5. INTERACTIVE BONE SPLITTER -->
+                                <Expander Header="🎯  Bone Splitter (Region Grow)" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                                          Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
+                                    <StackPanel Margin="4,6,4,4">
+                                        <TextBlock Text="Click on the 2D Slice Views to isolate connected bone targets."
+                                                   TextWrapping="Wrap" FontSize="10" FontWeight="Normal"
+                                                   Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6" />
+                                                   
+                                        <TextBlock Text="GROW TOLERANCE (± HU)" Style="{StaticResource PanelHeader}" FontSize="9" Margin="0,4,0,2" />
+                                        <DockPanel Margin="0,0,0,6">
+                                            <TextBox Width="45" FontSize="10" TextAlignment="Center" Text="{Binding RegionGrowTolerance, UpdateSourceTrigger=PropertyChanged}" DockPanel.Dock="Right" />
+                                            <Slider Minimum="10" Maximum="1000" Value="{Binding RegionGrowTolerance, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                        </DockPanel>
+
+                                        <TextBlock Text="SPLITTER MIN HU" Style="{StaticResource PanelHeader}" FontSize="9" Margin="0,4,0,2" />
+                                        <DockPanel Margin="0,0,0,6">
+                                            <TextBox Width="45" FontSize="10" TextAlignment="Center" Text="{Binding SplitterMinHU, UpdateSourceTrigger=PropertyChanged}" DockPanel.Dock="Right" />
+                                            <Slider Minimum="-1000" Maximum="3000" Value="{Binding SplitterMinHU, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                        </DockPanel>
+
+                                        <TextBlock Text="SPLITTER MAX HU" Style="{StaticResource PanelHeader}" FontSize="9" Margin="0,0,0,2" />
+                                        <DockPanel Margin="0,0,0,6">
+                                            <TextBox Width="45" FontSize="10" TextAlignment="Center" Text="{Binding SplitterMaxHU, UpdateSourceTrigger=PropertyChanged}" DockPanel.Dock="Right" />
+                                            <Slider Minimum="-1000" Maximum="3000" Value="{Binding SplitterMaxHU, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                        </DockPanel>
+
+                                        <TextBlock Text="ACTIVE SEED TARGET" Style="{StaticResource PanelHeader}" FontSize="9" Margin="0,4,0,2" />
+                                        <Grid Margin="0,0,0,6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="2" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="2" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <RadioButton Grid.Column="0" Content="Mandible" IsChecked="{Binding IsMandibleSeed}" Style="{StaticResource DarkToggleButtonStyle}" 
+                                                         Foreground="#FFE6A85C" FontSize="10" FontWeight="SemiBold" ToolTip="Joint Collision Target 1" />
+                                            <RadioButton Grid.Column="2" Content="Cranium" IsChecked="{Binding IsCraniumSeed}" Style="{StaticResource DarkToggleButtonStyle}"
+                                                         Foreground="#FF5B9AFF" FontSize="10" FontWeight="SemiBold" ToolTip="Joint Collision Target 2" />
+                                            <RadioButton Grid.Column="4" Content="Exclude" IsChecked="{Binding IsExcludeSeed}" Style="{StaticResource DarkToggleButtonStyle}"
+                                                         Foreground="#FFA0AAB5" FontSize="10" FontWeight="SemiBold" ToolTip="Deleted / Ignored Volume" />
+                                        </Grid>
+
+                                        <ToggleButton Content="🎯 Enable Click-Targeting" IsChecked="{Binding IsRegionGrowMode}"
+                                                      Margin="0,4,0,6" IsEnabled="{Binding IsVolumeLoaded}"
+                                                      Style="{StaticResource DarkToggleButtonStyle}" FontWeight="SemiBold"/>
+                                        
+                                        <Grid Margin="0,0,0,6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="4"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Button Grid.Column="0" Content="♻ Clear Seeds" Command="{Binding ClearSeedsCommand}" IsEnabled="{Binding IsVolumeLoaded}" Padding="4" />
+                                            <Button Grid.Column="2" Content="⚡ Compute Split" Command="{Binding ComputeMultiSeedSplitCommand}" 
+                                                    IsEnabled="{Binding IsVolumeLoaded}" Padding="4" Background="#FF1B98E0" Foreground="White" FontWeight="Bold"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Expander>
+
+                                </StackPanel>
+                            </Expander>
+
+                        <!-- 2. DENTAL SCAN ALIGNMENT -->
+                        <Expander Header="🦷  Dental Scan Alignment" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                                  Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
+                            <StackPanel Margin="4,6,4,4">
+                                <TextBlock Text="Import dental cast STL files and align them to the CT volume."
+                                           TextWrapping="Wrap" FontSize="10" FontWeight="Normal"
+                                           Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6" />
+                                <Button Content="📥 Import STL" Command="{Binding ImportStlCommand}" Margin="0,0,0,4" />
+                                <ItemsControl ItemsSource="{Binding ImportedMeshes}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Padding="4,3" Margin="0,1" CornerRadius="3" Background="#10FFFFFF">
+                                                <DockPanel>
+                                                    <CheckBox IsChecked="{Binding IsVisible}" DockPanel.Dock="Left"
+                                                              VerticalAlignment="Center" Margin="0,0,4,0" />
+                                                    <Button DockPanel.Dock="Right" Content="✕"
+                                                            Background="Transparent" BorderThickness="0" Foreground="#888"
+                                                            Padding="3,0" VerticalAlignment="Center" Cursor="Hand"
+                                                            Command="{Binding DataContext.DeleteImportedMeshCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="{Binding}" ToolTip="Delete" />
+                                                    <TextBlock Text="{Binding Name}" FontSize="10" VerticalAlignment="Center" />
+                                                </DockPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- 3. PHOTOGRAMMETRY -->
+                        <Expander Header="📷  Photogrammetry" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                                  Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
+                            <StackPanel Margin="4,6,4,4">
+                                <TextBlock Text="Import and align facial photographs for soft tissue analysis."
+                                           TextWrapping="Wrap" FontSize="10" FontWeight="Normal"
+                                           Foreground="{StaticResource TextSecondaryBrush}" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- 4. CEPHALOMETRY -->
+                        <Expander Header="📐  Cephalometry" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                                  Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
+                            <StackPanel Margin="4,6,4,4">
+                                <TextBlock Text="Place landmarks, trace cephalometric planes, and compute angular and linear measurements."
+                                           TextWrapping="Wrap" FontSize="10" FontWeight="Normal"
+                                           Foreground="{StaticResource TextSecondaryBrush}" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- 5. PLAN OSTEOTOMIES -->
+                        <Expander Header="✂  Plan Osteotomies" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                                  Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
+                            <StackPanel Margin="4,6,4,4">
+                                <TextBlock Text="Define cut planes for Le Fort I, BSSO, and genioplasty osteotomies."
+                                           TextWrapping="Wrap" FontSize="10" FontWeight="Normal"
+                                           Foreground="{StaticResource TextSecondaryBrush}" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- 5. SURGICAL MOVEMENTS -->
+                        <Expander Header="↔  Surgical Movements" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                                  Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
+                            <StackPanel Margin="4,6,4,4">
+                                <TextBlock Text="Translate and rotate bone segments to the planned positions."
+                                           TextWrapping="Wrap" FontSize="10" FontWeight="Normal"
+                                           Foreground="{StaticResource TextSecondaryBrush}" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- 6. SPLINT GENERATION -->
+                        <Expander Header="🔧  Splint Generation" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                                  Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
+                            <StackPanel Margin="4,6,4,4">
+                                <TextBlock Text="Generate surgical splints from planned movements."
+                                           TextWrapping="Wrap" FontSize="10" FontWeight="Normal"
+                                           Foreground="{StaticResource TextSecondaryBrush}" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- 7. EXPORT -->
+                        <Expander Header="📤  Export" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                                  Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
+                            <StackPanel Margin="4,6,4,4">
+                                <Button Content="📤 Export STL" Command="{Binding ExportStlCommand}"
+                                        Margin="0,0,0,4" IsEnabled="{Binding IsVolumeLoaded}" />
+                                <TextBlock Text="Export 3D models, splints, and surgical guides."
+                                           TextWrapping="Wrap" FontSize="10" FontWeight="Normal"
+                                           Foreground="{StaticResource TextSecondaryBrush}" />
+                            </StackPanel>
+                        </Expander>
+
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Fixed 3D Models List at Bottom -->
+                <Border Grid.Row="1" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="6" Background="{StaticResource BgMediumBrush}">
+                    <StackPanel>
+                        <TextBlock Text="3D MODELS" Style="{StaticResource PanelHeader}" FontSize="9" Margin="0,0,0,4" />
+                        <ScrollViewer MaxHeight="200" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding Segments}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Padding="4,3" Margin="0,1" CornerRadius="3" Background="#10FFFFFF">
+                                            <DockPanel>
+                                                <CheckBox IsChecked="{Binding IsVisible}" DockPanel.Dock="Left"
+                                                          VerticalAlignment="Center" Margin="0,0,4,0" />
+                                                <Button DockPanel.Dock="Right" Content="✕"
+                                                        Background="Transparent" BorderThickness="0" Foreground="#888"
+                                                        Padding="3,0" VerticalAlignment="Center" Cursor="Hand"
+                                                        Command="{Binding DataContext.DeleteSegmentItemCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}" ToolTip="Delete" />
+                                                <TextBlock Text="{Binding Name}" FontSize="10" VerticalAlignment="Center" />
+                                            </DockPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
+
+            <GridSplitter Grid.Column="1" Width="4" Background="{StaticResource BgDarkBrush}"
+                          HorizontalAlignment="Center" VerticalAlignment="Stretch" />
+
+            <!-- ═══ CENTER: 3D VIEWPORT ═══ -->
+            <Border Grid.Column="2" Margin="4" Background="{StaticResource BgMediumBrush}"
+                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Viewport toolbar -->
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="6,4">
+                        <CheckBox Content="Ortho" IsChecked="{Binding IsOrthographic}"
+                                  Foreground="{StaticResource TextSecondaryBrush}" FontSize="11"
+                                  Margin="0,0,12,0"
+                                  Checked="OnProjectionChanged" Unchecked="OnProjectionChanged" />
+                        <CheckBox Content="Grid" IsChecked="{Binding ShowGrid}"
+                                  Foreground="{StaticResource TextSecondaryBrush}" FontSize="11"
+                                  Checked="OnGridToggled" Unchecked="OnGridToggled" />
+                    </StackPanel>
+
+                    <!-- 3D Viewport -->
+                    <helix:HelixViewport3D x:Name="Viewport3D" Grid.Row="1"
+                                           Background="#FF0C1018"
+                                           ShowCoordinateSystem="True"
+                                           CoordinateSystemLabelForeground="White"
+                                           ZoomExtentsWhenLoaded="True"
+                                           IsRotationEnabled="True"
+                                           IsPanEnabled="True"
+                                           IsZoomEnabled="True"
+                                           RotateAroundMouseDownPoint="False"
+                                           CameraRotationMode="Turnball"
+                                           ModelUpDirection="0,0,1"
+                                           ShowViewCube="True"
+                                           IsViewCubeEdgeClicksEnabled="True"
+                                           ViewCubeBackText="L" ViewCubeFrontText="R"
+                                           ViewCubeLeftText="P" ViewCubeRightText="A"
+                                           ViewCubeTopText="S" ViewCubeBottomText="I">
+                        <helix:HelixViewport3D.Camera>
+                            <PerspectiveCamera x:Name="MainCamera"
+                                               Position="0,-300,0" LookDirection="0,1,0"
+                                               UpDirection="0,0,1" FieldOfView="45" />
+                        </helix:HelixViewport3D.Camera>
+                        <ModelVisual3D Content="{Binding BoneModel}" />
+                    </helix:HelixViewport3D>
+
+                    <!-- Grid overlay (drawn in code-behind) -->
+                    <Canvas x:Name="GridOverlay" Grid.Row="1"
+                            IsHitTestVisible="False" Visibility="Collapsed" />
+
+                    <!-- Enlarged MPR view overlay -->
+                    <Border x:Name="EnlargedOverlay" Grid.Row="1" Background="#FF0C1018"
+                            Visibility="Collapsed" Margin="0">
+                        <Grid x:Name="EnlargedGrid" MouseWheel="EnlargedPanel_MouseWheel"
+                              MouseLeftButtonDown="SlicePanel_LeftDown"
+                              MouseRightButtonDown="SlicePanel_RightDown"
+                              MouseRightButtonUp="SlicePanel_RightUp"
+                              MouseMove="SlicePanel_MouseMove"
+                              Background="Transparent">
+                            <Image x:Name="EnlargedImage" Stretch="Uniform"
+                                   RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                            <Canvas x:Name="EnlargedCrosshairCanvas" IsHitTestVisible="False" />
+                            <TextBlock x:Name="EnlargedLabel" Style="{StaticResource PanelHeader}"
+                                       HorizontalAlignment="Left" VerticalAlignment="Top"
+                                       Margin="12,8" FontSize="14" />
+                            <Button Content="✕" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                    Margin="0,6,12,0" Padding="6,2" FontSize="14" Cursor="Hand"
+                                    Background="Transparent" BorderThickness="0"
+                                    Foreground="{StaticResource TextSecondaryBrush}"
+                                    Click="CloseEnlarged_Click" ToolTip="Close Enlarged View" />
+                        </Grid>
+                    </Border>
+
+                    <!-- Overlay: placeholder text when no data -->
+                    <TextBlock Grid.Row="1" Text="Load a DICOM / CBCT folder to visualize"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               FontSize="16" Foreground="{StaticResource TextSecondaryBrush}"
+                               Visibility="{Binding IsVolumeLoaded, Converter={StaticResource InverseBoolToVisibility}}" />
+                </Grid>
+            </Border>
+
+            <GridSplitter Grid.Column="3" Width="4" Background="{StaticResource BgDarkBrush}"
+                          HorizontalAlignment="Center" VerticalAlignment="Stretch" />
+
+            <!-- ═══ RIGHT: 2D SLICE VIEWERS ═══ -->
+            <Grid Grid.Column="4">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- MPR Toolbar -->
+                <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="6,3">
+                    <CheckBox Content="Crosshairs" IsChecked="{Binding ShowCrosshairs}"
+                              Foreground="{StaticResource TextSecondaryBrush}" FontSize="10"
+                              Checked="OnCrosshairsToggled" Unchecked="OnCrosshairsToggled" />
+                </StackPanel>
+
+                <!-- Axial View -->
+                <Border Grid.Row="1" Margin="4" Background="{StaticResource BgMediumBrush}"
+                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4">
+                    <Grid x:Name="AxialPanel"
+                          MouseWheel="AxialPanel_MouseWheel"
+                          MouseLeftButtonDown="SlicePanel_LeftDown"
+                          MouseRightButtonDown="SlicePanel_RightDown"
+                          MouseRightButtonUp="SlicePanel_RightUp"
+                          MouseMove="SlicePanel_MouseMove"
+                          Background="Transparent">
+                        <Image Source="{Binding AxialImage}" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                        <Canvas x:Name="AxialCrosshairCanvas" IsHitTestVisible="False" />
+                        <TextBlock Text="AXIAL" Style="{StaticResource PanelHeader}"
+                                   HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6" />
+                        <Button Content="⤢" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                Margin="0,4,8,0" Padding="4,1" FontSize="12" Cursor="Hand"
+                                Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextSecondaryBrush}"
+                                Click="EnlargeAxial_Click" ToolTip="Enlarge Axial" />
+
+                    </Grid>
+                </Border>
+
+                <!-- Coronal View -->
+                <Border Grid.Row="2" Margin="4" Background="{StaticResource BgMediumBrush}"
+                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4">
+                    <Grid x:Name="CoronalPanel"
+                          MouseWheel="CoronalPanel_MouseWheel"
+                          MouseLeftButtonDown="SlicePanel_LeftDown"
+                          MouseRightButtonDown="SlicePanel_RightDown"
+                          MouseRightButtonUp="SlicePanel_RightUp"
+                          MouseMove="SlicePanel_MouseMove"
+                          Background="Transparent">
+                        <Image Source="{Binding CoronalImage}" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                        <Canvas x:Name="CoronalCrosshairCanvas" IsHitTestVisible="False" />
+                        <TextBlock Text="CORONAL" Style="{StaticResource PanelHeader}"
+                                   HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6" />
+                        <Button Content="⤢" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                Margin="0,4,8,0" Padding="4,1" FontSize="12" Cursor="Hand"
+                                Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextSecondaryBrush}"
+                                Click="EnlargeCoronal_Click" ToolTip="Enlarge Coronal" />
+
+                    </Grid>
+                </Border>
+
+                <!-- Sagittal View -->
+                <Border Grid.Row="3" Margin="4" Background="{StaticResource BgMediumBrush}"
+                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4">
+                    <Grid x:Name="SagittalPanel"
+                          MouseWheel="SagittalPanel_MouseWheel"
+                          MouseLeftButtonDown="SlicePanel_LeftDown"
+                          MouseRightButtonDown="SlicePanel_RightDown"
+                          MouseRightButtonUp="SlicePanel_RightUp"
+                          MouseMove="SlicePanel_MouseMove"
+                          Background="Transparent">
+                        <Image Source="{Binding SagittalImage}" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                        <Canvas x:Name="SagittalCrosshairCanvas" IsHitTestVisible="False" />
+                        <TextBlock Text="SAGITTAL" Style="{StaticResource PanelHeader}"
+                                   HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6" />
+                        <Button Content="⤢" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                Margin="0,4,8,0" Padding="4,1" FontSize="12" Cursor="Hand"
+                                Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextSecondaryBrush}"
+                                Click="EnlargeSagittal_Click" ToolTip="Enlarge Sagittal" />
+
+                    </Grid>
+                </Border>
+
+                <!-- Windowing Controls -->
+                <Border Grid.Row="4" Margin="4" Padding="10,8" Background="{StaticResource BgMediumBrush}"
+                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4"
+                        Visibility="{Binding IsVolumeLoaded, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel>
+                        <TextBlock Text="WINDOWING" Style="{StaticResource PanelHeader}" FontSize="9" />
+                        <DockPanel Margin="0,2">
+                            <TextBlock Text="Center" Width="42" FontSize="10" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                            <TextBox DockPanel.Dock="Right" Width="50" FontSize="11" TextAlignment="Center"
+                                     Text="{Binding WindowCenter, StringFormat=F0, UpdateSourceTrigger=LostFocus}" />
+                            <Slider Minimum="-1024" Maximum="3071" Value="{Binding WindowCenter}" Margin="4,0" />
+                        </DockPanel>
+                        <DockPanel Margin="0,2">
+                            <TextBlock Text="Width" Width="42" FontSize="10" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" />
+                            <TextBox DockPanel.Dock="Right" Width="50" FontSize="11" TextAlignment="Center"
+                                     Text="{Binding WindowWidth, StringFormat=F0, UpdateSourceTrigger=LostFocus}" />
+                            <Slider Minimum="1" Maximum="4096" Value="{Binding WindowWidth}" Margin="4,0" />
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <!-- ═══ STATUS BAR ═══ -->
+        <Border Grid.Row="2" Background="{StaticResource BgMediumBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0"
+                Padding="10,4">
+            <DockPanel>
+                <TextBlock Text="{Binding StatusText}" Style="{StaticResource StatusText}"
+                           DockPanel.Dock="Left" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding VolumeDimensions}" Style="{StaticResource StatusText}"
+                           DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                <ProgressBar Value="{Binding LoadProgress}" Maximum="100"
+                             Visibility="{Binding IsLoading, Converter={StaticResource BoolToVisibility}}"
+                             Margin="20,0" VerticalAlignment="Center" />
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

@@ -1,0 +1,426 @@
+using System;
+using System.Collections.Generic;
+using OrthoPlanner.Core.Segmentation;
+
+namespace OrthoPlanner.Core.Imaging;
+
+/// <summary>
+/// Represents a 3D volume constructed from DICOM slices.
+/// Stores Hounsfield Unit (HU) values in a flat array for performance.
+/// </summary>
+public class VolumeData
+{
+    /// <summary>Width of the volume in voxels (columns).</summary>
+    public int Width { get; }
+
+    /// <summary>Height of the volume in voxels (rows).</summary>
+    public int Height { get; }
+
+    /// <summary>Depth of the volume in voxels (number of slices).</summary>
+    public int Depth { get; }
+
+    /// <summary>Voxel spacing in mm: [X, Y, Z].</summary>
+    public double[] Spacing { get; }
+
+    /// <summary>
+    /// Flat array of HU values stored in [x + y*Width + z*Width*Height] order.
+    /// Using short (Int16) since HU range is typically -1024 to +3071.
+    /// </summary>
+    public short[] Voxels { get; }
+
+    /// <summary>Minimum HU value in the volume.</summary>
+    public short MinValue { get; private set; }
+
+    /// <summary>Maximum HU value in the volume.</summary>
+    public short MaxValue { get; private set; }
+
+    /// <summary>Patient name from DICOM metadata.</summary>
+    public string PatientName { get; set; } = string.Empty;
+
+    /// <summary>Study date from DICOM metadata.</summary>
+    public string StudyDate { get; set; } = string.Empty;
+
+    /// <summary>Series description from DICOM metadata.</summary>
+    public string SeriesDescription { get; set; } = string.Empty;
+
+    public VolumeData(int width, int height, int depth, double[] spacing)
+    {
+        Width = width;
+        Height = height;
+        Depth = depth;
+        Spacing = spacing;
+        Voxels = new short[width * height * depth];
+    }
+
+    /// <summary>
+    /// Get the HU value at a specific voxel coordinate.
+    /// </summary>
+    public short GetVoxel(int x, int y, int z)
+    {
+        if (x < 0 || x >= Width || y < 0 || y >= Height || z < 0 || z >= Depth)
+            return short.MinValue;
+        return Voxels[x + y * Width + z * Width * Height];
+    }
+
+    /// <summary>
+    /// Set the HU value at a specific voxel coordinate.
+    /// </summary>
+    public void SetVoxel(int x, int y, int z, short value)
+    {
+        if (x < 0 || x >= Width || y < 0 || y >= Height || z < 0 || z >= Depth)
+            return;
+        Voxels[x + y * Width + z * Width * Height] = value;
+    }
+
+    /// <summary>
+    /// Compute min/max values across the entire volume. Call after loading all voxels.
+    /// </summary>
+    public void ComputeMinMax()
+    {
+        if (Voxels.Length == 0) return;
+        short min = short.MaxValue;
+        short max = short.MinValue;
+        for (int i = 0; i < Voxels.Length; i++)
+        {
+            if (Voxels[i] < min) min = Voxels[i];
+            if (Voxels[i] > max) max = Voxels[i];
+        }
+        MinValue = min;
+        MaxValue = max;
+        ComputeHistogram();
+    }
+
+    /// <summary>
+    /// Extract a 2D axial slice at the given Z index.
+    /// Returns pixel data as normalized 0-255 grayscale based on window/level.
+    /// </summary>
+    public byte[] GetAxialSlice(int z, double windowCenter, double windowWidth)
+    {
+        var slice = new byte[Width * Height];
+        double lower = windowCenter - windowWidth / 2.0;
+        double upper = windowCenter + windowWidth / 2.0;
+
+        for (int y = 0; y < Height; y++)
+        for (int x = 0; x < Width; x++)
+        {
+            short hu = GetVoxel(x, y, z);
+            double normalized = Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0);
+            slice[x + y * Width] = (byte)(normalized * 255);
+        }
+        return slice;
+    }
+
+    /// <summary>
+    /// Axial slice as BGRA32 with threshold overlay tint.
+    /// Voxels in [threshMin, threshMax] get a red overlay.
+    /// </summary>
+    public byte[] GetAxialSliceBgra(int z, double windowCenter, double windowWidth,
+        short threshMin, short threshMax)
+    {
+        int pixelCount = Width * Height;
+        var bgra = new byte[pixelCount * 4];
+        double lower = windowCenter - windowWidth / 2.0;
+        double upper = windowCenter + windowWidth / 2.0;
+
+        for (int y = 0; y < Height; y++)
+        for (int x = 0; x < Width; x++)
+        {
+            short hu = GetVoxel(x, y, z);
+            byte gray = (byte)(Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0) * 255);
+            int idx = (x + y * Width) * 4;
+            
+            if (hu >= threshMin && hu <= threshMax)
+            {
+                // Blend: 60% Light Blue (B=255, G=200, R=50)
+                bgra[idx + 0] = (byte)(gray * 0.4 + 255 * 0.6); // B
+                bgra[idx + 1] = (byte)(gray * 0.4 + 200 * 0.6); // G
+                bgra[idx + 2] = (byte)(gray * 0.4 + 50 * 0.6);  // R
+            }
+            else
+            {
+                bgra[idx + 0] = gray; // B
+                bgra[idx + 1] = gray; // G
+                bgra[idx + 2] = gray; // R
+            }
+            bgra[idx + 3] = 255; // A
+        }
+        return bgra;
+    }
+
+    /// <summary>
+    /// Extract a 2D coronal slice at the given Y index.
+    /// Z is reversed so superior (high Z) is at the top of the image.
+    /// </summary>
+    public byte[] GetCoronalSlice(int y, double windowCenter, double windowWidth)
+    {
+        var slice = new byte[Width * Depth];
+        double lower = windowCenter - windowWidth / 2.0;
+        double upper = windowCenter + windowWidth / 2.0;
+
+        for (int z = 0; z < Depth; z++)
+        {
+            int destRow = Depth - 1 - z;
+            for (int x = 0; x < Width; x++)
+            {
+                short hu = GetVoxel(x, y, z);
+                double normalized = Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0);
+                slice[x + destRow * Width] = (byte)(normalized * 255);
+            }
+        }
+        return slice;
+    }
+
+    /// <summary>
+    /// Coronal slice as BGRA32 with threshold overlay tint.
+    /// </summary>
+    public byte[] GetCoronalSliceBgra(int y, double windowCenter, double windowWidth,
+        short threshMin, short threshMax)
+    {
+        int pixelCount = Width * Depth;
+        var bgra = new byte[pixelCount * 4];
+        double lower = windowCenter - windowWidth / 2.0;
+        double upper = windowCenter + windowWidth / 2.0;
+
+        for (int z = 0; z < Depth; z++)
+        {
+            int destRow = Depth - 1 - z;
+            for (int x = 0; x < Width; x++)
+            {
+                short hu = GetVoxel(x, y, z);
+                byte gray = (byte)(Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0) * 255);
+                int idx = (x + destRow * Width) * 4;
+
+                if (hu >= threshMin && hu <= threshMax)
+                {
+                    bgra[idx + 0] = (byte)(gray * 0.4 + 255 * 0.6);
+                    bgra[idx + 1] = (byte)(gray * 0.4 + 200 * 0.6);
+                    bgra[idx + 2] = (byte)(gray * 0.4 + 50 * 0.6);
+                }
+                else
+                {
+                    bgra[idx + 0] = gray;
+                    bgra[idx + 1] = gray;
+                    bgra[idx + 2] = gray;
+                }
+                bgra[idx + 3] = 255;
+            }
+        }
+        return bgra;
+    }
+
+    /// <summary>
+    /// Extract a 2D sagittal slice at the given X index.
+    /// Z is reversed so superior (high Z) is at the top of the image.
+    /// </summary>
+    public byte[] GetSagittalSlice(int x, double windowCenter, double windowWidth)
+    {
+        var slice = new byte[Height * Depth];
+        double lower = windowCenter - windowWidth / 2.0;
+        double upper = windowCenter + windowWidth / 2.0;
+
+        for (int z = 0; z < Depth; z++)
+        {
+            int destRow = Depth - 1 - z;
+            for (int y = 0; y < Height; y++)
+            {
+                short hu = GetVoxel(x, y, z);
+                double normalized = Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0);
+                slice[y + destRow * Height] = (byte)(normalized * 255);
+            }
+        }
+        return slice;
+    }
+
+    /// <summary>
+    /// Sagittal slice as BGRA32 with threshold overlay tint.
+    /// </summary>
+    public byte[] GetSagittalSliceBgra(int x, double windowCenter, double windowWidth,
+        short threshMin, short threshMax)
+    {
+        int pixelCount = Height * Depth;
+        var bgra = new byte[pixelCount * 4];
+        double lower = windowCenter - windowWidth / 2.0;
+        double upper = windowCenter + windowWidth / 2.0;
+
+        for (int z = 0; z < Depth; z++)
+        {
+            int destRow = Depth - 1 - z;
+            for (int y = 0; y < Height; y++)
+            {
+                short hu = GetVoxel(x, y, z);
+                byte gray = (byte)(Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0) * 255);
+                int idx = (y + destRow * Height) * 4;
+
+                if (hu >= threshMin && hu <= threshMax)
+                {
+                    bgra[idx + 0] = (byte)(gray * 0.4 + 255 * 0.6);
+                    bgra[idx + 1] = (byte)(gray * 0.4 + 200 * 0.6);
+                    bgra[idx + 2] = (byte)(gray * 0.4 + 50 * 0.6);
+                }
+                else
+                {
+                    bgra[idx + 0] = gray;
+                    bgra[idx + 1] = gray;
+                    bgra[idx + 2] = gray;
+                }
+                bgra[idx + 3] = 255;
+            }
+        }
+        return bgra;
+    }
+
+    /// <summary>
+    /// Axial slice as BGRA32, blending live SegmentationVolume label colors.
+    /// </summary>
+    public byte[] GetAxialSliceWithMaskBgra(int z, double windowCenter, double windowWidth, SegmentationVolume segVol)
+    {
+        int pixelCount = Width * Height;
+        var bgra = new byte[pixelCount * 4];
+        double lower = windowCenter - windowWidth / 2.0;
+        double upper = windowCenter + windowWidth / 2.0;
+
+        for (int y = 0; y < Height; y++)
+        for (int x = 0; x < Width; x++)
+        {
+            int flatIdx = x + y * Width + z * Width * Height;
+            short hu = Voxels[flatIdx];
+            byte gray = (byte)(Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0) * 255);
+            int idx = (x + y * Width) * 4;
+
+            byte label = segVol.Labels[flatIdx];
+            if (label > 0 && segVol.Segments.TryGetValue(label, out var info))
+            {
+                bgra[idx + 0] = (byte)(gray * 0.4 + info.ColorB * 0.6);
+                bgra[idx + 1] = (byte)(gray * 0.4 + info.ColorG * 0.6);
+                bgra[idx + 2] = (byte)(gray * 0.4 + info.ColorR * 0.6);
+            }
+            else
+            {
+                bgra[idx + 0] = gray;
+                bgra[idx + 1] = gray;
+                bgra[idx + 2] = gray;
+            }
+            bgra[idx + 3] = 255;
+        }
+        return bgra;
+    }
+
+    /// <summary>
+    /// Coronal slice as BGRA32, blending live SegmentationVolume label colors.
+    /// </summary>
+    public byte[] GetCoronalSliceWithMaskBgra(int y, double windowCenter, double windowWidth, SegmentationVolume segVol)
+    {
+        int pixelCount = Width * Depth;
+        var bgra = new byte[pixelCount * 4];
+        double lower = windowCenter - windowWidth / 2.0;
+        double upper = windowCenter + windowWidth / 2.0;
+
+        for (int z = 0; z < Depth; z++)
+        {
+            int destRow = Depth - 1 - z;
+            for (int x = 0; x < Width; x++)
+            {
+                int flatIdx = x + y * Width + z * Width * Height;
+                short hu = Voxels[flatIdx];
+                byte gray = (byte)(Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0) * 255);
+                int idx = (x + destRow * Width) * 4;
+
+                byte label = segVol.Labels[flatIdx];
+                if (label > 0 && segVol.Segments.TryGetValue(label, out var info))
+                {
+                    bgra[idx + 0] = (byte)(gray * 0.4 + info.ColorB * 0.6);
+                    bgra[idx + 1] = (byte)(gray * 0.4 + info.ColorG * 0.6);
+                    bgra[idx + 2] = (byte)(gray * 0.4 + info.ColorR * 0.6);
+                }
+                else
+                {
+                    bgra[idx + 0] = gray;
+                    bgra[idx + 1] = gray;
+                    bgra[idx + 2] = gray;
+                }
+                bgra[idx + 3] = 255;
+            }
+        }
+        return bgra;
+    }
+
+    /// <summary>
+    /// Sagittal slice as BGRA32, blending live SegmentationVolume label colors.
+    /// </summary>
+    public byte[] GetSagittalSliceWithMaskBgra(int x, double windowCenter, double windowWidth, SegmentationVolume segVol)
+    {
+        int pixelCount = Height * Depth;
+        var bgra = new byte[pixelCount * 4];
+        double lower = windowCenter - windowWidth / 2.0;
+        double upper = windowCenter + windowWidth / 2.0;
+
+        for (int z = 0; z < Depth; z++)
+        {
+            int destRow = Depth - 1 - z;
+            for (int y = 0; y < Height; y++)
+            {
+                int flatIdx = x + y * Width + z * Width * Height;
+                short hu = Voxels[flatIdx];
+                byte gray = (byte)(Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0) * 255);
+                int idx = (y + destRow * Height) * 4;
+
+                byte label = segVol.Labels[flatIdx];
+                if (label > 0 && segVol.Segments.TryGetValue(label, out var info))
+                {
+                    bgra[idx + 0] = (byte)(gray * 0.4 + info.ColorB * 0.6);
+                    bgra[idx + 1] = (byte)(gray * 0.4 + info.ColorG * 0.6);
+                    bgra[idx + 2] = (byte)(gray * 0.4 + info.ColorR * 0.6);
+                }
+                else
+                {
+                    bgra[idx + 0] = gray;
+                    bgra[idx + 1] = gray;
+                    bgra[idx + 2] = gray;
+                }
+                bgra[idx + 3] = 255;
+            }
+        }
+        return bgra;
+    }
+
+    /// <summary>
+    /// HU histogram with 512 bins from MinValue to MaxValue.
+    /// </summary>
+    public int[] Histogram { get; private set; } = [];
+    public int HistogramMax { get; private set; }
+
+    private void ComputeHistogram()
+    {
+        const int bins = 512;
+        Histogram = new int[bins];
+        double range = MaxValue - MinValue;
+        if (range <= 0) return;
+
+        double scale = (bins - 1) / range;
+        for (int i = 0; i < Voxels.Length; i++)
+        {
+            int bin = (int)((Voxels[i] - MinValue) * scale);
+            bin = Math.Clamp(bin, 0, bins - 1);
+            Histogram[bin]++;
+        }
+
+        // Find max (skip the first few bins which are often air/background spikes)
+        HistogramMax = 0;
+        for (int i = 10; i < bins; i++)
+            if (Histogram[i] > HistogramMax) HistogramMax = Histogram[i];
+    }
+
+    /// <summary>Get the HU value for a histogram bin index.</summary>
+    public double HistogramBinToHU(int bin)
+    {
+        double range = MaxValue - MinValue;
+        return MinValue + (bin * range / (Histogram.Length - 1));
+    }
+    /// <summary>
+    /// Returns the physical dimensions of the volume in mm.
+    /// </summary>
+    public (double Width, double Height, double Depth) GetPhysicalDimensions()
+    {
+        return (Width * Spacing[0], Height * Spacing[1], Depth * Spacing[2]);
+    }
+}

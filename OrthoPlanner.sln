@@ -1,0 +1,50 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{2C62A94A-8A3F-4D76-A943-002D5C7D20DF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OrthoPlanner.App", "src\OrthoPlanner.App\OrthoPlanner.App.csproj", "{81E8D651-2ACC-4088-882E-B976770CED48}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OrthoPlanner.Core", "src\OrthoPlanner.Core\OrthoPlanner.Core.csproj", "{EB35FF53-46B8-41D5-BBC9-03C3853637E6}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OrthoPlanner.Infrastructure", "src\OrthoPlanner.Infrastructure\OrthoPlanner.Infrastructure.csproj", "{8D94166C-0E97-49DE-ABEE-03013D0D0001}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{C4E5192A-720A-4298-ACB4-30C3F2354214}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OrthoPlanner.Tests", "tests\OrthoPlanner.Tests\OrthoPlanner.Tests.csproj", "{6B90B912-DF83-42F1-962B-83BCA1CBAE6E}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{81E8D651-2ACC-4088-882E-B976770CED48}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{81E8D651-2ACC-4088-882E-B976770CED48}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{81E8D651-2ACC-4088-882E-B976770CED48}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{81E8D651-2ACC-4088-882E-B976770CED48}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EB35FF53-46B8-41D5-BBC9-03C3853637E6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EB35FF53-46B8-41D5-BBC9-03C3853637E6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EB35FF53-46B8-41D5-BBC9-03C3853637E6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EB35FF53-46B8-41D5-BBC9-03C3853637E6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8D94166C-0E97-49DE-ABEE-03013D0D0001}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8D94166C-0E97-49DE-ABEE-03013D0D0001}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8D94166C-0E97-49DE-ABEE-03013D0D0001}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8D94166C-0E97-49DE-ABEE-03013D0D0001}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6B90B912-DF83-42F1-962B-83BCA1CBAE6E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6B90B912-DF83-42F1-962B-83BCA1CBAE6E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6B90B912-DF83-42F1-962B-83BCA1CBAE6E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6B90B912-DF83-42F1-962B-83BCA1CBAE6E}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{81E8D651-2ACC-4088-882E-B976770CED48} = {2C62A94A-8A3F-4D76-A943-002D5C7D20DF}
+		{EB35FF53-46B8-41D5-BBC9-03C3853637E6} = {2C62A94A-8A3F-4D76-A943-002D5C7D20DF}
+		{8D94166C-0E97-49DE-ABEE-03013D0D0001} = {2C62A94A-8A3F-4D76-A943-002D5C7D20DF}
+		{6B90B912-DF83-42F1-962B-83BCA1CBAE6E} = {C4E5192A-720A-4298-ACB4-30C3F2354214}
+	EndGlobalSection
+EndGlobal
