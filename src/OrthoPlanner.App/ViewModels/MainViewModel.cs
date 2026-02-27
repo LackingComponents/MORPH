@@ -35,15 +35,22 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _volumeDimensions = "";
 
     // ─── 2D Slice Indices ───
+    [ObservableProperty] private int _totalSlices;
+    [ObservableProperty] private int _currentSlice;
     [ObservableProperty] private int _axialIndex;
     [ObservableProperty] private int _coronalIndex;
     [ObservableProperty] private int _sagittalIndex;
     [ObservableProperty] private int _axialMax = 1;
     [ObservableProperty] private int _coronalMax = 1;
     [ObservableProperty] private int _sagittalMax = 1;
+    
+    // Proportional Heights for 1:1 Anatomical Scale in UI Viewports
+    [ObservableProperty] private double _axialDisplayHeight = 1.0;
+    [ObservableProperty] private double _coronalDisplayHeight = 1.0;
+    [ObservableProperty] private double _sagittalDisplayHeight = 1.0;
 
     // ─── Windowing ───
-    [ObservableProperty] private double _windowCenter = 400;
+    [ObservableProperty] private double _windowCenter = 40;
     [ObservableProperty] private double _windowWidth = 2000;
 
     // ─── 3D Iso Threshold ───
@@ -661,6 +668,11 @@ public partial class MainViewModel : ObservableObject
             SeriesDescription = Volume.SeriesDescription;
             VolumeDimensions = $"{Volume.Width} × {Volume.Height} × {Volume.Depth}";
 
+            if (Volume == null) return;
+        
+            IsLoading = true;
+            StatusText = "Drawing Projections...";
+            
             AxialMax = Volume.Depth - 1;
             CoronalMax = Volume.Height - 1;
             SagittalMax = Volume.Width - 1;
@@ -668,6 +680,12 @@ public partial class MainViewModel : ObservableObject
             AxialIndex = Volume.Depth / 2;
             CoronalIndex = Volume.Height / 2;
             SagittalIndex = Volume.Width / 2;
+            
+            // Push the physical aspect ratios to the Grid Rows so the UI enforces 1:1 squares visually
+            // Because the Grid widths are uniform "*", we scale height directly mapping to Voxel spread.
+            AxialDisplayHeight = Volume.Height * Volume.Spacing[1];
+            CoronalDisplayHeight = Volume.Depth * Volume.Spacing[2];
+            SagittalDisplayHeight = Volume.Depth * Volume.Spacing[2];
 
             IsoMin = -1000; // Always start exactly at -1000 (air) for predictable UI
             IsoMax = Volume.MaxValue;
@@ -1445,45 +1463,60 @@ public partial class MainViewModel : ObservableObject
     {
         if (Volume == null || BoneModel == null) return;
 
-        // Calculate the central pivot point (centroid) ON UI THREAD
+        StatusText = "Calculating exact physical volume bounds...";
+        IsLoading = true;
+        
+        // --- 1. Calculate Spatial Centroid Pivot ---
         var bounds = BoneModel.Bounds;
         Point3D center;
         if (!bounds.IsEmpty)
-        {
             center = new Point3D(bounds.X + bounds.SizeX / 2, bounds.Y + bounds.SizeY / 2, bounds.Z + bounds.SizeZ / 2);
-        }
         else
         {
             var dims = Volume.GetPhysicalDimensions();
             center = new Point3D(dims.Width / 2, dims.Height / 2, dims.Depth / 2);
         }
 
-        // Build the physical transformation matrix ON UI THREAD
-        var group = new Transform3DGroup();
-        group.Children.Add(new TranslateTransform3D(-center.X, -center.Y, -center.Z));
-        group.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), _cPitch)));
-        group.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), _cRoll)));
-        group.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), _cYaw)));
-        group.Children.Add(new TranslateTransform3D(center.X + _cLat, center.Y + _cAnt, center.Z + _cVert));
+        // --- 2. Build the STRICT INVERSE Transformation Matrix (Target -> Source) ---
+        var invGroup = new Transform3DGroup();
+        invGroup.Children.Add(new TranslateTransform3D(-center.X, -center.Y, -center.Z));
+        invGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), NhpPitch)));
+        invGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), NhpRoll)));
+        invGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), NhpYaw)));
+        invGroup.Children.Add(new TranslateTransform3D(center.X + NhpLateral, center.Y + NhpAnteroposterior, center.Z + NhpVertical));
+        var invMatrix = invGroup.Value;
+        if (invMatrix.HasInverse) invMatrix.Invert();
 
-        var matrix = group.Value;
-        if (matrix.HasInverse) matrix.Invert();
-
-        var nhpTransform = new OrthoPlanner.Core.Imaging.NhpTransform
+        var inverseTransform = new OrthoPlanner.Core.Imaging.NhpTransform
         {
-            M11 = matrix.M11, M12 = matrix.M12, M13 = matrix.M13, M14 = matrix.M14,
-            M21 = matrix.M21, M22 = matrix.M22, M23 = matrix.M23, M24 = matrix.M24,
-            M31 = matrix.M31, M32 = matrix.M32, M33 = matrix.M33, M34 = matrix.M34,
-            M41 = matrix.OffsetX, M42 = matrix.OffsetY, M43 = matrix.OffsetZ, M44 = matrix.M44
+            M11 = invMatrix.M11, M12 = invMatrix.M12, M13 = invMatrix.M13, M14 = invMatrix.M14,
+            M21 = invMatrix.M21, M22 = invMatrix.M22, M23 = invMatrix.M23, M24 = invMatrix.M24,
+            M31 = invMatrix.M31, M32 = invMatrix.M32, M33 = invMatrix.M33, M34 = invMatrix.M34,
+            M41 = invMatrix.OffsetX, M42 = invMatrix.OffsetY, M43 = invMatrix.OffsetZ, M44 = invMatrix.M44
+        };
+            
+        // --- 3. Build the STRICT FORWARD Transformation Matrix (Source -> Target) ---
+        var fwdGroup = new Transform3DGroup();
+        fwdGroup.Children.Add(new TranslateTransform3D(-center.X, -center.Y, -center.Z));
+        fwdGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), -NhpPitch)));
+        fwdGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), -NhpRoll)));
+        fwdGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), -NhpYaw)));
+        fwdGroup.Children.Add(new TranslateTransform3D(center.X - NhpLateral, center.Y - NhpAnteroposterior, center.Z - NhpVertical));
+        var fwdMatrix = fwdGroup.Value;
+        if (fwdMatrix.HasInverse) fwdMatrix.Invert();
+        
+        var transform = new OrthoPlanner.Core.Imaging.NhpTransform
+        {
+            M11 = fwdMatrix.M11, M12 = fwdMatrix.M12, M13 = fwdMatrix.M13, M14 = fwdMatrix.M14,
+            M21 = fwdMatrix.M21, M22 = fwdMatrix.M22, M23 = fwdMatrix.M23, M24 = fwdMatrix.M24,
+            M31 = fwdMatrix.M31, M32 = fwdMatrix.M32, M33 = fwdMatrix.M33, M34 = fwdMatrix.M34,
+            M41 = fwdMatrix.OffsetX, M42 = fwdMatrix.OffsetY, M43 = fwdMatrix.OffsetZ, M44 = fwdMatrix.M44
         };
 
-        StatusText = "Reslicing volume... This may take a moment.";
-        IsLoading = true;
+        StatusText = "Reslicing volume matrix...";
         
-        var currentVol = Volume;
-
-        // Perform the heavy slice interpolation ON BACKGROUND THREAD
-        var resliced = await Task.Run(() => SegmentationEngine.ResliceVolume(currentVol, nhpTransform));
+        // Pass both transforms so the Engine can determine exact physical boundaries and pad without waste!
+        var resliced = await Task.Run(() => SegmentationEngine.ResliceVolume(Volume, transform, inverseTransform));
         
         IsLoading = false;
         
@@ -1507,6 +1540,11 @@ public partial class MainViewModel : ObservableObject
             AxialMax = Volume.Depth - 1;
             CoronalMax = Volume.Height - 1;
             SagittalMax = Volume.Width - 1;
+            
+            // Push updated aspect ratios out
+            AxialDisplayHeight = Volume.Height * Volume.Spacing[1];
+            CoronalDisplayHeight = Volume.Depth * Volume.Spacing[2];
+            SagittalDisplayHeight = Volume.Depth * Volume.Spacing[2];
             
             UpdateAllSlices();
             UpdateHistograms();

@@ -812,39 +812,52 @@ public static class SegmentationEngine
     /// <summary>
     /// Performs a physical reslice of the volume using trilinear interpolation.
     /// </summary>
-    public static VolumeData ResliceVolume(VolumeData source, NhpTransform transform)
+    public static VolumeData ResliceVolume(VolumeData source, NhpTransform transform, NhpTransform inverseTransform)
     {
-        // 1. Find the 8 corners of the original volume in physical space
         int wSrc = source.Width, hSrc = source.Height, dSrc = source.Depth;
         double sx = source.Spacing[0], sy = source.Spacing[1], sz = source.Spacing[2];
 
-        // The center of the original volume
+        // The world-center of the Original Volume
         double cx = wSrc * sx / 2.0;
         double cy = hSrc * sy / 2.0;
         double cz = dSrc * sz / 2.0;
 
-        // We want to apply the *inverse* transform to find where the box corners land
-        // in the global world, to see how big the bounding box must be.
-        // For simplicity (since the transform passed is already world-to-local), 
-        // we'll estimate worst case bounds by just rotating the physical dimensions.
-        // A sphere bounding the box is easiest:
-        double diag = Math.Sqrt((wSrc*sx)*(wSrc*sx) + (hSrc*sy)*(hSrc*sy) + (dSrc*sz)*(dSrc*sz));
+        // Extract the 8 local physical corners of the source box
+        double[] xCorners = [0, wSrc * sx];
+        double[] yCorners = [0, hSrc * sy];
+        double[] zCorners = [0, dSrc * sz];
 
-        // Let's use the exact 8 corners mapped through the *inverse* 
-        // We know `transform` is Target-to-Source. We need Source-to-Target to find max bounds.
-        // Instead of building a full matrix inverter, we will safely pad the bounding volume
-        // by the diagonal to guarantee no cropping, then recenter it.
-        int maxW = (int)Math.Ceiling(diag / sx);
-        int maxH = (int)Math.Ceiling(diag / sy);
-        int maxD = (int)Math.Ceiling(diag / sz);
+        double minWorldX = double.MaxValue, maxWorldX = double.MinValue;
+        double minWorldY = double.MaxValue, maxWorldY = double.MinValue;
+        double minWorldZ = double.MaxValue, maxWorldZ = double.MinValue;
+
+        // Map every corner through the inverse transform (Source -> Forward -> Target)
+        // to find exactly where the bounding box reaches in the New Coordinate Space
+        foreach (double x in xCorners)
+        {
+            foreach (double y in yCorners)
+            {
+                foreach (double z in zCorners)
+                {
+                    // Center the corner
+                    double lox = x - cx; double loy = y - cy; double loz = z - cz;
+                    // Project it forward to see how far the rotation throws it
+                    var (wx, wy, wz) = inverseTransform.TransformPoint(lox, loy, loz);
+                    
+                    if (wx < minWorldX) minWorldX = wx; if (wx > maxWorldX) maxWorldX = wx;
+                    if (wy < minWorldY) minWorldY = wy; if (wy > maxWorldY) maxWorldY = wy;
+                    if (wz < minWorldZ) minWorldZ = wz; if (wz > maxWorldZ) maxWorldZ = wz;
+                }
+            }
+        }
+
+        // Calculate absolute minimum grid bounds necessary to enclose the rotated data
+        int maxW = (int)Math.Ceiling((maxWorldX - minWorldX) / sx);
+        int maxH = (int)Math.Ceiling((maxWorldY - minWorldY) / sy);
+        int maxD = (int)Math.Ceiling((maxWorldZ - minWorldZ) / sz);
 
         int w = maxW, h = maxH, d = maxD;
         var newVoxels = new short[w * h * d];
-
-        // The center of the new padded volume
-        double ncx = w * sx / 2.0;
-        double ncy = h * sy / 2.0;
-        double ncz = d * sz / 2.0;
 
         System.Threading.Tasks.Parallel.For(0, d, z =>
         {
@@ -852,16 +865,16 @@ public static class SegmentationEngine
             {
                 for (int x = 0; x < w; x++)
                 {
-                    // Map target voxel physical point back to source space
-                    // Shift so we scan around the center of the NEW padded box
-                    double worldX = (x * sx) - ncx + cx;
-                    double worldY = (y * sy) - ncy + cy;
-                    double worldZ = (z * sz) - ncz + cz;
+                    // Iterate through the NEW grid bounds and map backwards to see what's there
+                    // Shift the (0,0,0) iteration point back to the global Box Minimums
+                    double worldX = (x * sx) + minWorldX;
+                    double worldY = (y * sy) + minWorldY;
+                    double worldZ = (z * sz) + minWorldZ;
 
                     var (ox, oy, oz) = transform.TransformPoint(worldX, worldY, worldZ);
                     
-                    // Sample HU using trilinear interpolation
-                    newVoxels[x + y * w + z * w * h] = SampleTrilinear(source, ox, oy, oz);
+                    // Shift back into local Source coordinates before Trilinear Interpolation picks it up
+                    newVoxels[x + y * w + z * w * h] = SampleTrilinear(source, ox + cx, oy + cy, oz + cz);
                 }
             }
         });

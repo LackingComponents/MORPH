@@ -728,20 +728,26 @@ public partial class MainWindow : Window
                         // Calculate an appropriate safe viewing distance
                         double distance = Math.Max(bounds.SizeX, Math.Max(bounds.SizeY, bounds.SizeZ)) * 1.5;
                         if (distance < 100) distance = 300.0;
+
+                        // 1. Force the internal Pan Offset controller to target the object centroid precisely
+                        Viewport3D.CameraController.CameraTarget = centroid;
                         
-                        // Keep current camera look-direction but normalize the vector
+                        // 2. Override the user's manual Right-Click Orbit Pivot point to the very center of the cranial data!
+                        Viewport3D.FixedRotationPoint = centroid;
+
+                        // 3. Keep current camera look-direction but normalize the vector
                         var dir = cam.LookDirection;
                         dir.Normalize();
 
-                        // Enforce the specific Face direction triggered by Helix Toolkit 
-                        // Instead of backing out from the 'current' position (which keeps the pan offset),
-                        // we completely discard translation offsets by looking strictly from the centroid outwards!
                         cam.Position = new Point3D(
                             centroid.X - dir.X * distance, 
                             centroid.Y - dir.Y * distance, 
                             centroid.Z - dir.Z * distance);
                         
                         cam.LookDirection = new Vector3D(dir.X * distance, dir.Y * distance, dir.Z * distance);
+                        
+                        // 4. Force immediate Pan zeroing through mathematical extents mapping!
+                        Viewport3D.ZoomExtents();
                     }
                 }
             }

@@ -623,10 +623,10 @@
             <Grid Grid.Column="4">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
+                    <!-- Bind Star ratios directly to the scaled voxel spread for true 1:1 screen mapping -->
+                    <RowDefinition Height="{Binding AxialDisplayHeight, Converter={StaticResource LengthConverter}}" />
+                    <RowDefinition Height="{Binding CoronalDisplayHeight, Converter={StaticResource LengthConverter}}" />
+                    <RowDefinition Height="{Binding SagittalDisplayHeight, Converter={StaticResource LengthConverter}}" />
                 </Grid.RowDefinitions>
 
                 <!-- MPR Toolbar -->
@@ -646,7 +646,7 @@
                           MouseRightButtonUp="SlicePanel_RightUp"
                           MouseMove="SlicePanel_MouseMove"
                           Background="Transparent">
-                        <Image Source="{Binding AxialImage}" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                        <Image Source="{Binding AxialImage}" Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor" />
                         <Canvas x:Name="AxialCrosshairCanvas" IsHitTestVisible="False" />
                         <TextBlock Text="AXIAL" Style="{StaticResource PanelHeader}"
                                    HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6" />
@@ -668,7 +668,7 @@
                           MouseRightButtonUp="SlicePanel_RightUp"
                           MouseMove="SlicePanel_MouseMove"
                           Background="Transparent">
-                        <Image Source="{Binding CoronalImage}" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                        <Image Source="{Binding CoronalImage}" Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor" />
                         <Canvas x:Name="CoronalCrosshairCanvas" IsHitTestVisible="False" />
                         <TextBlock Text="CORONAL" Style="{StaticResource PanelHeader}"
                                    HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6" />
@@ -690,7 +690,7 @@
                           MouseRightButtonUp="SlicePanel_RightUp"
                           MouseMove="SlicePanel_MouseMove"
                           Background="Transparent">
-                        <Image Source="{Binding SagittalImage}" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                        <Image Source="{Binding SagittalImage}" Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor" />
                         <Canvas x:Name="SagittalCrosshairCanvas" IsHitTestVisible="False" />
                         <TextBlock Text="SAGITTAL" Style="{StaticResource PanelHeader}"
                                    HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6" />
@@ -702,26 +702,8 @@
                     </Grid>
                 </Border>
 
-                <!-- Windowing Controls -->
-                <Border Grid.Row="4" Margin="4" Padding="10,8" Background="{StaticResource BgMediumBrush}"
-                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4"
-                        Visibility="{Binding IsVolumeLoaded, Converter={StaticResource BoolToVisibility}}">
-                    <StackPanel>
-                        <TextBlock Text="WINDOWING" Style="{StaticResource PanelHeader}" FontSize="9" />
-                        <DockPanel Margin="0,2">
-                            <TextBlock Text="Center" Width="42" FontSize="10" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" />
-                            <TextBox DockPanel.Dock="Right" Width="50" FontSize="11" TextAlignment="Center"
-                                     Text="{Binding WindowCenter, StringFormat=F0, UpdateSourceTrigger=LostFocus}" />
-                            <Slider Minimum="-1024" Maximum="3071" Value="{Binding WindowCenter}" Margin="4,0" />
-                        </DockPanel>
-                        <DockPanel Margin="0,2">
-                            <TextBlock Text="Width" Width="42" FontSize="10" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" />
-                            <TextBox DockPanel.Dock="Right" Width="50" FontSize="11" TextAlignment="Center"
-                                     Text="{Binding WindowWidth, StringFormat=F0, UpdateSourceTrigger=LostFocus}" />
-                            <Slider Minimum="1" Maximum="4096" Value="{Binding WindowWidth}" Margin="4,0" />
-                        </DockPanel>
-                    </StackPanel>
-                </Border>
+                <!-- Windowing Controls (Removed to save space per user request) -->
+
             </Grid>
         </Grid>
 
