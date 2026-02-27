@@ -40,6 +40,10 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private int _axialIndex;
     [ObservableProperty] private int _coronalIndex;
     [ObservableProperty] private int _sagittalIndex;
+    
+    // ─── 3D Viewport Anchors ───
+    [ObservableProperty] private System.Windows.Media.Media3D.Point3D _modelCenter = new System.Windows.Media.Media3D.Point3D(0, 0, 0);
+
     [ObservableProperty] private int _axialMax = 1;
     [ObservableProperty] private int _coronalMax = 1;
     [ObservableProperty] private int _sagittalMax = 1;
@@ -222,6 +226,9 @@ public partial class MainViewModel : ObservableObject
         group.Children.Add(new TranslateTransform3D(center.X + dLat, center.Y + dAnt, center.Z + dVert));
 
         BoneModel.Transform = group;
+        
+        // Dynamically enforce the freehand rotation pivot point!
+        ModelCenter = group.Transform(center);
     }
 
     public ObservableCollection<(int X, int Y, int Z, byte ClassLabel)> MultiSeeds { get; } = new();
@@ -844,6 +851,8 @@ public partial class MainViewModel : ObservableObject
 
     private WriteableBitmap? GenerateColoredHistogram(double minHU, double maxHU, int localMax, double range, byte r, byte g, byte b)
     {
+        if (Volume == null) return null;
+        
         int histW = 512; 
         int histH = 80;
         var pixels = new byte[histW * histH * 4];
@@ -1364,6 +1373,14 @@ public partial class MainViewModel : ObservableObject
             group.Children.Add(mesh.Model3D!);
 
         BoneModel = group;
+        
+        if (!BoneModel.Bounds.IsEmpty)
+        {
+            ModelCenter = new System.Windows.Media.Media3D.Point3D(
+                BoneModel.Bounds.X + BoneModel.Bounds.SizeX / 2,
+                BoneModel.Bounds.Y + BoneModel.Bounds.SizeY / 2,
+                BoneModel.Bounds.Z + BoneModel.Bounds.SizeZ / 2);
+        }
     }
 
     [RelayCommand]
@@ -1525,7 +1542,7 @@ public partial class MainViewModel : ObservableObject
         _cRoll = NhpRoll; _cPitch = NhpPitch; _cYaw = NhpYaw;
         // NOTE: We DO NOT zero out NhpLateral, NhpPitch, etc. They must persist in the UI!
 
-        await System.Windows.Application.Current.Dispatcher.InvokeAsync(async () => {
+        await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => {
             Volume = resliced;
             
             // Re-initialize segmentation volume for the new dimensions (Air Padded array)

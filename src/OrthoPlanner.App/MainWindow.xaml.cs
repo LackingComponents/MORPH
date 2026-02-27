@@ -358,6 +358,8 @@ public partial class MainWindow : Window
         double rx = Math.Clamp(pos.X / grid.ActualWidth, 0, 1);
         double ry = Math.Clamp(pos.Y / grid.ActualHeight, 0, 1);
 
+        if (VM == null) return;
+
         int viewType = 0;
         if (grid.Name == "AxialPanel") viewType = 1;
         else if (grid.Name == "CoronalPanel") viewType = 2;
@@ -704,33 +706,28 @@ public partial class MainWindow : Window
             {
                 if (vp3d.Camera is ProjectionCamera cam)
                 {
-                    // Find the actual physical bounding box of all 3D objects in the scene
-                    var bounds = Rect3D.Empty;
-                    foreach (var child in vp3d.Children)
+                    if (VM != null && VM.BoneModel != null && !VM.BoneModel.Bounds.IsEmpty)
                     {
-                        var childBounds = HelixToolkit.Wpf.Visual3DHelper.FindBounds(child, Transform3D.Identity);
-                        if (!childBounds.IsEmpty)
-                        {
-                            if (bounds.IsEmpty) bounds = childBounds;
-                            else bounds.Union(childBounds);
-                        }
-                    }
-                    
-                    
-                    if (!bounds.IsEmpty)
-                    {
-                        // Calculate the spatial centroid of the DICOM mesh structure
+                        // Safely apply the Transform Math directly to the Model's local bounds, ignoring UI layers!
+                        var worldBounds = VM.BoneModel.Transform != null 
+                            ? VM.BoneModel.Transform.TransformBounds(VM.BoneModel.Bounds) 
+                            : VM.BoneModel.Bounds;
+                            
+                        // Calculate the spatial centroid of the DICOM mesh structure exclusively
                         var centroid = new Point3D(
-                            bounds.X + bounds.SizeX / 2,
-                            bounds.Y + bounds.SizeY / 2,
-                            bounds.Z + bounds.SizeZ / 2);
+                            worldBounds.X + worldBounds.SizeX / 2,
+                            worldBounds.Y + worldBounds.SizeY / 2,
+                            worldBounds.Z + worldBounds.SizeZ / 2);
 
                         // Calculate an appropriate safe viewing distance
-                        double distance = Math.Max(bounds.SizeX, Math.Max(bounds.SizeY, bounds.SizeZ)) * 1.5;
+                        double distance = Math.Max(worldBounds.SizeX, Math.Max(worldBounds.SizeY, worldBounds.SizeZ)) * 1.5;
                         if (distance < 100) distance = 300.0;
 
                         // 1. Force the internal Pan Offset controller to target the object centroid precisely
-                        Viewport3D.CameraController.CameraTarget = centroid;
+                        if (Viewport3D.CameraController != null)
+                        {
+                            Viewport3D.CameraController.CameraTarget = centroid;
+                        }
                         
                         // 2. Override the user's manual Right-Click Orbit Pivot point to the very center of the cranial data!
                         Viewport3D.FixedRotationPoint = centroid;

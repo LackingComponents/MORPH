@@ -566,6 +566,8 @@
                                            IsPanEnabled="True"
                                            IsZoomEnabled="True"
                                            RotateAroundMouseDownPoint="False"
+                                           FixedRotationPointEnabled="True"
+                                           FixedRotationPoint="{Binding ModelCenter}"
                                            CameraRotationMode="Turnball"
                                            ModelUpDirection="0,0,1"
                                            ShowViewCube="True"
