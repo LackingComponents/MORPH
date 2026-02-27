@@ -720,8 +720,8 @@ public partial class MainWindow : Window
                     
                 lookDirection.Normalize();
                 
-                // Fetch the absolute grid origin (0,0,0) for the reference frame centering!
-                var originTarget = new Point3D(0, 0, 0);
+                // Fetch the dynamic mathematical exact pivot center mapped in the ViewModel
+                var centroid = VM.ModelCenter;
 
                 // Calculate an appropriate safe viewing distance 
                 var worldBounds = VM.BoneModel.Transform != null 
@@ -733,18 +733,16 @@ public partial class MainWindow : Window
                 
                 // Calculate the exact target offset relative to the absolute grid center
                 var targetPosition = new Point3D(
-                    originTarget.X - lookDirection.X * distance, 
-                    originTarget.Y - lookDirection.Y * distance, 
-                    originTarget.Z - lookDirection.Z * distance);
+                    centroid.X - lookDirection.X * distance, 
+                    centroid.Y - lookDirection.Y * distance, 
+                    centroid.Z - lookDirection.Z * distance);
 
-                // Use the HelixToolkit CameraHelper to animate firmly to our origin anchors, bypassing their generic bounds logic!
-                HelixToolkit.Wpf.CameraHelper.AnimateTo(cam, targetPosition, lookDirection, new Vector3D(0, 0, 1), 500);
+                // The camera's look direction vector MUST have a magnitude equal to the distance to the target!
+                // Otherwise, Helix sets its internal focal/rotation point 1 unit in front of the camera lens, breaking orbits!
+                var scaledLookDirection = new Vector3D(lookDirection.X * distance, lookDirection.Y * distance, lookDirection.Z * distance);
 
-                // 4. Force Override internal controller to target the absolute world origin
-                if (Viewport3D.CameraController != null)
-                {
-                    Viewport3D.CameraController.CameraTarget = originTarget;
-                }
+                // Use the HelixToolkit CameraHelper to animate firmly to our model center!
+                HelixToolkit.Wpf.CameraHelper.AnimateTo(cam, targetPosition, scaledLookDirection, new Vector3D(0, 0, 1), 500);
 
                 // FATAL OVERRIDE: Prevent HelixToolkit from triggering its own ViewCube click logic entirely!
                 e.Handled = true;
