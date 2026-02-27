@@ -76,6 +76,10 @@ public partial class MainWindow : Window
                                 cam.Position = new Point3D(centroid.X - dir.X * dist, centroid.Y - dir.Y * dist, centroid.Z - dir.Z * dist);
                                 cam.LookDirection = new Vector3D(dir.X * dist, dir.Y * dist, dir.Z * dist);
                             }
+                            
+                            // Prevent right-click pan from detaching the pivot
+                            Viewport3D.FixedRotationPointEnabled = true;
+                            Viewport3D.FixedRotationPoint = centroid;
                         }
                     });
                 }

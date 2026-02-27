@@ -181,9 +181,7 @@ public partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(IsNhpDirty));
 
         // Start Reslice Engine
-        await Task.Run(() => PerformPhysicalReslice());
-        
-        StatusText = "Volume resliced to NHP.";
+        await PerformPhysicalResliceAsync();
     }
 
     private void UpdateNhpTransform()
@@ -1434,17 +1432,16 @@ public partial class MainViewModel : ObservableObject
         window.Show();
     }
 
-    private void PerformPhysicalReslice()
+    private async Task PerformPhysicalResliceAsync()
     {
-        if (Volume == null) return;
+        if (Volume == null || BoneModel == null) return;
 
-        // Calculate the central pivot point (centroid)
-        var bounds = BoneModel?.Bounds;
+        // Calculate the central pivot point (centroid) ON UI THREAD
+        var bounds = BoneModel.Bounds;
         Point3D center;
-        if (bounds != null && !bounds.Value.IsEmpty)
+        if (!bounds.IsEmpty)
         {
-            var b = bounds.Value;
-            center = new Point3D(b.X + b.SizeX / 2, b.Y + b.SizeY / 2, b.Z + b.SizeZ / 2);
+            center = new Point3D(bounds.X + bounds.SizeX / 2, bounds.Y + bounds.SizeY / 2, bounds.Z + bounds.SizeZ / 2);
         }
         else
         {
@@ -1452,13 +1449,13 @@ public partial class MainViewModel : ObservableObject
             center = new Point3D(dims.Width / 2, dims.Height / 2, dims.Depth / 2);
         }
 
-        // Build the physical transformation matrix
+        // Build the physical transformation matrix ON UI THREAD
         var group = new Transform3DGroup();
         group.Children.Add(new TranslateTransform3D(-center.X, -center.Y, -center.Z));
-        group.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), NhpPitch)));
-        group.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), NhpRoll)));
-        group.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), NhpYaw)));
-        group.Children.Add(new TranslateTransform3D(center.X + NhpLateral, center.Y + NhpAnteroposterior, center.Z + NhpVertical));
+        group.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), _cPitch)));
+        group.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), _cRoll)));
+        group.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), _cYaw)));
+        group.Children.Add(new TranslateTransform3D(center.X + _cLat, center.Y + _cAnt, center.Z + _cVert));
 
         var matrix = group.Value;
         if (matrix.HasInverse) matrix.Invert();
@@ -1471,15 +1468,22 @@ public partial class MainViewModel : ObservableObject
             M41 = matrix.OffsetX, M42 = matrix.OffsetY, M43 = matrix.OffsetZ, M44 = matrix.M44
         };
 
-        // Perform the heavy slice interpolation
-        var resliced = SegmentationEngine.ResliceVolume(Volume, nhpTransform);
+        StatusText = "Reslicing volume... This may take a moment.";
+        IsLoading = true;
+        
+        var currentVol = Volume;
+
+        // Perform the heavy slice interpolation ON BACKGROUND THREAD
+        var resliced = await Task.Run(() => SegmentationEngine.ResliceVolume(currentVol, nhpTransform));
+        
+        IsLoading = false;
         
         // Reset local NHP UI values (since they are now 'baked' into the volume)
         NhpLateral = 0; NhpAnteroposterior = 0; NhpVertical = 0;
         NhpPitch = 0; NhpRoll = 0; NhpYaw = 0;
         _cLat = 0; _cAnt = 0; _cVert = 0; _cRoll = 0; _cPitch = 0; _cYaw = 0;
 
-        System.Windows.Application.Current.Dispatcher.Invoke(async () => {
+        await System.Windows.Application.Current.Dispatcher.InvokeAsync(async () => {
             Volume = resliced;
             
             // Re-initialize segmentation volume for the new dimensions
