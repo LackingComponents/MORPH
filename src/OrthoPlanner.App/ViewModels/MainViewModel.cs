@@ -1374,13 +1374,8 @@ public partial class MainViewModel : ObservableObject
 
         BoneModel = group;
         
-        if (!BoneModel.Bounds.IsEmpty)
-        {
-            ModelCenter = new System.Windows.Media.Media3D.Point3D(
-                BoneModel.Bounds.X + BoneModel.Bounds.SizeX / 2,
-                BoneModel.Bounds.Y + BoneModel.Bounds.SizeY / 2,
-                BoneModel.Bounds.Z + BoneModel.Bounds.SizeZ / 2);
-        }
+        // Crucial: Always re-apply active NHP transforms and calculate the active Pivot offset!
+        UpdateNhpTransform();
     }
 
     [RelayCommand]

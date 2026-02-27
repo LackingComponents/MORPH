@@ -677,12 +677,13 @@ public partial class MainWindow : Window
 
     // ═══ Viewport Navigation ═══
 
-    private void Viewport3D_PreviewMouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    private void Viewport3D_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (sender is System.Windows.Controls.Viewport3D vp3d)
         {
             var hitParams = new PointHitTestParameters(e.GetPosition(vp3d));
-            bool hitCube = false;
+            HelixToolkit.Wpf.ViewCubeVisual3D? hitCube = null;
+            Point3D hitPoint = new Point3D();
 
             VisualTreeHelper.HitTest(vp3d, null, result =>
             {
@@ -691,9 +692,10 @@ public partial class MainWindow : Window
                     DependencyObject? current = meshHit.ModelHit;
                     while (current != null)
                     {
-                        if (current.GetType().Name == "ViewCubeVisual3D")
+                        if (current is HelixToolkit.Wpf.ViewCubeVisual3D cube)
                         {
-                            hitCube = true;
+                            hitCube = cube;
+                            hitPoint = meshHit.PointHit;
                             return HitTestResultBehavior.Stop;
                         }
                         current = VisualTreeHelper.GetParent(current);
@@ -702,51 +704,52 @@ public partial class MainWindow : Window
                 return HitTestResultBehavior.Continue;
             }, hitParams);
 
-            if (hitCube)
+            if (hitCube != null && vp3d.Camera is ProjectionCamera cam && VM != null && VM.BoneModel != null && !VM.BoneModel.Bounds.IsEmpty)
             {
-                if (vp3d.Camera is ProjectionCamera cam)
+                // Calculate which Face was clicked by creating a Normal Vector from the Cube Center to the Hit Point
+                var cubeBounds = HelixToolkit.Wpf.Visual3DHelper.FindBounds(hitCube, Transform3D.Identity);
+                var cubeCenter = cubeBounds.Location + new Vector3D(
+                    cubeBounds.SizeX / 2,
+                    cubeBounds.SizeY / 2,
+                    cubeBounds.SizeZ / 2);
+
+                var lookDirection = new Vector3D(
+                    cubeCenter.X - hitPoint.X,
+                    cubeCenter.Y - hitPoint.Y,
+                    cubeCenter.Z - hitPoint.Z);
+                    
+                lookDirection.Normalize();
+                
+                // Fetch the dynamic mathematical exact pivot center mapped in the ViewModel
+                var centroid = VM.ModelCenter;
+
+                // Calculate an appropriate safe viewing distance 
+                var worldBounds = VM.BoneModel.Transform != null 
+                    ? VM.BoneModel.Transform.TransformBounds(VM.BoneModel.Bounds) 
+                    : VM.BoneModel.Bounds;
+                    
+                double distance = Math.Max(worldBounds.SizeX, Math.Max(worldBounds.SizeY, worldBounds.SizeZ)) * 1.5;
+                if (distance < 100) distance = 300.0;
+                
+                // Calculate the exact target offset
+                var targetPosition = new Point3D(
+                    centroid.X - lookDirection.X * distance, 
+                    centroid.Y - lookDirection.Y * distance, 
+                    centroid.Z - lookDirection.Z * distance);
+
+                // Use the HelixToolkit CameraHelper to animate firmly to our mathematical anchors, bypassing their bounds logic!
+                HelixToolkit.Wpf.CameraHelper.AnimateTo(cam, targetPosition, lookDirection, new Vector3D(0, 0, 1), 500);
+
+                // 4. Force Override internal controller to target the exact object centroid
+                if (Viewport3D.CameraController != null)
                 {
-                    if (VM != null && VM.BoneModel != null && !VM.BoneModel.Bounds.IsEmpty)
-                    {
-                        // Safely apply the Transform Math directly to the Model's local bounds, ignoring UI layers!
-                        var worldBounds = VM.BoneModel.Transform != null 
-                            ? VM.BoneModel.Transform.TransformBounds(VM.BoneModel.Bounds) 
-                            : VM.BoneModel.Bounds;
-                            
-                        // Calculate the spatial centroid of the DICOM mesh structure exclusively
-                        var centroid = new Point3D(
-                            worldBounds.X + worldBounds.SizeX / 2,
-                            worldBounds.Y + worldBounds.SizeY / 2,
-                            worldBounds.Z + worldBounds.SizeZ / 2);
-
-                        // Calculate an appropriate safe viewing distance
-                        double distance = Math.Max(worldBounds.SizeX, Math.Max(worldBounds.SizeY, worldBounds.SizeZ)) * 1.5;
-                        if (distance < 100) distance = 300.0;
-
-                        // 1. Force the internal Pan Offset controller to target the object centroid precisely
-                        if (Viewport3D.CameraController != null)
-                        {
-                            Viewport3D.CameraController.CameraTarget = centroid;
-                        }
-                        
-                        // 2. Override the user's manual Right-Click Orbit Pivot point to the very center of the cranial data!
-                        Viewport3D.FixedRotationPoint = centroid;
-
-                        // 3. Keep current camera look-direction but normalize the vector
-                        var dir = cam.LookDirection;
-                        dir.Normalize();
-
-                        cam.Position = new Point3D(
-                            centroid.X - dir.X * distance, 
-                            centroid.Y - dir.Y * distance, 
-                            centroid.Z - dir.Z * distance);
-                        
-                        cam.LookDirection = new Vector3D(dir.X * distance, dir.Y * distance, dir.Z * distance);
-                        
-                        // 4. Force immediate Pan zeroing through mathematical extents mapping!
-                        Viewport3D.ZoomExtents();
-                    }
+                    Viewport3D.CameraController.CameraTarget = centroid;
                 }
+                
+                Viewport3D.FixedRotationPoint = centroid;
+
+                // FATAL OVERRIDE: Prevent HelixToolkit from triggering its own ViewCube click logic entirely!
+                e.Handled = true;
             }
         }
     }
