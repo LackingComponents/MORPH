@@ -418,7 +418,9 @@
                                 <TextBlock Text="Import dental cast STL files and align them to the CT volume."
                                            TextWrapping="Wrap" FontSize="10" FontWeight="Normal"
                                            Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6" />
-                                <Button Content="📥 Import STL" Command="{Binding ImportStlCommand}" Margin="0,0,0,4" />
+                                <Button Content="📥 Load Dental Scans" Command="{Binding ImportStlCommand}" Margin="0,0,0,4" />
+                                <Button Content="🔄 Align to CT" Command="{Binding AlignDentalScansCommand}" Margin="0,0,0,4"
+                                        Background="#FF1B98E0" Foreground="White" FontWeight="Bold" />
                                 <ItemsControl ItemsSource="{Binding ImportedMeshes}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>

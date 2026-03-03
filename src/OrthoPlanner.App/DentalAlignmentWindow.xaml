@@ -1,0 +1,99 @@
+<Window x:Class="OrthoPlanner.App.DentalAlignmentWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:helix="http://helix-toolkit.org/wpf"
+        Title="Dental Scan Alignment Wizard" Width="1200" Height="700"
+        WindowStartupLocation="CenterOwner" Background="#FF0C1018" Foreground="White">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header / instructions -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,8">
+            <TextBlock x:Name="StepTitle" Text="Step 1: Pick Matching Landmarks" FontSize="16" FontWeight="Bold" Foreground="White"/>
+            <TextBlock x:Name="StepInstructions" FontSize="11" Foreground="#AAB" TextWrapping="Wrap" Margin="0,4,0,0"
+                       Text="Left-click on 3 or more matching points on both views. Pick the same tooth/cusp on the CT (left) and the STL scan (right). Points are numbered for correspondence."/>
+        </StackPanel>
+
+        <!-- Dual viewports -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="6"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- CT dental model -->
+            <Border Grid.Column="0" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4">
+                <Grid>
+                    <helix:HelixViewport3D x:Name="CtViewport" Background="#FF0C1018"
+                                           ShowCoordinateSystem="True" CoordinateSystemLabelForeground="White"
+                                           ZoomExtentsWhenLoaded="True" IsHeadLightEnabled="True"
+                                           CameraRotationMode="Turnball" ModelUpDirection="0,0,1"
+                                           ShowViewCube="False"
+                                           MouseLeftButtonDown="CtViewport_MouseLeftButtonDown">
+                        <helix:HelixViewport3D.Camera>
+                            <PerspectiveCamera Position="0,-300,0" LookDirection="0,1,0"
+                                               UpDirection="0,0,1" FieldOfView="45"/>
+                        </helix:HelixViewport3D.Camera>
+                    </helix:HelixViewport3D>
+                    <TextBlock Text="CT Dental Surface" FontSize="11" Foreground="#88FFFFFF"
+                               HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6"/>
+                </Grid>
+            </Border>
+
+            <!-- Separator -->
+            <GridSplitter Grid.Column="1" Width="6" Background="Transparent"
+                          HorizontalAlignment="Center" VerticalAlignment="Stretch"/>
+
+            <!-- STL scan -->
+            <Border Grid.Column="2" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4">
+                <Grid>
+                    <helix:HelixViewport3D x:Name="StlViewport" Background="#FF0C1018"
+                                           ShowCoordinateSystem="True" CoordinateSystemLabelForeground="White"
+                                           ZoomExtentsWhenLoaded="True" IsHeadLightEnabled="True"
+                                           CameraRotationMode="Turnball" ModelUpDirection="0,0,1"
+                                           ShowViewCube="False"
+                                           MouseLeftButtonDown="StlViewport_MouseLeftButtonDown">
+                        <helix:HelixViewport3D.Camera>
+                            <PerspectiveCamera Position="0,-300,0" LookDirection="0,1,0"
+                                               UpDirection="0,0,1" FieldOfView="45"/>
+                        </helix:HelixViewport3D.Camera>
+                    </helix:HelixViewport3D>
+                    <TextBlock Text="Dental STL Scan" FontSize="11" Foreground="#88FFFFFF"
+                               HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6"/>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Footer controls -->
+        <Grid Grid.Row="2" Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0" Orientation="Horizontal">
+                <TextBlock x:Name="LandmarkCountText" Text="Landmarks: 0 pairs" FontSize="11" Foreground="#AAB" VerticalAlignment="Center"/>
+                <Button x:Name="ClearLandmarksBtn" Content="Clear Landmarks" Margin="12,0,0,0" Padding="8,4"
+                        Background="#30FFFFFF" Foreground="White" BorderThickness="0" Click="ClearLandmarks_Click"/>
+            </StackPanel>
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <TextBlock x:Name="RmsText" Text="" FontSize="11" Foreground="#8CF" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                <Button x:Name="ComputeBtn" Content="⚡ Compute Alignment" Padding="10,6"
+                        Background="#FF1B98E0" Foreground="White" BorderThickness="0" FontWeight="Bold"
+                        IsEnabled="False" Click="ComputeAlignment_Click"/>
+                <Button x:Name="AcceptBtn" Content="✔ Accept" Padding="10,6" Margin="8,0,0,0"
+                        Background="#FF2ECC71" Foreground="White" BorderThickness="0" FontWeight="Bold"
+                        Visibility="Collapsed" Click="Accept_Click"/>
+                <Button Content="Cancel" Padding="10,6" Margin="8,0,0,0"
+                        Background="#30FFFFFF" Foreground="White" BorderThickness="0" Click="Cancel_Click"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

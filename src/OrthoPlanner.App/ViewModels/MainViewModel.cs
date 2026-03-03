@@ -1240,31 +1240,105 @@ public partial class MainViewModel : ObservableObject
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "Import STL Mesh",
-            Filter = "STL Files (*.stl)|*.stl|All Files (*.*)|*.*"
+            Title = "Import Dental STL Scans",
+            Filter = "STL Files (*.stl)|*.stl|All Files (*.*)|*.*",
+            Multiselect = true
         };
-        if (dialog.ShowDialog() != true) return;
+        if (dialog.ShowDialog() != true || dialog.FileNames.Length == 0) return;
+
+        // Show classification dialog
+        var classDialog = new StlClassificationDialog(dialog.FileNames);
+        classDialog.Owner = System.Windows.Application.Current.MainWindow;
+        if (classDialog.ShowDialog() != true) return;
 
         IsLoading = true;
-        StatusText = "Importing STL...";
+        StatusText = "Importing STL scans...";
 
-        var vertices = await Task.Run(() => StlIO.LoadStl(dialog.FileName));
-
-        var meshVm = new MeshViewModel
+        foreach (var entry in classDialog.Entries)
         {
-            Name = Path.GetFileNameWithoutExtension(dialog.FileName),
-            Vertices = vertices,
-            ColorR = 245, ColorG = 245, ColorB = 230,
-            IsVisible = true
-        };
-        meshVm.OnVisibilityChanged = RefreshCombinedModel;
-        meshVm.BuildModel();
-        SaveStateForUndo();
-        ImportedMeshes.Add(meshVm);
+            var vertices = await Task.Run(() => StlIO.LoadStl(entry.FilePath));
 
+            var scanType = entry.IsUpper ? DentalScanType.Upper
+                         : entry.IsLower ? DentalScanType.Lower
+                         : DentalScanType.Other;
+
+            var meshVm = new MeshViewModel
+            {
+                Name = Path.GetFileNameWithoutExtension(entry.FilePath) + (scanType != DentalScanType.Other ? $" ({scanType})" : ""),
+                Vertices = vertices,
+                ColorR = (byte)(scanType == DentalScanType.Upper ? 140 : scanType == DentalScanType.Lower ? 255 : 245),
+                ColorG = (byte)(scanType == DentalScanType.Upper ? 200 : scanType == DentalScanType.Lower ? 170 : 245),
+                ColorB = (byte)(scanType == DentalScanType.Upper ? 255 : scanType == DentalScanType.Lower ? 170 : 230),
+                ScanType = scanType,
+                IsVisible = true
+            };
+            meshVm.OnVisibilityChanged = RefreshCombinedModel;
+            meshVm.BuildModel();
+            ImportedMeshes.Add(meshVm);
+        }
+
+        SaveStateForUndo();
         RefreshCombinedModel();
-        StatusText = $"Imported: {meshVm.Name} ({vertices.Count / 3:N0} triangles)";
+        StatusText = $"Imported {classDialog.Entries.Count} STL scan(s).";
         IsLoading = false;
+
+        OnPropertyChanged(nameof(HasUpperAndLowerScans));
+    }
+
+    public bool HasUpperAndLowerScans =>
+        ImportedMeshes.Any(m => m.ScanType == DentalScanType.Upper) &&
+        ImportedMeshes.Any(m => m.ScanType == DentalScanType.Lower);
+
+    [RelayCommand]
+    private async Task AlignDentalScansAsync()
+    {
+        // Gather CT dental surface vertices (from DentalModel or HardTissueModel)
+        var ctSegment = DentalModel ?? HardTissueModel;
+        if (ctSegment?.Vertices == null || ctSegment.Vertices.Count < 100)
+        {
+            System.Windows.MessageBox.Show(
+                "Please run the Dental or Bone segmentation first to generate a CT surface for alignment.",
+                "No CT Surface", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            return;
+        }
+
+        var scansToAlign = ImportedMeshes
+            .Where(m => m.ScanType == DentalScanType.Upper || m.ScanType == DentalScanType.Lower)
+            .ToList();
+
+        if (scansToAlign.Count == 0)
+        {
+            System.Windows.MessageBox.Show(
+                "No scans classified as Upper or Lower. Please import and classify dental scans first.",
+                "No Scans", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            return;
+        }
+
+        foreach (var scan in scansToAlign)
+        {
+            if (scan.Vertices == null) continue;
+
+            StatusText = $"Aligning {scan.Name}...";
+
+            var wizard = new DentalAlignmentWindow(ctSegment.Vertices, scan.Vertices);
+            wizard.Owner = System.Windows.Application.Current.MainWindow;
+            wizard.Title = $"Align: {scan.Name}";
+
+            if (wizard.ShowDialog() == true && wizard.Accepted && wizard.FinalTransform != null)
+            {
+                // Apply the transform to the actual vertices
+                await Task.Run(() => IcpAligner.TransformVertices(scan.Vertices, wizard.FinalTransform));
+                scan.BuildModel();
+                RefreshCombinedModel();
+                StatusText = $"Aligned: {scan.Name}";
+            }
+            else
+            {
+                StatusText = $"Alignment cancelled for {scan.Name}.";
+            }
+        }
+
+        StatusText = "Dental alignment complete.";
     }
 
     [RelayCommand]
@@ -1607,11 +1681,14 @@ public partial class SegmentViewModel : ObservableObject
     }
 }
 
+public enum DentalScanType { Other, Upper, Lower }
+
 public partial class MeshViewModel : ObservableObject
 {
     [ObservableProperty] private string _name = "";
     [ObservableProperty] private bool _isVisible = true;
     [ObservableProperty] private byte _colorR = 245, _colorG = 245, _colorB = 230;
+    [ObservableProperty] private DentalScanType _scanType = DentalScanType.Other;
     public List<float[]>? Vertices { get; set; }
     public GeometryModel3D? Model3D { get; set; }
 
@@ -1625,7 +1702,7 @@ public partial class MeshViewModel : ObservableObject
     }
 }
 
-internal static class MeshHelper
+public static class MeshHelper
 {
     public static GeometryModel3D BuildModel3D(List<float[]> vertices, byte r, byte g, byte b)
     {
