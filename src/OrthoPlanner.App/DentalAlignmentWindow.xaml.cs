@@ -29,6 +29,7 @@ public class LandmarkPairItem : INotifyPropertyChanged
 public partial class DentalAlignmentWindow : Window
 {
     private readonly List<float[]> _ctVertices;
+    private readonly OrthoPlanner.Core.Imaging.VolumeData _ctVolume;
     private readonly List<float[]> _stlVertices;
     private readonly List<float[]> _stlOriginalVertices;
 
@@ -42,9 +43,10 @@ public partial class DentalAlignmentWindow : Window
     public bool Accepted { get; private set; }
     public double[,]? FinalTransform { get; private set; }
 
-    public DentalAlignmentWindow(List<float[]> ctVertices, List<float[]> stlVertices)
+    public DentalAlignmentWindow(OrthoPlanner.Core.Imaging.VolumeData ctVolume, List<float[]> ctVertices, List<float[]> stlVertices)
     {
         InitializeComponent();
+        _ctVolume = ctVolume;
         _ctVertices = ctVertices;
         _stlVertices = stlVertices;
         _stlOriginalVertices = stlVertices.Select(v => new float[] { v[0], v[1], v[2] }).ToList();
@@ -353,9 +355,9 @@ public partial class DentalAlignmentWindow : Window
             }
             else
             {
-                // Trim out worst 35% of points (aiming for dense 65% overlap)
+                // Trim out worst 30% of points (aiming for dense 70% overlap as requested)
                 result = await Task.Run(() =>
-                    IcpAligner.Align(_stlOriginalVertices, _ctVertices, initialTransform, maxIterations: 150, tolerance: 0.0005, trimRatio: 0.65,
+                    IcpAligner.Align(_stlOriginalVertices, _ctVertices, initialTransform, maxIterations: 150, tolerance: 0.0005, trimRatio: 0.70,
                         progress: p => Dispatcher.Invoke(() => StepInstructions.Text = $"ICP iteration... {p * 100:F0}%")));
             }
 
@@ -374,8 +376,8 @@ public partial class DentalAlignmentWindow : Window
             StlViewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(60, 60, 60), new Vector3D(1, 1, 0.5)) });
             StlViewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(80, 80, 80), new Vector3D(0, 1, 0.5)) });     // Back
 
-            // Dark Blue translucent CT model using new alpha parameter (140 alpha)
-            var ctModel = MeshHelper.BuildModel3D(_ctVertices, 80, 160, 255, 140);
+            // Dark Blue translucent CT model (increased opacity to 180 per request)
+            var ctModel = MeshHelper.BuildModel3D(_ctVertices, 80, 160, 255, 180);
             StlViewport.Children.Add(new ModelVisual3D { Content = ctModel });
 
             // Bright Golden solid STL model (alpha defaults to 255)
@@ -388,6 +390,47 @@ public partial class DentalAlignmentWindow : Window
             StepTitle.Text = "Step 3: Review Alignment";
             StepInstructions.Text = "Review the right viewport! (Blue = CT, Gold = Scan). Pan/Rotate to check accuracy. If good, click Accept.";
             AcceptBtn.Visibility = Visibility.Visible;
+            SkipIcpCheckBox.Visibility = Visibility.Collapsed;
+
+            // ─── Generate 2D Panoramic MPR Overlay ───
+            if (_ctVolume != null && tgtLandmarks.Count >= 3)
+            {
+                try
+                {
+                    // 1. Extract X,Y from landmarks 
+                    var curvePoints = tgtLandmarks.Select(p => (p.Item1, p.Item2)).ToList();
+                    
+                    // 2. Generate smooth Catmull-Rom spline
+                    var denseSpline = OrthoPlanner.Core.Geometry.SplineHelper.ComputeCatmullRom2D(curvePoints, stepsPerSegment: 40);
+                    
+                    // 3. Find average Z height of landmarks as the center of our 50mm MPR band
+                    double zCenter = tgtLandmarks.Average(p => p.Item3);
+
+                    // 4. Build a KdTree of the Aligned STL vertices to check for mesh intersections perfectly
+                    var stlTree = new OrthoPlanner.Core.Geometry.KdTree();
+                    stlTree.Build(previewVerts);
+
+                    // 5. Generate the 2D MPR Image (MIP with Gold STL overlay)
+                    var bgra = _ctVolume.GetPanoramicMIPBgra(denseSpline, zCenter, 400, 2000, stlTree);
+                    
+                    int w = (int)(denseSpline.Count * 0.5);
+                    int h = (int)(50.0 / 0.5); // 50mm height / 0.5mm sample rate
+                    
+                    if (w > 0 && h > 0)
+                    {
+                        var bitmap = new System.Windows.Media.Imaging.WriteableBitmap(w, h, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null);
+                        bitmap.WritePixels(new Int32Rect(0, 0, w, h), bgra, w * 4, 0);
+                        PanoramicImage.Source = bitmap;
+                        
+                        // Expand the panoramic row!
+                        PanoramicRow.Height = new GridLength(200, GridUnitType.Pixel);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Panoramic MPR failed: {ex.Message}");
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -410,6 +453,22 @@ public partial class DentalAlignmentWindow : Window
 
     private void Cancel_Click(object sender, RoutedEventArgs e)
     {
+        // If we are at checkout (Accept button is visible), 'Cancel' means "go back to picking points"
+        if (AcceptBtn.Visibility == Visibility.Visible)
+        {
+            AcceptBtn.Visibility = Visibility.Collapsed;
+            SkipIcpCheckBox.Visibility = Visibility.Visible;
+            PanoramicRow.Height = new GridLength(0); // Hide MPR
+            StlViewport.Children.Clear(); // Clear alignment preview
+            AddStandardLighting(StlViewport);
+            StlViewport.Children.Add(new ModelVisual3D { Content = MeshHelper.BuildModel3D(_stlOriginalVertices, 255, 230, 90) }); // Restore original gold STL
+            
+            StepTitle.Text = "Step 1: Pick Matching Landmarks";
+            StepInstructions.Text = "Adjust landmarks or right-click to remove. Then click Compute Alignment when ready.";
+            return;
+        }
+
+        // If we are already at the picking screen, 'Cancel' closes the window.
         Accepted = false;
         DialogResult = false;
         Close();

@@ -20,58 +20,78 @@
         </StackPanel>
 
         <!-- Dual viewports -->
-        <Grid Grid.Row="1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="6"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
+        <!-- Main Layout: 3D Viewers (Top) + Panoramic 2D MPR (Bottom) -->
+        <Grid Grid.Row="1" Margin="0,12,0,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/> <!-- Top 3D Viewers -->
+                <RowDefinition Height="Auto"/> <!-- Splitter -->
+                <RowDefinition Height="0" x:Name="PanoramicRow"/> <!-- Bottom 2D Viewer -->
+            </Grid.RowDefinitions>
+            
+            <Grid Grid.Row="0" x:Name="ViewersContainer">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
 
-            <!-- CT dental model -->
-            <Border Grid.Column="0" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4">
+                <!-- CT dental model -->
+                <Border Grid.Column="0" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4">
+                    <Grid>
+                        <helix:HelixViewport3D x:Name="CtViewport" Background="#FF0E1420"
+                                               ShowCoordinateSystem="True" CoordinateSystemLabelForeground="White"
+                                               ZoomExtentsWhenLoaded="True" IsHeadLightEnabled="True"
+                                               CameraRotationMode="Turnball" ModelUpDirection="0,0,1"
+                                               ShowViewCube="False"
+                                               PreviewMouseLeftButtonDown="CtViewport_PreviewMouseLeftButtonDown"
+                                               PreviewMouseRightButtonDown="CtViewport_PreviewMouseRightButtonDown">
+                            <helix:HelixViewport3D.Camera>
+                                <PerspectiveCamera Position="0,-300,0" LookDirection="0,1,0"
+                                                   UpDirection="0,0,1" FieldOfView="45"/>
+                            </helix:HelixViewport3D.Camera>
+                        </helix:HelixViewport3D>
+                        <TextBlock Text="🦴 CT Dental Surface" FontSize="11" Foreground="#88FFFFFF"
+                                   HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6"/>
+                        <TextBlock Text="Left-click = add | Right-click near marker = remove" FontSize="9" Foreground="#44FFFFFF"
+                                   HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,4"/>
+                    </Grid>
+                </Border>
+
+                <!-- Separator -->
+                <GridSplitter Grid.Column="1" Width="6" Background="Transparent"
+                              HorizontalAlignment="Center" VerticalAlignment="Stretch"/>
+
+                <!-- STL scan -->
+                <Border Grid.Column="2" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4">
+                    <Grid>
+                        <helix:HelixViewport3D x:Name="StlViewport" Background="#FF0E1420"
+                                               ShowCoordinateSystem="True" CoordinateSystemLabelForeground="White"
+                                               ZoomExtentsWhenLoaded="True" IsHeadLightEnabled="True"
+                                               CameraRotationMode="Turnball" ModelUpDirection="0,0,1"
+                                               ShowViewCube="False"
+                                               PreviewMouseLeftButtonDown="StlViewport_PreviewMouseLeftButtonDown"
+                                               PreviewMouseRightButtonDown="StlViewport_PreviewMouseRightButtonDown">
+                            <helix:HelixViewport3D.Camera>
+                                <PerspectiveCamera Position="0,-300,0" LookDirection="0,1,0"
+                                                   UpDirection="0,0,1" FieldOfView="45"/>
+                            </helix:HelixViewport3D.Camera>
+                        </helix:HelixViewport3D>
+                        <TextBlock Text="🦷 Dental STL Scan" FontSize="11" Foreground="#88FFFFFF"
+                                   HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6"/>
+                        <TextBlock Text="Left-click = add | Right-click near marker = remove" FontSize="9" Foreground="#44FFFFFF"
+                                   HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,4"/>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- Panoramic Expansion -->
+            <GridSplitter Grid.Row="1" Height="6" Background="Transparent"
+                          HorizontalAlignment="Stretch" VerticalAlignment="Center" />
+            
+            <Border Grid.Row="2" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4" Background="#FF0B1014" ClipToBounds="True">
                 <Grid>
-                    <helix:HelixViewport3D x:Name="CtViewport" Background="#FF0E1420"
-                                           ShowCoordinateSystem="True" CoordinateSystemLabelForeground="White"
-                                           ZoomExtentsWhenLoaded="True" IsHeadLightEnabled="True"
-                                           CameraRotationMode="Turnball" ModelUpDirection="0,0,1"
-                                           ShowViewCube="False"
-                                           PreviewMouseLeftButtonDown="CtViewport_PreviewMouseLeftButtonDown"
-                                           PreviewMouseRightButtonDown="CtViewport_PreviewMouseRightButtonDown">
-                        <helix:HelixViewport3D.Camera>
-                            <PerspectiveCamera Position="0,-300,0" LookDirection="0,1,0"
-                                               UpDirection="0,0,1" FieldOfView="45"/>
-                        </helix:HelixViewport3D.Camera>
-                    </helix:HelixViewport3D>
-                    <TextBlock Text="🦴 CT Dental Surface" FontSize="11" Foreground="#88FFFFFF"
-                               HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6"/>
-                    <TextBlock Text="Left-click = add | Right-click near marker = remove" FontSize="9" Foreground="#44FFFFFF"
-                               HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,4"/>
-                </Grid>
-            </Border>
-
-            <!-- Separator -->
-            <GridSplitter Grid.Column="1" Width="6" Background="Transparent"
-                          HorizontalAlignment="Center" VerticalAlignment="Stretch"/>
-
-            <!-- STL scan -->
-            <Border Grid.Column="2" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4">
-                <Grid>
-                    <helix:HelixViewport3D x:Name="StlViewport" Background="#FF0E1420"
-                                           ShowCoordinateSystem="True" CoordinateSystemLabelForeground="White"
-                                           ZoomExtentsWhenLoaded="True" IsHeadLightEnabled="True"
-                                           CameraRotationMode="Turnball" ModelUpDirection="0,0,1"
-                                           ShowViewCube="False"
-                                           PreviewMouseLeftButtonDown="StlViewport_PreviewMouseLeftButtonDown"
-                                           PreviewMouseRightButtonDown="StlViewport_PreviewMouseRightButtonDown">
-                        <helix:HelixViewport3D.Camera>
-                            <PerspectiveCamera Position="0,-300,0" LookDirection="0,1,0"
-                                               UpDirection="0,0,1" FieldOfView="45"/>
-                        </helix:HelixViewport3D.Camera>
-                    </helix:HelixViewport3D>
-                    <TextBlock Text="🦷 Dental STL Scan" FontSize="11" Foreground="#88FFFFFF"
-                               HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6"/>
-                    <TextBlock Text="Left-click = add | Right-click near marker = remove" FontSize="9" Foreground="#44FFFFFF"
-                               HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,4"/>
+                    <Image x:Name="PanoramicImage" Stretch="Uniform" RenderOptions.BitmapScalingMode="Fant"/>
+                    <TextBlock Text="2D Panoramic Reslice Overlay" FontSize="10" Foreground="#88FFFFFF" Margin="8,6" VerticalAlignment="Top" HorizontalAlignment="Left" />
                 </Grid>
             </Border>
         </Grid>

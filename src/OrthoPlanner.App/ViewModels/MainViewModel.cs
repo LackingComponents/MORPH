@@ -1331,7 +1331,7 @@ public partial class MainViewModel : ObservableObject
 
             StatusText = $"Aligning {scan.Name}...";
 
-            var wizard = new DentalAlignmentWindow(ctSegment.Vertices, scan.Vertices);
+            var wizard = new DentalAlignmentWindow(Volume, ctSegment.Vertices, scan.Vertices);
             wizard.Owner = System.Windows.Application.Current.MainWindow;
             wizard.Title = $"Align: {scan.Name}";
 
