@@ -339,6 +339,11 @@ public partial class DentalAlignmentWindow : Window
             // ──Vivid Visualization ── 
             StlViewport.Children.Clear();
             AddStandardLighting(StlViewport);
+            
+            // Add extra bright 3-point lighting specifically for the review pane so it pops!
+            StlViewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(200, 200, 200), new Vector3D(-1, -1, -1)) }); // Key
+            StlViewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(130, 130, 130), new Vector3D(1, -0.5, 0)) });  // Fill
+            StlViewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(80, 80, 80), new Vector3D(0, 1, 0.5)) });     // Back
 
             // Dark Blue translucent CT model using new alpha parameter (140 alpha)
             var ctModel = MeshHelper.BuildModel3D(_ctVertices, 80, 160, 255, 140);

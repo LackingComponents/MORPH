@@ -82,9 +82,16 @@ public static class IcpAligner
                 distances[i] = (i, distSq, ptx, pty, ptz);
             }
 
-            // TRIMMED ICP: Sort by distance and keep only the closest trimRatio fraction
+            // DYNAMIC TRIMMING: Start with 100% of points, linearly decrease to trimRatio over first 40 iterations
+            double currentTrimRatio = trimRatio;
+            if (iter < 40)
+            {
+                double t = iter / 40.0;
+                currentTrimRatio = 1.0 * (1.0 - t) + trimRatio * t;
+            }
+
             Array.Sort(distances, (a, b) => a.distSq.CompareTo(b.distSq));
-            int nKeep = Math.Max(10, (int)(nSrc * trimRatio));
+            int nKeep = Math.Max(10, (int)(nSrc * currentTrimRatio));
 
             // Build trimmed correspondence arrays
             var trimSrc = new double[nKeep, 3];
@@ -105,8 +112,8 @@ public static class IcpAligner
 
             double rms = Math.Sqrt(sumDistSq / nKeep);
 
-            // Convergence check
-            if (Math.Abs(prevRms - rms) < tolerance)
+            // Convergence check: require at least 20 iterations to avoid getting trapped in early local minima during dynamic trimming
+            if (iter > 20 && Math.Abs(prevRms - rms) < tolerance)
             {
                 prevRms = rms;
                 iter++;
