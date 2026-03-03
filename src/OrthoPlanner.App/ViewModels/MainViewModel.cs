@@ -298,16 +298,16 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _enhanceSegmentation = true;
 
     // ─── Environment Lighting ───
-    [ObservableProperty] private byte _frontLightIntensity = 95;
+    [ObservableProperty] private byte _frontLightIntensity = 0;
     partial void OnFrontLightIntensityChanged(byte value) => RefreshCombinedModel();
 
     [ObservableProperty] private double _frontLightZ = 0.0; // Straight frontal
     partial void OnFrontLightZChanged(double value) => RefreshCombinedModel();
 
-    [ObservableProperty] private byte _bottomLightIntensity = 90;
+    [ObservableProperty] private byte _bottomLightIntensity = 0;
     partial void OnBottomLightIntensityChanged(byte value) => RefreshCombinedModel();
 
-    [ObservableProperty] private byte _leftRightLightIntensity = 8;
+    [ObservableProperty] private byte _leftRightLightIntensity = 0;
     partial void OnLeftRightLightIntensityChanged(byte value) => RefreshCombinedModel();
 
     [ObservableProperty] private byte _backLightIntensity = 0;
@@ -1363,8 +1363,8 @@ public partial class MainViewModel : ObservableObject
     {
         var group = new Model3DGroup();
 
-        // Moderate ambient light to set a baseline (prevents pitch black shadows)
-        group.Children.Add(new AmbientLight(Color.FromRgb(100, 100, 105)));
+        // Very low ambient light to barely prevent pitch black shadows, letting Headlamp do the work
+        group.Children.Add(new AmbientLight(Color.FromRgb(30, 30, 35)));
         
         // Strong key light directly from the front (patient faces Y = -1, so light shines towards +Y)
         group.Children.Add(new DirectionalLight(Color.FromRgb(FrontLightIntensity, FrontLightIntensity, FrontLightIntensity), new Vector3D(0, 1, FrontLightZ)));
