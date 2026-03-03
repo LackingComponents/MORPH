@@ -724,9 +724,11 @@ public partial class MainWindow : Window
                 var centroid = VM.ModelCenter;
 
                 // Obtain the true spatial bounding box of only the dicom mesh, modified by NHP.
+                // We use BoneOnlyBounds so the camera doesn't zoom out miles away when a dental scan is loaded off-center!
+                var boneBounds = VM.BoneOnlyBounds.IsEmpty ? VM.BoneModel.Bounds : VM.BoneOnlyBounds;
                 var worldBounds = VM.BoneModel.Transform != null 
-                    ? VM.BoneModel.Transform.TransformBounds(VM.BoneModel.Bounds) 
-                    : VM.BoneModel.Bounds;
+                    ? VM.BoneModel.Transform.TransformBounds(boneBounds) 
+                    : boneBounds;
 
                 // Animate the camera angle mathematically based on the clicked Cube face.
                 HelixToolkit.Wpf.CameraHelper.ChangeDirection(cam, lookDirection, new Vector3D(0, 0, 1), 500);
@@ -752,9 +754,10 @@ public partial class MainWindow : Window
         // 1. Refocus the camera keeping exactly its current LookDirection
         if (VM != null && VM.BoneModel != null && !VM.BoneModel.Bounds.IsEmpty)
         {
+            var boneBounds = VM.BoneOnlyBounds.IsEmpty ? VM.BoneModel.Bounds : VM.BoneOnlyBounds;
             var worldBounds = VM.BoneModel.Transform != null 
-                ? VM.BoneModel.Transform.TransformBounds(VM.BoneModel.Bounds) 
-                : VM.BoneModel.Bounds;
+                ? VM.BoneModel.Transform.TransformBounds(boneBounds) 
+                : boneBounds;
             
             // Keep the exact same look direction and up direction.
             // ZoomExtents alone will natively purge the panning offsets by snapping the Position to the bounds!
@@ -775,9 +778,10 @@ public partial class MainWindow : Window
     {
         if (VM != null && VM.BoneModel != null && !VM.BoneModel.Bounds.IsEmpty)
         {
+            var boneBounds = VM.BoneOnlyBounds.IsEmpty ? VM.BoneModel.Bounds : VM.BoneOnlyBounds;
             var worldBounds = VM.BoneModel.Transform != null 
-                ? VM.BoneModel.Transform.TransformBounds(VM.BoneModel.Bounds) 
-                : VM.BoneModel.Bounds;
+                ? VM.BoneModel.Transform.TransformBounds(boneBounds) 
+                : boneBounds;
             
             // Vector pointing from -Y to +Y is Anterior view.
             var anteriorLookDirection = new Vector3D(0, 1, 0);
@@ -800,9 +804,10 @@ public partial class MainWindow : Window
     {
         if (VM != null && VM.BoneModel != null && !VM.BoneModel.Bounds.IsEmpty)
         {
+            var boneBounds = VM.BoneOnlyBounds.IsEmpty ? VM.BoneModel.Bounds : VM.BoneOnlyBounds;
             var worldBounds = VM.BoneModel.Transform != null 
-                ? VM.BoneModel.Transform.TransformBounds(VM.BoneModel.Bounds) 
-                : VM.BoneModel.Bounds;
+                ? VM.BoneModel.Transform.TransformBounds(boneBounds) 
+                : boneBounds;
             
             // Looking towards the Right Profile (1, 0, 0)
             var rightProfileLookDirection = new Vector3D(1, 0, 0);

@@ -71,10 +71,10 @@ public partial class DentalAlignmentWindow : Window
 
     private void AddStandardLighting(HelixViewport3D viewport)
     {
-        // Add strong lighting so models don't look dark and flat
-        viewport.Children.Add(new ModelVisual3D { Content = new AmbientLight(Color.FromRgb(60, 60, 65)) });
-        viewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Colors.White, new Vector3D(0, 1, -0.5)) });
-        viewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(100, 100, 100), new Vector3D(0, 0, 1)) });
+        // Add softer, diffused lighting to prevent blowing out the dental geometries
+        viewport.Children.Add(new ModelVisual3D { Content = new AmbientLight(Color.FromRgb(90, 90, 95)) });
+        viewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(150, 150, 150), new Vector3D(0, 1, -0.5)) });
+        viewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(60, 60, 60), new Vector3D(0, 0, 1)) });
     }
 
     // ═══ Left-Click Add ═══
@@ -337,22 +337,14 @@ public partial class DentalAlignmentWindow : Window
             IcpAligner.TransformVertices(previewVerts, result.Transform);
 
             // ──Vivid Visualization ── 
-            // We clear the right viewport and render BOTH the CT and the aligned STL together.
-            // CT = Blueish translucent, STL = Golden solid, brightly lit.
             StlViewport.Children.Clear();
             AddStandardLighting(StlViewport);
 
-            // Dark Blue translucent CT model
-            var ctModel = MeshHelper.BuildModel3D(_ctVertices, 80, 160, 255);
-            if (ctModel.Material is DiffuseMaterial diff)
-            {
-                var brush = new SolidColorBrush(Color.FromArgb(140, 80, 160, 255)); // Semi-transparent
-                ctModel.Material = new DiffuseMaterial(brush);
-                ctModel.BackMaterial = new DiffuseMaterial(brush);
-            }
+            // Dark Blue translucent CT model using new alpha parameter (140 alpha)
+            var ctModel = MeshHelper.BuildModel3D(_ctVertices, 80, 160, 255, 140);
             StlViewport.Children.Add(new ModelVisual3D { Content = ctModel });
 
-            // Bright Golden solid STL model
+            // Bright Golden solid STL model (alpha defaults to 255)
             var alignedModel = MeshHelper.BuildModel3D(previewVerts, 255, 230, 90);
             StlViewport.Children.Add(new ModelVisual3D { Content = alignedModel });
 

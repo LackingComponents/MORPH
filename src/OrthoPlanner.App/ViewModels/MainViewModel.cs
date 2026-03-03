@@ -173,7 +173,7 @@ public partial class MainViewModel : ObservableObject
 
     // ─── NHP Committed State (Baseline) ───
     private double _cLat, _cAnt, _cVert, _cRoll, _cPitch, _cYaw;
-    private Rect3D _boneOnlyBounds = Rect3D.Empty; // Bone segment bounds only, excludes imported STL meshes
+    public Rect3D BoneOnlyBounds { get; private set; } = Rect3D.Empty; // Bone segment bounds only, excludes imported STL meshes
 
     public bool IsNhpDirty => Math.Abs(NhpLateral - _cLat) > 0.01 || 
                               Math.Abs(NhpAnteroposterior - _cAnt) > 0.01 ||
@@ -218,7 +218,7 @@ public partial class MainViewModel : ObservableObject
         if (BoneModel == null) return;
 
         // Use bone-only bounds for camera centering (ignore imported STL meshes)
-        var bounds = _boneOnlyBounds.IsEmpty ? BoneModel.Bounds : _boneOnlyBounds;
+        var bounds = BoneOnlyBounds.IsEmpty ? BoneModel.Bounds : BoneOnlyBounds;
         if (bounds.IsEmpty) return;
         var center = new Point3D(bounds.X + bounds.SizeX/2, bounds.Y + bounds.SizeY/2, bounds.Z + bounds.SizeZ/2);
 
@@ -1457,13 +1457,14 @@ public partial class MainViewModel : ObservableObject
         group.Children.Add(new DirectionalLight(Color.FromRgb(BackLightIntensity, BackLightIntensity, BackLightIntensity), new Vector3D(0, -1, 0)));
 
         // Track bone-only bounds for camera centering (segments only, NOT imported meshes)
-        _boneOnlyBounds = Rect3D.Empty;
+        BoneOnlyBounds = Rect3D.Empty;
 
         // Add segment models
         foreach (var seg in Segments.Where(s => s.IsVisible && s.Model3D != null))
         {
             group.Children.Add(seg.Model3D!);
-            _boneOnlyBounds.Union(seg.Model3D!.Bounds);
+            if (BoneOnlyBounds.IsEmpty) BoneOnlyBounds = seg.Model3D!.Bounds;
+            else BoneOnlyBounds.Union(seg.Model3D!.Bounds);
         }
 
         // Add imported meshes (these should NOT affect the camera center)
@@ -1711,7 +1712,7 @@ public partial class MeshViewModel : ObservableObject
 
 public static class MeshHelper
 {
-    public static GeometryModel3D BuildModel3D(List<float[]> vertices, byte r, byte g, byte b)
+    public static GeometryModel3D BuildModel3D(List<float[]> vertices, byte r, byte g, byte b, byte a = 255)
     {
         var mesh = new MeshGeometry3D();
         var positions = new Point3DCollection(vertices.Count);
@@ -1741,13 +1742,13 @@ public static class MeshHelper
 
         mesh.Freeze();
 
-        // Solid opaque material — no specular to avoid translucent appearance
-        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
+        // Solid or translucent material based on alpha
+        var brush = new SolidColorBrush(Color.FromArgb(a, r, g, b));
         brush.Freeze();
         var material = new DiffuseMaterial(brush);
         material.Freeze();
 
-        var backBrush = new SolidColorBrush(Color.FromRgb((byte)(r * 0.8), (byte)(g * 0.8), (byte)(b * 0.8)));
+        var backBrush = new SolidColorBrush(Color.FromArgb(a, (byte)(r * 0.8), (byte)(g * 0.8), (byte)(b * 0.8)));
         backBrush.Freeze();
         var backMaterial = new DiffuseMaterial(backBrush);
         backMaterial.Freeze();
