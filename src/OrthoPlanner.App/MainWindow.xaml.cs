@@ -755,13 +755,17 @@ public partial class MainWindow : Window
             Viewport3D.CameraController.ResetCamera();
         }
 
-        // 2. Refocus the camera completely onto the active bounds
+        // 2. Refocus the camera completely onto the active bounds and force it to the Anterior View!
         if (VM != null && VM.BoneModel != null && !VM.BoneModel.Bounds.IsEmpty)
         {
             var worldBounds = VM.BoneModel.Transform != null 
                 ? VM.BoneModel.Transform.TransformBounds(VM.BoneModel.Bounds) 
                 : VM.BoneModel.Bounds;
             
+            // Vector pointing from -Y to +Y is Anterior view.
+            var anteriorLookDirection = new Vector3D(0, 1, 0);
+            HelixToolkit.Wpf.CameraHelper.ChangeDirection(Viewport3D.Camera, anteriorLookDirection, new Vector3D(0, 0, 1), 500);
+
             Viewport3D.ZoomExtents(worldBounds, 500);
             
             if (Viewport3D.CameraController != null)

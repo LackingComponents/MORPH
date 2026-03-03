@@ -4,6 +4,7 @@
         xmlns:helix="http://helix-toolkit.org/wpf"
         xmlns:vm="clr-namespace:OrthoPlanner.App.ViewModels"
         xmlns:ctrl="clr-namespace:OrthoPlanner.App.Controls"
+        xmlns:v="clr-namespace:OrthoPlanner.App.Views"
         Title="OrthoPlanner — Orthognathic Surgery Planning"
         WindowState="Maximized"
         PreviewKeyDown="Window_PreviewKeyDown"
@@ -440,12 +441,12 @@
                         </Expander>
 
                         <!-- 3. PHOTOGRAMMETRY -->
-                        <Expander Header="📷  Photogrammetry" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                        <Expander Header="📷  Photogrammetry" IsExpanded="{Binding IsPhotogrammetryOpen, Mode=TwoWay}" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
                                   Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
                             <StackPanel Margin="4,6,4,4">
                                 <TextBlock Text="Import and align facial photographs for soft tissue analysis."
                                            TextWrapping="Wrap" FontSize="10" FontWeight="Normal"
-                                           Foreground="{StaticResource TextSecondaryBrush}" />
+                                           Foreground="{StaticResource TextSecondaryBrush}"/>
                             </StackPanel>
                         </Expander>
 
@@ -570,6 +571,7 @@
                                            ModelUpDirection="0,0,1"
                                            ShowViewCube="True"
                                            IsViewCubeEdgeClicksEnabled="True"
+                                           IsHeadLightEnabled="True"
                                            ViewCubeBackText="L" ViewCubeFrontText="R"
                                            ViewCubeLeftText="P" ViewCubeRightText="A"
                                            ViewCubeTopText="S" ViewCubeBottomText="I">
@@ -712,6 +714,13 @@
                 <!-- Windowing Controls (Removed to save space per user request) -->
 
             </Grid>
+            
+            <!-- ═══ FULLSCREEN PHOTOGRAMMETRY OVERLAY ═══ -->
+            <Border Grid.Column="2" Grid.ColumnSpan="3" Background="#E50C1018"
+                    Visibility="{Binding IsPhotogrammetryOpen, Converter={StaticResource BoolToVisibility}}"
+                    Margin="-4,0,0,0">
+                <v:PhotogrammetryView DataContext="{Binding PhotogrammetrySpace}" />
+            </Border>
         </Grid>
 
         <!-- ═══ STATUS BAR ═══ -->

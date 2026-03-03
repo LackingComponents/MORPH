@@ -11,6 +11,7 @@ using HelixToolkit.Wpf;
 using OrthoPlanner.Core.Imaging;
 using OrthoPlanner.Core.Geometry;
 using OrthoPlanner.Core.Segmentation;
+using OrthoPlanner.App.ViewModels.Photogrammetry;
 
 namespace OrthoPlanner.App.ViewModels;
 
@@ -18,6 +19,22 @@ public partial class MainViewModel : ObservableObject
 {
     public MainViewModel()
     {
+    }
+
+    // ─── Photogrammetry ───
+    public PhotogrammetryViewModel PhotogrammetrySpace { get; } = new();
+    [ObservableProperty] private bool _isPhotogrammetryOpen;
+
+    [RelayCommand]
+    private void OpenPhotogrammetry()
+    {
+        IsPhotogrammetryOpen = true;
+    }
+
+    [RelayCommand]
+    private void ClosePhotogrammetry()
+    {
+        IsPhotogrammetryOpen = false;
     }
 
     // ─── Volume State ───
