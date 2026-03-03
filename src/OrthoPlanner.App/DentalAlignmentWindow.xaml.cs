@@ -71,10 +71,10 @@ public partial class DentalAlignmentWindow : Window
 
     private void AddStandardLighting(HelixViewport3D viewport)
     {
-        // Add softer, diffused lighting to prevent blowing out the dental geometries
-        viewport.Children.Add(new ModelVisual3D { Content = new AmbientLight(Color.FromRgb(90, 90, 95)) });
-        viewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(150, 150, 150), new Vector3D(0, 1, -0.5)) });
-        viewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(60, 60, 60), new Vector3D(0, 0, 1)) });
+        // Mimic MainViewModel lighting exactly: 
+        // Very low ambient light to barely prevent pitch black shadows, letting Headlamp do the work
+        viewport.Children.Add(new ModelVisual3D { Content = new AmbientLight(Color.FromRgb(30, 30, 35)) });
+        // (The HelixViewport3D has IsHeadLightEnabled="True" in XAML, exactly like the Main viewport)
     }
 
     // ═══ Left-Click Add ═══
@@ -326,9 +326,9 @@ public partial class DentalAlignmentWindow : Window
 
             var initialTransform = IcpAligner.ComputeLandmarkTransform(srcLandmarks, tgtLandmarks);
 
-            // Trim out worst 40% of points to ensure convergence over only matching teeth
+            // Trim out worst 75% of points to ensure convergence over only matching teeth
             var result = await Task.Run(() =>
-                IcpAligner.Align(_stlOriginalVertices, _ctVertices, initialTransform, maxIterations: 80, tolerance: 0.001, trimRatio: 0.60,
+                IcpAligner.Align(_stlOriginalVertices, _ctVertices, initialTransform, maxIterations: 150, tolerance: 0.0005, trimRatio: 0.25,
                     progress: p => Dispatcher.Invoke(() => StepInstructions.Text = $"ICP iteration... {p * 100:F0}%")));
 
             FinalTransform = result.Transform;
