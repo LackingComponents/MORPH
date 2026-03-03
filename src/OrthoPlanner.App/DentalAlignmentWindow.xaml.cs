@@ -324,6 +324,25 @@ public partial class DentalAlignmentWindow : Window
                 }
             }
 
+            // --- Pre-ICP Validation: Ensure points are not clustered too closely together ---
+            if (srcLandmarks.Count >= 3)
+            {
+                double srcMaxDist = GetMaxDistanceBetweenPoints(srcLandmarks);
+                double tgtMaxDist = GetMaxDistanceBetweenPoints(tgtLandmarks);
+
+                if (srcMaxDist < 15.0 || tgtMaxDist < 15.0)
+                {
+                    MessageBox.Show("The landmarks you selected are completely clustered in one area of the mouth. " +
+                        "This will cause the initial gross alignment rotation to fail wildly.\n\n" +
+                        "Please place landmarks that span across the dental arch (e.g., Left Molar, Right Molar, Incisors) " +
+                        "to provide a stable 3D rotation basis.", "Unstable Landmarks Detected", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    
+                    StepTitle.Text = "Step 1: Pick Matching Landmarks";
+                    StepInstructions.Text = "Spread points across the dental arch before aligning.";
+                    return;
+                }
+            }
+
             var initialTransform = IcpAligner.ComputeLandmarkTransform(srcLandmarks, tgtLandmarks);
 
             // Trim out worst 75% of points to ensure convergence over only matching teeth
@@ -341,8 +360,8 @@ public partial class DentalAlignmentWindow : Window
             AddStandardLighting(StlViewport);
             
             // Add extra bright 3-point lighting specifically for the review pane so it pops!
-            StlViewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(200, 200, 200), new Vector3D(-1, -1, -1)) }); // Key
-            StlViewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(130, 130, 130), new Vector3D(1, -0.5, 0)) });  // Fill
+            // Wait, to completely KILL shadows, we just use a massive pure white AmbientLight instead of directional.
+            StlViewport.Children.Add(new ModelVisual3D { Content = new AmbientLight(Color.FromRgb(255, 255, 255)) });
             StlViewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(80, 80, 80), new Vector3D(0, 1, 0.5)) });     // Back
 
             // Dark Blue translucent CT model using new alpha parameter (140 alpha)
@@ -384,5 +403,24 @@ public partial class DentalAlignmentWindow : Window
         Accepted = false;
         DialogResult = false;
         Close();
+    }
+
+    private double GetMaxDistanceBetweenPoints(List<(double X, double Y, double Z)> points)
+    {
+        double maxDistSq = 0;
+        for (int i = 0; i < points.Count; i++)
+        {
+            for (int j = i + 1; j < points.Count; j++)
+            {
+                var p1 = points[i];
+                var p2 = points[j];
+                double dx = p1.X - p2.X;
+                double dy = p1.Y - p2.Y;
+                double dz = p1.Z - p2.Z;
+                double distSq = dx * dx + dy * dy + dz * dz;
+                if (distSq > maxDistSq) maxDistSq = distSq;
+            }
+        }
+        return Math.Sqrt(maxDistSq);
     }
 }
