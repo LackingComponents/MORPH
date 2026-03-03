@@ -233,7 +233,7 @@ public static class IcpAligner
         }
 
         // SVD of H = U * S * V^T using Jacobi rotations on H^T*H
-        SVD3x3(H, out double[,] U, out double[,] Vt);
+        SVD3x3(H, out double[,] U, out double[,] V);
 
         // R = V * U^T
         var R = new double[3, 3];
@@ -242,7 +242,7 @@ public static class IcpAligner
             {
                 double sum = 0;
                 for (int k = 0; k < 3; k++)
-                    sum += Vt[k, i] * U[k, j]; // V * U^T
+                    sum += V[i, k] * U[j, k]; // V * U^T
                 R[i, j] = sum;
             }
 
@@ -252,14 +252,14 @@ public static class IcpAligner
                    + R[0, 2] * (R[1, 0] * R[2, 1] - R[1, 1] * R[2, 0]);
         if (det < 0)
         {
-            // Flip the column of Vt corresponding to the smallest singular value
-            for (int i = 0; i < 3; i++) Vt[i, 2] = -Vt[i, 2];
+            // Flip the column of V corresponding to the smallest singular value
+            for (int i = 0; i < 3; i++) V[i, 2] = -V[i, 2];
             for (int i = 0; i < 3; i++)
                 for (int j = 0; j < 3; j++)
                 {
                     double sum = 0;
                     for (int k = 0; k < 3; k++)
-                        sum += Vt[k, i] * U[k, j];
+                        sum += V[i, k] * U[j, k];
                     R[i, j] = sum;
                 }
         }
@@ -283,7 +283,7 @@ public static class IcpAligner
     /// <summary>
     /// Minimalist 3x3 SVD via Jacobi eigenvalue decomposition of H^T*H.
     /// </summary>
-    private static void SVD3x3(double[,] H, out double[,] U, out double[,] Vt)
+    private static void SVD3x3(double[,] H, out double[,] U, out double[,] VOut)
     {
         // Compute H^T * H
         var HtH = new double[3, 3];
@@ -335,7 +335,7 @@ public static class IcpAligner
 
         // eigenvalues are diagonal of A, singular values are sqrt
         // V columns are eigenvectors of H^T*H = right singular vectors
-        Vt = V;
+        VOut = V;
 
         // U = H * V * S^{-1}
         U = new double[3, 3];
