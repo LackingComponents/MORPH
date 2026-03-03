@@ -75,9 +75,9 @@ public static class IcpAligner
             tgtDistances[i] = (p, distSq);
         }
 
-        // Sort and completely discard the furthest 75% of the CT mesh (cranium, spine, etc.)
+        // Sort and completely discard the furthest 90% of the CT mesh (cranium, spine, etc.)
         Array.Sort(tgtDistances, (a, b) => a.distSq.CompareTo(b.distSq));
-        int keepTgt = Math.Max(10, (int)(targetVerts.Count * 0.25));
+        int keepTgt = Math.Max(10, (int)(targetVerts.Count * 0.10));
         var croppedTarget = new List<float[]>(keepTgt);
         for (int i = 0; i < keepTgt; i++) croppedTarget.Add(tgtDistances[i].pt);
 

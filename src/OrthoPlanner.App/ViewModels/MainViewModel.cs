@@ -297,6 +297,7 @@ public partial class MainViewModel : ObservableObject
     }
 
     [ObservableProperty] private bool _enhanceSegmentation = true;
+    [ObservableProperty] private bool _cleanDentalSegmentation = true;
 
     // ─── Environment Lighting ───
     [ObservableProperty] private byte _frontLightIntensity = 0;
@@ -928,7 +929,7 @@ public partial class MainViewModel : ObservableObject
 
     [RelayCommand]
     private async Task RunDentalSegmentAsync() => 
-        await RunSegmentInternalAsync("Dental Model", DentalMinHU, DentalMaxHU, 245, 245, 230, DentalModel, applyNoiseRemoval: false);
+        await RunSegmentInternalAsync("Dental Model", DentalMinHU, DentalMaxHU, 245, 245, 230, DentalModel, applyNoiseRemoval: false, cleanDental: CleanDentalSegmentation);
 
     [RelayCommand]
     private async Task RunCustomSegmentAsync() => 
@@ -939,7 +940,9 @@ public partial class MainViewModel : ObservableObject
         byte r, byte g, byte b, 
         SegmentViewModel? modelToOverwrite, 
         bool applyNoiseRemoval = true,
-        bool enhanceThinBone = false)
+        bool enhanceThinBone = false,
+        int morphologyIterations = 1,
+        bool cleanDental = false)
     {
         if (Volume == null || IsLoading) return;
 
@@ -988,12 +991,8 @@ public partial class MainViewModel : ObservableObject
             await Task.Run(() =>
                 SegmentationEngine.RemoveSmallComponents(_segVolume, label, 50, 
                     p => Application.Current.Dispatcher.Invoke(() => LoadProgress = 20 + p * 10)));
+            morphologyIterations = 2;
         }
-
-        // --- NEW: Morphology Pass ---
-        StatusText = "Closing structural holes (Morphology)...";
-        LoadProgress = 30;
-        int morphologyIterations = enhanceThinBone ? 2 : 1;
         
         await Task.Run(() =>
             SegmentationEngine.MorphologicalClosing(_segVolume, label, morphologyIterations, 
@@ -1008,12 +1007,23 @@ public partial class MainViewModel : ObservableObject
                     p => Application.Current.Dispatcher.Invoke(() => LoadProgress = 40 + p * 10)));
             
             count = _segVolume.CountVoxels(label); // update count after noise removal
-            if (count == 0)
-            {
-                StatusText = $"Model disappeared after noise removal. Try a lower lower threshold.";
-                IsLoading = false;
-                return;
-            }
+        }
+        else if (cleanDental)
+        {
+            StatusText = "Removing 70% of smaller objects (keeping top 30%)...";
+            LoadProgress = 40;
+            await Task.Run(() =>
+                SegmentationEngine.KeepTopPercentageComponents(_segVolume, label, 0.30,
+                    p => Application.Current.Dispatcher.Invoke(() => LoadProgress = 40 + p * 10)));
+            
+            count = _segVolume.CountVoxels(label); // update count after noise removal
+        }
+
+        if (count == 0)
+        {
+            StatusText = $"Model disappeared after noise removal. Try a lower lower threshold.";
+            IsLoading = false;
+            return;
         }
 
         StatusText = "Smoothing mask boundaries...";

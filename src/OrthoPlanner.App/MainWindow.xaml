@@ -320,6 +320,8 @@
                                         </DockPanel>
                                         <CheckBox Content="Preview Overlay" IsChecked="{Binding ShowDentalOverlay}"
                                                   Margin="0,4,0,4" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
+                                        <CheckBox Content="Remove 70% of Smaller Objects" IsChecked="{Binding CleanDentalSegmentation}"
+                                                  Margin="0,0,0,8" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
                                         <Button Content="🔧 Compute Dental Model" Command="{Binding RunDentalSegmentCommand}"
                                                 Margin="0,0,0,6" IsEnabled="{Binding IsVolumeLoaded}" />
                                     </StackPanel>

@@ -615,6 +615,66 @@ public static class SegmentationEngine
     }
 
     /// <summary>
+    /// Identifies all disconnected components and removes the smallest X% of them by count.
+    /// E.g. keeping the largest 30% of components (removing the 70% of smaller objects).
+    /// </summary>
+    public static void KeepTopPercentageComponents(SegmentationVolume segVol, byte label, double keepRatio, Action<double>? progress = null)
+    {
+        int w = segVol.Width, h = segVol.Height, d = segVol.Depth;
+        int totalVoxels = w * h * d;
+        var visited = new bool[totalVoxels];
+        
+        var components = new List<List<int>>();
+
+        int[] n6 = { 1, -1, w, -w, w * h, -w * h }; // 1D offsets for speed
+        var queue = new Queue<int>();
+
+        for (int i = 0; i < totalVoxels; i++)
+        {
+            if (segVol.Labels[i] == label && !visited[i])
+            {
+                var comp = new List<int>();
+                queue.Enqueue(i);
+                visited[i] = true;
+
+                while (queue.Count > 0)
+                {
+                    int curr = queue.Dequeue();
+                    comp.Add(curr);
+
+                    foreach (var offset in n6)
+                    {
+                        int nIdx = curr + offset;
+                        if (nIdx >= 0 && nIdx < totalVoxels && !visited[nIdx] && segVol.Labels[nIdx] == label)
+                        {
+                            visited[nIdx] = true;
+                            queue.Enqueue(nIdx);
+                        }
+                    }
+                }
+                components.Add(comp);
+            }
+        }
+
+        if (components.Count == 0) return;
+
+        // Sort by size descending
+        components.Sort((a, b) => b.Count.CompareTo(a.Count));
+
+        // Keep top ratio
+        int keepCount = Math.Max(1, (int)(components.Count * keepRatio));
+        
+        // Wipe the removed components from the volume
+        for (int i = keepCount; i < components.Count; i++)
+        {
+            foreach (var idx in components[i])
+            {
+                segVol.Labels[idx] = 0;
+            }
+        }
+    }
+
+    /// <summary>
     /// Smooths the binary mask for a specific label using a 3x3x3 majority-vote 
     /// morphological filter. This fills small holes and smooths jagged boundaries.
     /// </summary>

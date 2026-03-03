@@ -345,10 +345,19 @@ public partial class DentalAlignmentWindow : Window
 
             var initialTransform = IcpAligner.ComputeLandmarkTransform(srcLandmarks, tgtLandmarks);
 
-            // Trim out worst 75% of points to ensure convergence over only matching teeth
-            var result = await Task.Run(() =>
-                IcpAligner.Align(_stlOriginalVertices, _ctVertices, initialTransform, maxIterations: 150, tolerance: 0.0005, trimRatio: 0.25,
-                    progress: p => Dispatcher.Invoke(() => StepInstructions.Text = $"ICP iteration... {p * 100:F0}%")));
+            IcpAligner.AlignResult result;
+            if (SkipIcpCheckBox.IsChecked == true)
+            {
+                result = new IcpAligner.AlignResult { Transform = initialTransform, RmsError = 0, Iterations = 0 };
+                StepInstructions.Text = "Skipped ICP. Reviewing manual landmark alignment...";
+            }
+            else
+            {
+                // Trim out worst 35% of points (aiming for dense 65% overlap)
+                result = await Task.Run(() =>
+                    IcpAligner.Align(_stlOriginalVertices, _ctVertices, initialTransform, maxIterations: 150, tolerance: 0.0005, trimRatio: 0.65,
+                        progress: p => Dispatcher.Invoke(() => StepInstructions.Text = $"ICP iteration... {p * 100:F0}%")));
+            }
 
             FinalTransform = result.Transform;
 
