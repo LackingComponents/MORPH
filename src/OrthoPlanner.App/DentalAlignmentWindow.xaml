@@ -16,7 +16,7 @@
         <StackPanel Grid.Row="0" Margin="0,0,0,8">
             <TextBlock x:Name="StepTitle" Text="Step 1: Pick Matching Landmarks" FontSize="16" FontWeight="Bold" Foreground="White"/>
             <TextBlock x:Name="StepInstructions" FontSize="11" Foreground="#AAB" TextWrapping="Wrap" Margin="0,4,0,0"
-                       Text="Right-click on the surface to place landmarks. Pick the same cusp/tooth on the CT (left) and on the STL scan (right). Points are numbered for correspondence — place them in the same order on both sides."/>
+                       Text="Left-click on the surface to place landmarks (numbered in order). Right-click near an existing landmark to delete it. Place the same points on both sides in the same order."/>
         </StackPanel>
 
         <!-- Dual viewports -->
@@ -30,21 +30,22 @@
             <!-- CT dental model -->
             <Border Grid.Column="0" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4">
                 <Grid>
-                    <helix:HelixViewport3D x:Name="CtViewport" Background="#FF0C1018"
+                    <helix:HelixViewport3D x:Name="CtViewport" Background="#FF0E1420"
                                            ShowCoordinateSystem="True" CoordinateSystemLabelForeground="White"
                                            ZoomExtentsWhenLoaded="True" IsHeadLightEnabled="True"
                                            CameraRotationMode="Turnball" ModelUpDirection="0,0,1"
                                            ShowViewCube="False"
+                                           PreviewMouseLeftButtonDown="CtViewport_PreviewMouseLeftButtonDown"
                                            PreviewMouseRightButtonDown="CtViewport_PreviewMouseRightButtonDown">
                         <helix:HelixViewport3D.Camera>
                             <PerspectiveCamera Position="0,-300,0" LookDirection="0,1,0"
                                                UpDirection="0,0,1" FieldOfView="45"/>
                         </helix:HelixViewport3D.Camera>
                     </helix:HelixViewport3D>
-                    <TextBlock Text="CT Dental Surface" FontSize="11" Foreground="#88FFFFFF"
+                    <TextBlock Text="🦴 CT Dental Surface" FontSize="11" Foreground="#88FFFFFF"
                                HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6"/>
-                    <TextBlock Text="Right-click to place landmark" FontSize="10" Foreground="#55FFFFFF"
-                               HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,6"/>
+                    <TextBlock Text="Left-click = add | Right-click near marker = remove" FontSize="9" Foreground="#44FFFFFF"
+                               HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,4"/>
                 </Grid>
             </Border>
 
@@ -55,45 +56,41 @@
             <!-- STL scan -->
             <Border Grid.Column="2" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4">
                 <Grid>
-                    <helix:HelixViewport3D x:Name="StlViewport" Background="#FF0C1018"
+                    <helix:HelixViewport3D x:Name="StlViewport" Background="#FF0E1420"
                                            ShowCoordinateSystem="True" CoordinateSystemLabelForeground="White"
                                            ZoomExtentsWhenLoaded="True" IsHeadLightEnabled="True"
                                            CameraRotationMode="Turnball" ModelUpDirection="0,0,1"
                                            ShowViewCube="False"
+                                           PreviewMouseLeftButtonDown="StlViewport_PreviewMouseLeftButtonDown"
                                            PreviewMouseRightButtonDown="StlViewport_PreviewMouseRightButtonDown">
                         <helix:HelixViewport3D.Camera>
                             <PerspectiveCamera Position="0,-300,0" LookDirection="0,1,0"
                                                UpDirection="0,0,1" FieldOfView="45"/>
                         </helix:HelixViewport3D.Camera>
                     </helix:HelixViewport3D>
-                    <TextBlock Text="Dental STL Scan" FontSize="11" Foreground="#88FFFFFF"
+                    <TextBlock Text="🦷 Dental STL Scan" FontSize="11" Foreground="#88FFFFFF"
                                HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6"/>
-                    <TextBlock Text="Right-click to place landmark" FontSize="10" Foreground="#55FFFFFF"
-                               HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,6"/>
+                    <TextBlock Text="Left-click = add | Right-click near marker = remove" FontSize="9" Foreground="#44FFFFFF"
+                               HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,4"/>
                 </Grid>
             </Border>
         </Grid>
 
         <!-- Landmark pairs list -->
         <Border Grid.Row="2" Margin="0,6,0,0" Background="#10FFFFFF" CornerRadius="4" Padding="6"
-                MaxHeight="120">
+                MaxHeight="110">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <ItemsControl x:Name="PairsList">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <Border Padding="4,2" Margin="0,1" CornerRadius="3" Background="#08FFFFFF">
-                                <DockPanel>
-                                    <Button DockPanel.Dock="Right" Content="✕" Padding="4,0"
-                                            Background="Transparent" BorderThickness="0" Foreground="#F88"
-                                            Cursor="Hand" Click="DeletePair_Click" Tag="{Binding Index}"
-                                            ToolTip="Delete this pair" VerticalAlignment="Center"/>
-                                    <TextBlock VerticalAlignment="Center" FontSize="10">
-                                        <Run Text="{Binding Label, Mode=OneWay}" Foreground="#CCC"/>
-                                        <Run Text="{Binding CtText, Mode=OneWay}" Foreground="#8F8"/>
-                                        <Run Text=" ↔ " Foreground="#888"/>
-                                        <Run Text="{Binding StlText, Mode=OneWay}" Foreground="#F98"/>
-                                    </TextBlock>
-                                </DockPanel>
+                                <TextBlock VerticalAlignment="Center" FontSize="10">
+                                    <Run Text="{Binding Label, Mode=OneWay}" Foreground="#CCC"/>
+                                    <Run Text="  "/>
+                                    <Run Text="{Binding CtText, Mode=OneWay}" Foreground="#6F8"/>
+                                    <Run Text=" ↔ " Foreground="#888"/>
+                                    <Run Text="{Binding StlText, Mode=OneWay}" Foreground="#F86"/>
+                                </TextBlock>
                             </Border>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>

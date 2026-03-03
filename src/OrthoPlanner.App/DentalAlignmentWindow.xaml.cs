@@ -10,9 +10,6 @@ using OrthoPlanner.App.ViewModels;
 
 namespace OrthoPlanner.App;
 
-/// <summary>
-/// Data model for a single landmark pair displayed in the pairs list.
-/// </summary>
 public class LandmarkPairItem : INotifyPropertyChanged
 {
     public int Index { get; set; }
@@ -31,21 +28,17 @@ public class LandmarkPairItem : INotifyPropertyChanged
 
 public partial class DentalAlignmentWindow : Window
 {
-    // Mesh data
     private readonly List<float[]> _ctVertices;
     private readonly List<float[]> _stlVertices;
-    private readonly List<float[]> _stlOriginalVertices; // backup for reset
+    private readonly List<float[]> _stlOriginalVertices;
 
-    // Landmark data
     private readonly List<(double X, double Y, double Z)?> _ctLandmarks = new();
     private readonly List<(double X, double Y, double Z)?> _stlLandmarks = new();
-    private readonly List<Visual3D> _ctMarkerVisuals = new();   // 2 visuals per marker (sphere + label)
+    private readonly List<Visual3D> _ctMarkerVisuals = new();
     private readonly List<Visual3D> _stlMarkerVisuals = new();
 
-    // Pairs list for the UI
     private readonly ObservableCollection<LandmarkPairItem> _pairs = new();
 
-    // Result
     public bool Accepted { get; private set; }
     public double[,]? FinalTransform { get; private set; }
 
@@ -62,38 +55,73 @@ public partial class DentalAlignmentWindow : Window
 
     private void SetupViewports()
     {
-        // CT model
-        var ctModel = MeshHelper.BuildModel3D(_ctVertices, 230, 210, 180);
+        // CT Model
+        var ctModel = MeshHelper.BuildModel3D(_ctVertices, 240, 230, 210);
         CtViewport.Children.Add(new ModelVisual3D { Content = ctModel });
-        CtViewport.Children.Add(new ModelVisual3D { Content = new AmbientLight(Color.FromRgb(40, 40, 45)) });
+        AddStandardLighting(CtViewport);
 
-        // STL model
+        // STL Model
         var stlModel = MeshHelper.BuildModel3D(_stlVertices, 245, 245, 230);
         StlViewport.Children.Add(new ModelVisual3D { Content = stlModel });
-        StlViewport.Children.Add(new ModelVisual3D { Content = new AmbientLight(Color.FromRgb(40, 40, 45)) });
+        AddStandardLighting(StlViewport);
 
         CtViewport.ZoomExtents(500);
         StlViewport.ZoomExtents(500);
     }
 
-    // ═══ Right-click landmark picking ═══
+    private void AddStandardLighting(HelixViewport3D viewport)
+    {
+        // Add strong lighting so models don't look dark and flat
+        viewport.Children.Add(new ModelVisual3D { Content = new AmbientLight(Color.FromRgb(60, 60, 65)) });
+        viewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Colors.White, new Vector3D(0, 1, -0.5)) });
+        viewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(100, 100, 100), new Vector3D(0, 0, 1)) });
+    }
+
+    // ═══ Left-Click Add ═══
+
+    private void CtViewport_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.None) return; // allow shift/ctrl to pan/zoom if Helix uses it
+        
+        var pos = e.GetPosition(CtViewport);
+        var hits = Viewport3DHelper.FindHits(CtViewport.Viewport, pos);
+        if (hits == null || hits.Count == 0) return;
+
+        SetCtLandmark(GetNextCtIndex(), hits[0].Position);
+        e.Handled = true; // Consume to prevent Helix picking up the left click for orbital rotation
+    }
+
+    private void StlViewport_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.None) return;
+
+        var pos = e.GetPosition(StlViewport);
+        var hits = Viewport3DHelper.FindHits(StlViewport.Viewport, pos);
+        if (hits == null || hits.Count == 0) return;
+
+        SetStlLandmark(GetNextStlIndex(), hits[0].Position);
+        e.Handled = true;
+    }
+
+    // ═══ Right-Click Remove ═══
 
     private void CtViewport_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
         var pos = e.GetPosition(CtViewport);
-        var hitResult = VisualTreeHelper.HitTest(CtViewport, pos);
-        if (hitResult == null) return;
-
-        // Use Helix's viewport hit test for 3D position
         var hits = Viewport3DHelper.FindHits(CtViewport.Viewport, pos);
         if (hits == null || hits.Count == 0) return;
 
-        var point = hits[0].Position;
+        var clickPos = hits[0].Position;
+        int closestIdx = FindClosestLandmark(_ctLandmarks, clickPos);
 
-        // Determine which pair index this goes to
-        int idx = GetNextCtIndex();
-        SetCtLandmark(idx, point);
-        e.Handled = true; // Suppress the context menu / right-click rotation
+        if (closestIdx >= 0)
+        {
+            RemoveCtMarker(closestIdx);
+            _ctLandmarks[closestIdx] = null;
+            UpdatePairItem(closestIdx);
+            UpdateLandmarkUI();
+            e.Handled = true; // Prevent context menu
+        }
     }
 
     private void StlViewport_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
@@ -102,19 +130,47 @@ public partial class DentalAlignmentWindow : Window
         var hits = Viewport3DHelper.FindHits(StlViewport.Viewport, pos);
         if (hits == null || hits.Count == 0) return;
 
-        var point = hits[0].Position;
+        var clickPos = hits[0].Position;
+        int closestIdx = FindClosestLandmark(_stlLandmarks, clickPos);
 
-        int idx = GetNextStlIndex();
-        SetStlLandmark(idx, point);
-        e.Handled = true;
+        if (closestIdx >= 0)
+        {
+            RemoveStlMarker(closestIdx);
+            _stlLandmarks[closestIdx] = null;
+            UpdatePairItem(closestIdx);
+            UpdateLandmarkUI();
+            e.Handled = true;
+        }
     }
+
+    private int FindClosestLandmark(List<(double X, double Y, double Z)?> landmarks, Point3D point, double maxRadius = 5.0)
+    {
+        int bestIdx = -1;
+        double bestDistSq = maxRadius * maxRadius;
+
+        for (int i = 0; i < landmarks.Count; i++)
+        {
+            if (landmarks[i] == null) continue;
+            var l = landmarks[i]!.Value;
+            double dx = l.X - point.X, dy = l.Y - point.Y, dz = l.Z - point.Z;
+            double distSq = dx * dx + dy * dy + dz * dz;
+
+            if (distSq < bestDistSq)
+            {
+                bestDistSq = distSq;
+                bestIdx = i;
+            }
+        }
+        return bestIdx;
+    }
+
+    // ═══ Marker Management ═══
 
     private int GetNextCtIndex()
     {
-        // Find first pair that doesn't have a CT landmark yet, or create a new pair
         for (int i = 0; i < _ctLandmarks.Count; i++)
             if (_ctLandmarks[i] == null) return i;
-        return _ctLandmarks.Count; // append new
+        return _ctLandmarks.Count;
     }
 
     private int GetNextStlIndex()
@@ -126,7 +182,6 @@ public partial class DentalAlignmentWindow : Window
 
     private void SetCtLandmark(int idx, Point3D point)
     {
-        // Extend lists if needed
         while (_ctLandmarks.Count <= idx) _ctLandmarks.Add(null);
         while (_stlLandmarks.Count <= idx) _stlLandmarks.Add(null);
         while (_ctMarkerVisuals.Count <= idx * 2 + 1)
@@ -135,12 +190,9 @@ public partial class DentalAlignmentWindow : Window
             _ctMarkerVisuals.Add(null!);
         }
 
-        // Remove old marker if exists
         RemoveCtMarker(idx);
-
         _ctLandmarks[idx] = (point.X, point.Y, point.Z);
 
-        // Add visual marker
         var (sphere, label) = CreateMarker(point, Colors.LimeGreen, idx + 1);
         CtViewport.Children.Add(sphere);
         CtViewport.Children.Add(label);
@@ -163,7 +215,6 @@ public partial class DentalAlignmentWindow : Window
         }
 
         RemoveStlMarker(idx);
-
         _stlLandmarks[idx] = (point.X, point.Y, point.Z);
 
         var (sphere, label) = CreateMarker(point, Colors.OrangeRed, idx + 1);
@@ -179,19 +230,8 @@ public partial class DentalAlignmentWindow : Window
 
     private (SphereVisual3D sphere, BillboardTextVisual3D label) CreateMarker(Point3D position, Color color, int number)
     {
-        var sphere = new SphereVisual3D
-        {
-            Center = position,
-            Radius = 1.5,
-            Fill = new SolidColorBrush(color)
-        };
-        var label = new BillboardTextVisual3D
-        {
-            Text = number.ToString(),
-            Position = new Point3D(position.X, position.Y, position.Z + 3),
-            Foreground = new SolidColorBrush(color),
-            FontSize = 14
-        };
+        var sphere = new SphereVisual3D { Center = position, Radius = 1.5, Fill = new SolidColorBrush(color) };
+        var label = new BillboardTextVisual3D { Text = number.ToString(), Position = new Point3D(position.X, position.Y, position.Z + 3), Foreground = new SolidColorBrush(color), FontSize = 14 };
         return (sphere, label);
     }
 
@@ -213,12 +253,11 @@ public partial class DentalAlignmentWindow : Window
         }
     }
 
-    // ═══ Pairs list management ═══
+    // ═══ Pairs List ═══
 
     private void EnsurePairItem(int idx)
     {
-        while (_pairs.Count <= idx)
-            _pairs.Add(new LandmarkPairItem { Index = _pairs.Count });
+        while (_pairs.Count <= idx) _pairs.Add(new LandmarkPairItem { Index = _pairs.Count });
     }
 
     private void UpdatePairItem(int idx)
@@ -233,27 +272,6 @@ public partial class DentalAlignmentWindow : Window
         pair.Refresh();
     }
 
-    private void DeletePair_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is System.Windows.Controls.Button btn && btn.Tag is int idx)
-        {
-            // Remove the landmarks and markers at this index
-            RemoveCtMarker(idx);
-            RemoveStlMarker(idx);
-
-            if (idx < _ctLandmarks.Count) _ctLandmarks[idx] = null;
-            if (idx < _stlLandmarks.Count) _stlLandmarks[idx] = null;
-
-            // Clean up the pair item display
-            if (idx < _pairs.Count)
-            {
-                UpdatePairItem(idx);
-            }
-
-            UpdateLandmarkUI();
-        }
-    }
-
     private void UpdateLandmarkUI()
     {
         int ctCount = _ctLandmarks.Count(l => l.HasValue);
@@ -261,11 +279,8 @@ public partial class DentalAlignmentWindow : Window
         int pairs = 0;
         int maxIdx = Math.Max(_ctLandmarks.Count, _stlLandmarks.Count);
         for (int i = 0; i < maxIdx; i++)
-        {
-            bool hasCt = i < _ctLandmarks.Count && _ctLandmarks[i].HasValue;
-            bool hasStl = i < _stlLandmarks.Count && _stlLandmarks[i].HasValue;
-            if (hasCt && hasStl) pairs++;
-        }
+            if (i < _ctLandmarks.Count && _ctLandmarks[i].HasValue && i < _stlLandmarks.Count && _stlLandmarks[i].HasValue)
+                pairs++;
 
         LandmarkCountText.Text = $"CT: {ctCount} | STL: {stlCount} | Complete pairs: {pairs}";
         ComputeBtn.IsEnabled = pairs >= 3;
@@ -273,35 +288,31 @@ public partial class DentalAlignmentWindow : Window
 
     private void ClearLandmarks_Click(object sender, RoutedEventArgs e)
     {
-        // Remove all markers from viewports
         for (int i = 0; i < _ctMarkerVisuals.Count; i++)
             if (_ctMarkerVisuals[i] != null) CtViewport.Children.Remove(_ctMarkerVisuals[i]);
         for (int i = 0; i < _stlMarkerVisuals.Count; i++)
             if (_stlMarkerVisuals[i] != null) StlViewport.Children.Remove(_stlMarkerVisuals[i]);
 
-        _ctMarkerVisuals.Clear();
-        _stlMarkerVisuals.Clear();
-        _ctLandmarks.Clear();
-        _stlLandmarks.Clear();
+        _ctMarkerVisuals.Clear(); _stlMarkerVisuals.Clear();
+        _ctLandmarks.Clear(); _stlLandmarks.Clear();
         _pairs.Clear();
         UpdateLandmarkUI();
         RmsText.Text = "";
         AcceptBtn.Visibility = Visibility.Collapsed;
     }
 
-    // ═══ Alignment computation ═══
+    // ═══ ICP Compute & Vivid Overlay ═══
 
     private async void ComputeAlignment_Click(object sender, RoutedEventArgs e)
     {
         ComputeBtn.IsEnabled = false;
         StepTitle.Text = "Step 2: Computing ICP Alignment...";
-        StepInstructions.Text = "Running landmark registration followed by ICP refinement. Please wait...";
+        StepInstructions.Text = "Running landmark registration + trimmed ICP refinement. Please wait...";
 
         try
         {
-            // Build the matched landmark lists (only complete pairs)
-            var srcLandmarks = new List<(double X, double Y, double Z)>();
-            var tgtLandmarks = new List<(double X, double Y, double Z)>();
+            var srcLandmarks = new List<(double, double, double)>();
+            var tgtLandmarks = new List<(double, double, double)>();
             int maxIdx = Math.Max(_ctLandmarks.Count, _stlLandmarks.Count);
             for (int i = 0; i < maxIdx; i++)
             {
@@ -313,37 +324,50 @@ public partial class DentalAlignmentWindow : Window
                 }
             }
 
-            // Step 1: Compute initial transform from landmark pairs
             var initialTransform = IcpAligner.ComputeLandmarkTransform(srcLandmarks, tgtLandmarks);
 
-            // Step 2: Run ICP refinement
+            // Trim out worst 40% of points to ensure convergence over only matching teeth
             var result = await Task.Run(() =>
-                IcpAligner.Align(_stlOriginalVertices, _ctVertices, initialTransform, maxIterations: 80, tolerance: 0.001,
+                IcpAligner.Align(_stlOriginalVertices, _ctVertices, initialTransform, maxIterations: 80, tolerance: 0.001, trimRatio: 0.60,
                     progress: p => Dispatcher.Invoke(() => StepInstructions.Text = $"ICP iteration... {p * 100:F0}%")));
 
             FinalTransform = result.Transform;
 
-            // Apply transform to the STL vertices for preview
             var previewVerts = _stlOriginalVertices.Select(v => new float[] { v[0], v[1], v[2] }).ToList();
             IcpAligner.TransformVertices(previewVerts, result.Transform);
 
-            // Show overlay in the right viewport
+            // ──Vivid Visualization ── 
+            // We clear the right viewport and render BOTH the CT and the aligned STL together.
+            // CT = Blueish translucent, STL = Golden solid, brightly lit.
             StlViewport.Children.Clear();
-            StlViewport.Children.Add(new ModelVisual3D { Content = new AmbientLight(Color.FromRgb(40, 40, 45)) });
-            StlViewport.Children.Add(new ModelVisual3D { Content = MeshHelper.BuildModel3D(_ctVertices, 180, 200, 220) });
-            StlViewport.Children.Add(new ModelVisual3D { Content = MeshHelper.BuildModel3D(previewVerts, 245, 200, 150) });
+            AddStandardLighting(StlViewport);
+
+            // Dark Blue translucent CT model
+            var ctModel = MeshHelper.BuildModel3D(_ctVertices, 80, 160, 255);
+            if (ctModel.Material is DiffuseMaterial diff)
+            {
+                var brush = new SolidColorBrush(Color.FromArgb(140, 80, 160, 255)); // Semi-transparent
+                ctModel.Material = new DiffuseMaterial(brush);
+                ctModel.BackMaterial = new DiffuseMaterial(brush);
+            }
+            StlViewport.Children.Add(new ModelVisual3D { Content = ctModel });
+
+            // Bright Golden solid STL model
+            var alignedModel = MeshHelper.BuildModel3D(previewVerts, 255, 230, 90);
+            StlViewport.Children.Add(new ModelVisual3D { Content = alignedModel });
+
             StlViewport.ZoomExtents(500);
 
             RmsText.Text = $"RMS: {result.RmsError:F3} mm | {result.Iterations} iters";
             StepTitle.Text = "Step 3: Review Alignment";
-            StepInstructions.Text = "Right viewport shows the overlay. If it looks good, click Accept. Otherwise clear landmarks and retry.";
+            StepInstructions.Text = "Review the right viewport! (Blue = CT, Gold = Scan). Pan/Rotate to check accuracy. If good, click Accept.";
             AcceptBtn.Visibility = Visibility.Visible;
         }
         catch (Exception ex)
         {
             MessageBox.Show($"Alignment failed: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             StepTitle.Text = "Step 1: Pick Matching Landmarks";
-            StepInstructions.Text = "Alignment failed. Try picking different landmarks.";
+            StepInstructions.Text = "Alignment failed. Use right-click to fix bad landmarks and retry.";
         }
         finally
         {

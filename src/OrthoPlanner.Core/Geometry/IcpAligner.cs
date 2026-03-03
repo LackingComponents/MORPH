@@ -34,23 +34,26 @@ public static class IcpAligner
         double[,]? initialTransform = null,
         int maxIterations = 80,
         double tolerance = 0.001,
+        double trimRatio = 0.60,
         Action<double>? progress = null)
     {
         // Build k-d tree on target
         var tree = new KdTree();
         tree.Build(targetVerts);
 
-        // Subsample source for performance (use every Nth point, max ~5000)
-        int step = Math.Max(1, sourceVerts.Count / 5000);
+        // Subsample source for performance (use every Nth point, max ~8000)
+        int step = Math.Max(1, sourceVerts.Count / 8000);
         var srcSampled = new List<float[]>();
         for (int i = 0; i < sourceVerts.Count; i += step)
             srcSampled.Add(sourceVerts[i]);
 
+        int nSrc = srcSampled.Count;
+
         // Apply initial transform to sampled source
-        var currentSrc = new double[srcSampled.Count, 3];
+        var currentSrc = new double[nSrc, 3];
         var initT = initialTransform ?? Identity4x4();
 
-        for (int i = 0; i < srcSampled.Count; i++)
+        for (int i = 0; i < nSrc; i++)
         {
             TransformPoint(initT, srcSampled[i][0], srcSampled[i][1], srcSampled[i][2],
                 out double tx, out double ty, out double tz);
@@ -69,21 +72,38 @@ public static class IcpAligner
             progress?.Invoke((double)iter / maxIterations);
 
             // Step 1: Find closest points in target for each source point
-            var matchedTarget = new double[srcSampled.Count, 3];
-            double sumDistSq = 0;
+            var distances = new (int srcIdx, double distSq, double tgtX, double tgtY, double tgtZ)[nSrc];
 
-            for (int i = 0; i < srcSampled.Count; i++)
+            for (int i = 0; i < nSrc; i++)
             {
                 var (idx, distSq) = tree.FindNearest(
                     (float)currentSrc[i, 0], (float)currentSrc[i, 1], (float)currentSrc[i, 2]);
-                var (tx, ty, tz) = tree.GetPoint(idx);
-                matchedTarget[i, 0] = tx;
-                matchedTarget[i, 1] = ty;
-                matchedTarget[i, 2] = tz;
-                sumDistSq += distSq;
+                var (ptx, pty, ptz) = tree.GetPoint(idx);
+                distances[i] = (i, distSq, ptx, pty, ptz);
             }
 
-            double rms = Math.Sqrt(sumDistSq / srcSampled.Count);
+            // TRIMMED ICP: Sort by distance and keep only the closest trimRatio fraction
+            Array.Sort(distances, (a, b) => a.distSq.CompareTo(b.distSq));
+            int nKeep = Math.Max(10, (int)(nSrc * trimRatio));
+
+            // Build trimmed correspondence arrays
+            var trimSrc = new double[nKeep, 3];
+            var trimTgt = new double[nKeep, 3];
+            double sumDistSq = 0;
+
+            for (int i = 0; i < nKeep; i++)
+            {
+                int si = distances[i].srcIdx;
+                trimSrc[i, 0] = currentSrc[si, 0];
+                trimSrc[i, 1] = currentSrc[si, 1];
+                trimSrc[i, 2] = currentSrc[si, 2];
+                trimTgt[i, 0] = distances[i].tgtX;
+                trimTgt[i, 1] = distances[i].tgtY;
+                trimTgt[i, 2] = distances[i].tgtZ;
+                sumDistSq += distances[i].distSq;
+            }
+
+            double rms = Math.Sqrt(sumDistSq / nKeep);
 
             // Convergence check
             if (Math.Abs(prevRms - rms) < tolerance)
@@ -94,11 +114,11 @@ public static class IcpAligner
             }
             prevRms = rms;
 
-            // Step 2: Compute optimal rigid transform (SVD on cross-covariance)
-            var stepT = ComputeRigidTransformSVD(currentSrc, matchedTarget, srcSampled.Count);
+            // Step 2: Compute optimal rigid transform from TRIMMED pairs only
+            var stepT = ComputeRigidTransformSVD(trimSrc, trimTgt, nKeep);
 
-            // Apply step transform to current source positions
-            for (int i = 0; i < srcSampled.Count; i++)
+            // Apply step transform to ALL current source positions
+            for (int i = 0; i < nSrc; i++)
             {
                 TransformPoint(stepT, currentSrc[i, 0], currentSrc[i, 1], currentSrc[i, 2],
                     out double nx, out double ny, out double nz);
