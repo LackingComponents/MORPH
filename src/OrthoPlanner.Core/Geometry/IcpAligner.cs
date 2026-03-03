@@ -37,10 +37,6 @@ public static class IcpAligner
         double trimRatio = 0.60,
         Action<double>? progress = null)
     {
-        // Build k-d tree on target
-        var tree = new KdTree();
-        tree.Build(targetVerts);
-
         // Subsample source for performance (use every Nth point, max ~8000)
         int step = Math.Max(1, sourceVerts.Count / 8000);
         var srcSampled = new List<float[]>();
@@ -61,6 +57,33 @@ public static class IcpAligner
             currentSrc[i, 1] = ty;
             currentSrc[i, 2] = tz;
         }
+
+        // --- PRE-ICP CULLING OF THE TARGET MESH ---
+        // The CT target mesh is massive (entire skull/cranium) but we only want to align to the teeth.
+        // We temporarily build a KdTree of the *source* (STL cast) at its initial position.
+        var sourceTree = new KdTree();
+        var sourceListForTree = new List<float[]>();
+        for (int i = 0; i < nSrc; i++) sourceListForTree.Add(new float[] { (float)currentSrc[i, 0], (float)currentSrc[i, 1], (float)currentSrc[i, 2] });
+        sourceTree.Build(sourceListForTree);
+
+        // Find distance from every target point to the closest source point
+        var tgtDistances = new (float[] pt, double distSq)[targetVerts.Count];
+        for (int i = 0; i < targetVerts.Count; i++)
+        {
+            var p = targetVerts[i];
+            var (_, distSq) = sourceTree.FindNearest(p[0], p[1], p[2]);
+            tgtDistances[i] = (p, distSq);
+        }
+
+        // Sort and completely discard the furthest 75% of the CT mesh (cranium, spine, etc.)
+        Array.Sort(tgtDistances, (a, b) => a.distSq.CompareTo(b.distSq));
+        int keepTgt = Math.Max(10, (int)(targetVerts.Count * 0.25));
+        var croppedTarget = new List<float[]>(keepTgt);
+        for (int i = 0; i < keepTgt; i++) croppedTarget.Add(tgtDistances[i].pt);
+
+        // Build main k-d tree on the incredibly cropped target (teeth only!)
+        var tree = new KdTree();
+        tree.Build(croppedTarget);
 
         // Accumulate total transform
         var totalT = (double[,])initT.Clone();

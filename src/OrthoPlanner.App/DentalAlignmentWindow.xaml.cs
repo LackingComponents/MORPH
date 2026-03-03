@@ -359,9 +359,10 @@ public partial class DentalAlignmentWindow : Window
             StlViewport.Children.Clear();
             AddStandardLighting(StlViewport);
             
-            // Add extra bright 3-point lighting specifically for the review pane so it pops!
-            // Wait, to completely KILL shadows, we just use a massive pure white AmbientLight instead of directional.
-            StlViewport.Children.Add(new ModelVisual3D { Content = new AmbientLight(Color.FromRgb(255, 255, 255)) });
+            // Add soft ambient + directional lighting for depth (so it is neither pitch black nor blown-out flat)
+            StlViewport.Children.Add(new ModelVisual3D { Content = new AmbientLight(Color.FromRgb(150, 150, 150)) });
+            StlViewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(100, 100, 100), new Vector3D(-1, -1, -0.5)) });
+            StlViewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(60, 60, 60), new Vector3D(1, 1, 0.5)) });
             StlViewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(80, 80, 80), new Vector3D(0, 1, 0.5)) });     // Back
 
             // Dark Blue translucent CT model using new alpha parameter (140 alpha)
