@@ -749,25 +749,15 @@ public partial class MainWindow : Window
 
     private void CenterCamera_Click(object sender, RoutedEventArgs e)
     {
-        // 1. Rigorously purge all stored middle-click translation offsets from the CameraController
-        if (Viewport3D.CameraController != null)
-        {
-            Viewport3D.CameraController.ResetCamera();
-        }
-
-        // 2. Refocus the camera keeping exactly its current LookDirection
+        // 1. Refocus the camera keeping exactly its current LookDirection
         if (VM != null && VM.BoneModel != null && !VM.BoneModel.Bounds.IsEmpty)
         {
             var worldBounds = VM.BoneModel.Transform != null 
                 ? VM.BoneModel.Transform.TransformBounds(VM.BoneModel.Bounds) 
                 : VM.BoneModel.Bounds;
             
-            // Keep the exact same look direction, just reset the target to cleanly center the boundaries!
-            if (Viewport3D.Camera is ProjectionCamera cam)
-            {
-                HelixToolkit.Wpf.CameraHelper.ChangeDirection(cam, cam.LookDirection, new Vector3D(0, 0, 1), 500);
-            }
-
+            // Keep the exact same look direction and up direction.
+            // ZoomExtents alone will natively purge the panning offsets by snapping the Position to the bounds!
             Viewport3D.ZoomExtents(worldBounds, 500);
             
             if (Viewport3D.CameraController != null)
@@ -783,8 +773,6 @@ public partial class MainWindow : Window
 
     private void AnteriorView_Click(object sender, RoutedEventArgs e)
     {
-        if (Viewport3D.CameraController != null) Viewport3D.CameraController.ResetCamera();
-
         if (VM != null && VM.BoneModel != null && !VM.BoneModel.Bounds.IsEmpty)
         {
             var worldBounds = VM.BoneModel.Transform != null 
@@ -810,16 +798,14 @@ public partial class MainWindow : Window
 
     private void RightProfile_Click(object sender, RoutedEventArgs e)
     {
-        if (Viewport3D.CameraController != null) Viewport3D.CameraController.ResetCamera();
-
         if (VM != null && VM.BoneModel != null && !VM.BoneModel.Bounds.IsEmpty)
         {
             var worldBounds = VM.BoneModel.Transform != null 
                 ? VM.BoneModel.Transform.TransformBounds(VM.BoneModel.Bounds) 
                 : VM.BoneModel.Bounds;
             
-            // Looking from +X to -X gives the Right Profile of the patient
-            var rightProfileLookDirection = new Vector3D(-1, 0, 0);
+            // Looking towards the Right Profile (1, 0, 0)
+            var rightProfileLookDirection = new Vector3D(1, 0, 0);
             HelixToolkit.Wpf.CameraHelper.ChangeDirection(Viewport3D.Camera, rightProfileLookDirection, new Vector3D(0, 0, 1), 500);
 
             Viewport3D.ZoomExtents(worldBounds, 500);

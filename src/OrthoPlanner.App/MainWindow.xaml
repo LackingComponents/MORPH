@@ -587,15 +587,15 @@
                     <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="10">
                         <Button Width="32" Height="32" Margin="0,0,4,0" Background="#80000000" BorderBrush="#40FFFFFF" Foreground="White"
                                 Cursor="Hand" ToolTip="Reset Panning (Keep Rotation)" Click="CenterCamera_Click">
-                            <TextBlock Text="⌖" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
+                            <Path Data="M 16,2 L 16,30 M 2,16 L 30,16 M 10,16 A 6,6 0 1,1 10.1,16" Stroke="White" StrokeThickness="1.5" Stretch="Uniform" Margin="6"/>
                         </Button>
                         <Button Width="32" Height="32" Margin="0,0,4,0" Background="#80000000" BorderBrush="#40FFFFFF" Foreground="White"
                                 Cursor="Hand" ToolTip="Anterior View (Front)" Click="AnteriorView_Click">
-                            <TextBlock Text="💀" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
+                            <Path Data="M 10,26 L 22,26 L 22,20 C 28,18 28,6 16,6 C 4,6 4,18 10,20 Z M 12,12 A 2,2 0 1,1 12.1,12 M 20,12 A 2,2 0 1,1 20.1,12 M 16,18 L 16,20 M 14,26 L 14,21 M 18,26 L 18,21" Stroke="White" StrokeThickness="1.5" Stretch="Uniform" Margin="6"/>
                         </Button>
                         <Button Width="32" Height="32" Background="#80000000" BorderBrush="#40FFFFFF" Foreground="White"
                                 Cursor="Hand" ToolTip="Right Profile View" Click="RightProfile_Click">
-                            <TextBlock Text="👤" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
+                            <Path Data="M 8,26 L 18,26 L 18,22 L 23,22 L 25,18 L 25,12 C 25,6 14,6 10,6 C 6,6 4,14 8,20 Z M 18,12 A 2,2 0 1,1 18.1,12 M 22,18 L 20,18" Stroke="White" StrokeThickness="1.5" Stretch="Uniform" Margin="6"/>
                         </Button>
                     </StackPanel>
 
