@@ -17,7 +17,7 @@
         <!-- Title -->
         <StackPanel Grid.Row="0">
             <TextBlock x:Name="StepTitle" Text="Step 1: Preview Bone + Dental Casts" FontSize="16" FontWeight="SemiBold" Foreground="#EAECF0"/>
-            <TextBlock x:Name="StepInstructions" Text="Review the bone mesh with overlaid dental casts. The green plane shows the occlusal separation." FontSize="11" Foreground="#88AAB" Margin="0,4,0,0" TextWrapping="Wrap"/>
+            <TextBlock x:Name="StepInstructions" Text="Review the bone mesh with overlaid dental casts. The green plane shows the occlusal separation." FontSize="11" Foreground="#88AABB" Margin="0,4,0,0" TextWrapping="Wrap"/>
         </StackPanel>
 
         <!-- 3D Viewport -->
