@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace OrthoPlanner.Core.Geometry;
 
@@ -136,5 +137,143 @@ public static class MeshOps
         double sum = 0;
         for (int i = 0; i < verts.Count; i++) sum += verts[i][2];
         return (float)(sum / verts.Count);
+    }
+
+    /// <summary>
+    /// Remove triangles whose centroid is within <paramref name="radiusMm"/> of any
+    /// point on the arch spline. The spline is given as a dense list of 3D samples.
+    /// </summary>
+    public static List<float[]> SubtractByArchVolume(
+        List<float[]> boneVerts, List<(double X, double Y, double Z)> splineSamples, float radiusMm)
+    {
+        // Build a KdTree from the spline samples for fast proximity queries
+        var splineTree = new KdTree();
+        var splinePoints = splineSamples.Select(
+            p => new float[] { (float)p.X, (float)p.Y, (float)p.Z }).ToList();
+        splineTree.Build(splinePoints);
+
+        float radiusSq = radiusMm * radiusMm;
+        var result = new List<float[]>(boneVerts.Count);
+
+        for (int i = 0; i + 2 < boneVerts.Count; i += 3)
+        {
+            float cx = (boneVerts[i][0] + boneVerts[i + 1][0] + boneVerts[i + 2][0]) / 3f;
+            float cy = (boneVerts[i][1] + boneVerts[i + 1][1] + boneVerts[i + 2][1]) / 3f;
+            float cz = (boneVerts[i][2] + boneVerts[i + 1][2] + boneVerts[i + 2][2]) / 3f;
+
+            var (_, distSq) = splineTree.FindNearest(cx, cy, cz);
+            if (distSq > radiusSq)
+            {
+                result.Add(new float[] { boneVerts[i][0], boneVerts[i][1], boneVerts[i][2] });
+                result.Add(new float[] { boneVerts[i + 1][0], boneVerts[i + 1][1], boneVerts[i + 1][2] });
+                result.Add(new float[] { boneVerts[i + 2][0], boneVerts[i + 2][1], boneVerts[i + 2][2] });
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Find connected components in a triangle-soup mesh by flood-filling on shared vertex positions.
+    /// Returns a list of vertex lists, sorted by size (largest first).
+    /// </summary>
+    public static List<List<float[]>> LabelConnectedComponents(List<float[]> verts)
+    {
+        int triCount = verts.Count / 3;
+        if (triCount == 0) return new List<List<float[]>>();
+
+        // Build adjacency: two triangles are adjacent if they share a vertex position.
+        // Key: quantized position string → list of triangle indices that have a vertex at that position.
+        var posToTris = new Dictionary<long, List<int>>();
+
+        for (int t = 0; t < triCount; t++)
+        {
+            for (int v = 0; v < 3; v++)
+            {
+                var pt = verts[t * 3 + v];
+                long key = QuantizePosition(pt[0], pt[1], pt[2]);
+                if (!posToTris.TryGetValue(key, out var list))
+                {
+                    list = new List<int>();
+                    posToTris[key] = list;
+                }
+                list.Add(t);
+            }
+        }
+
+        // Build triangle adjacency graph
+        var adj = new List<int>[triCount];
+        for (int t = 0; t < triCount; t++) adj[t] = new List<int>();
+
+        foreach (var group in posToTris.Values)
+        {
+            for (int a = 0; a < group.Count; a++)
+                for (int b = a + 1; b < group.Count; b++)
+                {
+                    int ta = group[a], tb = group[b];
+                    if (ta != tb)
+                    {
+                        adj[ta].Add(tb);
+                        adj[tb].Add(ta);
+                    }
+                }
+        }
+
+        // BFS flood fill
+        var visited = new bool[triCount];
+        var components = new List<List<int>>();
+
+        for (int t = 0; t < triCount; t++)
+        {
+            if (visited[t]) continue;
+            var component = new List<int>();
+            var queue = new Queue<int>();
+            queue.Enqueue(t);
+            visited[t] = true;
+
+            while (queue.Count > 0)
+            {
+                int cur = queue.Dequeue();
+                component.Add(cur);
+                foreach (var nb in adj[cur])
+                {
+                    if (!visited[nb])
+                    {
+                        visited[nb] = true;
+                        queue.Enqueue(nb);
+                    }
+                }
+            }
+            components.Add(component);
+        }
+
+        // Sort by size (largest first) and convert to vertex lists
+        components.Sort((a, b) => b.Count.CompareTo(a.Count));
+
+        var result = new List<List<float[]>>();
+        foreach (var comp in components)
+        {
+            var mesh = new List<float[]>(comp.Count * 3);
+            foreach (int t in comp)
+            {
+                mesh.Add(verts[t * 3]);
+                mesh.Add(verts[t * 3 + 1]);
+                mesh.Add(verts[t * 3 + 2]);
+            }
+            result.Add(mesh);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Quantize a 3D position to a long key for hashing (0.01mm precision).
+    /// </summary>
+    private static long QuantizePosition(float x, float y, float z)
+    {
+        // Round to 0.01mm to handle floating-point noise
+        long qx = (long)Math.Round(x * 100);
+        long qy = (long)Math.Round(y * 100);
+        long qz = (long)Math.Round(z * 100);
+        // Pack into a single long with enough range
+        return qx * 10000000000L + qy * 100000L + qz;
     }
 }

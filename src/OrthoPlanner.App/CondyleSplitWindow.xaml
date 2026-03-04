@@ -54,7 +54,7 @@
                     Background="#20FFFFFF" Foreground="White" BorderBrush="#40FFFFFF" Cursor="Hand"/>
 
             <StackPanel Grid.Column="2" Orientation="Horizontal">
-                <Button x:Name="SplitBtn" Content="Split at Occlusal Plane" Click="Split_Click" Width="170" Height="28"
+                <Button x:Name="SplitBtn" Content="Compute Separation" Click="Split_Click" Width="170" Height="28"
                         Background="#3060A0" Foreground="White" BorderBrush="#4080C0" Cursor="Hand" Margin="0,0,8,0"/>
                 <Button x:Name="ConfirmBtn" Content="Confirm Condyles" Click="Confirm_Click" Width="140" Height="28"
                         Background="#308040" Foreground="White" BorderBrush="#40A060" Cursor="Hand" Visibility="Collapsed"/>
