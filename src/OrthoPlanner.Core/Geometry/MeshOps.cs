@@ -121,7 +121,7 @@ public static class MeshOps
             if (!inside)
             {
                 result.Add(new float[] { verts[i][0], verts[i][1], verts[i][2] });
-                result.Add(new float[] { verts[i + 1][0], verts[i + 1][1], verts[i + 2][2] });
+                result.Add(new float[] { verts[i + 1][0], verts[i + 1][1], verts[i + 1][2] });
                 result.Add(new float[] { verts[i + 2][0], verts[i + 2][1], verts[i + 2][2] });
             }
         }
