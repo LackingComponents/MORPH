@@ -1,0 +1,66 @@
+<Window x:Class="OrthoPlanner.App.CondyleSplitWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:helix="http://helix-toolkit.org/wpf"
+        Title="Split Cranium &amp; Mandible" Width="1100" Height="800"
+        WindowStartupLocation="CenterOwner"
+        Background="#FF0E1420" Foreground="White" FontFamily="Segoe UI">
+
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>  <!-- Title bar -->
+            <RowDefinition Height="*"/>     <!-- 3D Viewport -->
+            <RowDefinition Height="Auto"/>  <!-- Status / instructions -->
+            <RowDefinition Height="Auto"/>  <!-- Buttons -->
+        </Grid.RowDefinitions>
+
+        <!-- Title -->
+        <StackPanel Grid.Row="0">
+            <TextBlock x:Name="StepTitle" Text="Step 1: Preview Bone + Dental Casts" FontSize="16" FontWeight="SemiBold" Foreground="#EAECF0"/>
+            <TextBlock x:Name="StepInstructions" Text="Review the bone mesh with overlaid dental casts. The green plane shows the occlusal separation." FontSize="11" Foreground="#88AAB" Margin="0,4,0,0" TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <!-- 3D Viewport -->
+        <Border Grid.Row="1" Margin="0,8" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
+            <helix:HelixViewport3D x:Name="MainViewport" Background="#FF080C14"
+                                   ShowCoordinateSystem="True" CoordinateSystemLabelForeground="White"
+                                   ZoomExtentsWhenLoaded="True" IsHeadLightEnabled="True"
+                                   CameraRotationMode="Turnball" ModelUpDirection="0,0,1"
+                                   ShowViewCube="False"
+                                   PreviewMouseLeftButtonDown="Viewport_PreviewMouseLeftButtonDown"
+                                   PreviewMouseMove="Viewport_PreviewMouseMove"
+                                   PreviewMouseLeftButtonUp="Viewport_PreviewMouseLeftButtonUp">
+                <helix:HelixViewport3D.Camera>
+                    <PerspectiveCamera Position="0,-300,100" LookDirection="0,1,-0.3"
+                                       UpDirection="0,0,1" FieldOfView="45"/>
+                </helix:HelixViewport3D.Camera>
+            </helix:HelixViewport3D>
+        </Border>
+
+        <!-- Status bar -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,4">
+            <TextBlock x:Name="StatusText" Text="" FontSize="10" Foreground="#AAB"/>
+        </StackPanel>
+
+        <!-- Footer buttons -->
+        <Grid Grid.Row="3" Margin="0,4,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <Button Grid.Column="0" Content="Cancel" Click="Cancel_Click" Width="80" Height="28"
+                    Background="#20FFFFFF" Foreground="White" BorderBrush="#40FFFFFF" Cursor="Hand"/>
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button x:Name="SplitBtn" Content="Split at Occlusal Plane" Click="Split_Click" Width="170" Height="28"
+                        Background="#3060A0" Foreground="White" BorderBrush="#4080C0" Cursor="Hand" Margin="0,0,8,0"/>
+                <Button x:Name="ConfirmBtn" Content="Confirm Condyles" Click="Confirm_Click" Width="140" Height="28"
+                        Background="#308040" Foreground="White" BorderBrush="#40A060" Cursor="Hand" Visibility="Collapsed"/>
+                <Button x:Name="AcceptBtn" Content="Accept &amp; Close" Click="Accept_Click" Width="120" Height="28"
+                        Background="#308040" Foreground="White" BorderBrush="#40A060" Cursor="Hand" Visibility="Collapsed"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

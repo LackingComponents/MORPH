@@ -423,6 +423,8 @@
                                 <Button Content="📥 Load Dental Scans" Command="{Binding ImportStlCommand}" Margin="0,0,0,4" />
                                 <Button Content="🔄 Align to CT" Command="{Binding AlignDentalScansCommand}" Margin="0,0,0,4"
                                         Background="#FF1B98E0" Foreground="White" FontWeight="Bold" />
+                                <Button Content="🔪 Split Cranium / Mandible" Command="{Binding SplitCraniumMandibleCommand}" Margin="0,0,0,4"
+                                        Background="#FF8B4513" Foreground="White" FontWeight="Bold" />
                                 <ItemsControl ItemsSource="{Binding ImportedMeshes}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
