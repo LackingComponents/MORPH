@@ -1359,79 +1359,91 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task SplitCraniumMandibleAsync()
     {
-        // Validate: must have bone model
-        var boneSegment = HardTissueModel;
-        if (boneSegment?.Vertices == null || boneSegment.Vertices.Count < 100)
+        await Task.Yield(); // Ensure UI stays responsive
+
+        try
         {
-            System.Windows.MessageBox.Show(
-                "Please run bone segmentation first to generate a bone surface.",
-                "No Bone Model", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
-            return;
-        }
-
-        // Find upper and lower dental casts
-        var upper = ImportedMeshes.FirstOrDefault(m => m.ScanType == DentalScanType.Upper);
-        var lower = ImportedMeshes.FirstOrDefault(m => m.ScanType == DentalScanType.Lower);
-
-        if (upper?.Vertices == null || lower?.Vertices == null)
-        {
-            System.Windows.MessageBox.Show(
-                "Please import and align both Upper and Lower dental casts before splitting.",
-                "Missing Dental Casts", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
-            return;
-        }
-
-        StatusText = "Opening Cranium/Mandible Split wizard...";
-
-        var wizard = new CondyleSplitWindow(boneSegment.Vertices, upper.Vertices, lower.Vertices);
-        wizard.Owner = System.Windows.Application.Current.MainWindow;
-
-        if (wizard.ShowDialog() == true && wizard.Accepted)
-        {
-            SaveStateForUndo();
-
-            // Store condylar axis data
-            LeftCondyleCenter = wizard.LeftCondyleCenter;
-            RightCondyleCenter = wizard.RightCondyleCenter;
-
-            // Create Cranium segment
-            if (wizard.CraniumResult != null && wizard.CraniumResult.Count > 0)
+            // Validate: must have bone model
+            var boneSegment = HardTissueModel;
+            if (boneSegment?.Vertices == null || boneSegment.Vertices.Count < 100)
             {
-                var cranVm = new SegmentViewModel
-                {
-                    Label = (byte)(Segments.Count + 1),
-                    Name = "Cranium (Split)",
-                    ColorR = 220, ColorG = 200, ColorB = 170,
-                    Vertices = wizard.CraniumResult,
-                    IsVisible = true
-                };
-                cranVm.BuildModel();
-                cranVm.OnVisibilityChanged = RefreshCombinedModel;
-                Segments.Add(cranVm);
+                System.Windows.MessageBox.Show(
+                    "Please run bone segmentation first to generate a bone surface.",
+                    "No Bone Model", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+                return;
             }
 
-            // Create Mandible segment
-            if (wizard.MandibleResult != null && wizard.MandibleResult.Count > 0)
+            // Find upper and lower dental casts
+            var upper = ImportedMeshes.FirstOrDefault(m => m.ScanType == DentalScanType.Upper);
+            var lower = ImportedMeshes.FirstOrDefault(m => m.ScanType == DentalScanType.Lower);
+
+            if (upper?.Vertices == null || lower?.Vertices == null)
             {
-                var mandVm = new SegmentViewModel
-                {
-                    Label = (byte)(Segments.Count + 1),
-                    Name = "Mandible (Split)",
-                    ColorR = 180, ColorG = 200, ColorB = 220,
-                    Vertices = wizard.MandibleResult,
-                    IsVisible = true
-                };
-                mandVm.BuildModel();
-                mandVm.OnVisibilityChanged = RefreshCombinedModel;
-                Segments.Add(mandVm);
+                System.Windows.MessageBox.Show(
+                    "Please import and align both Upper and Lower dental casts before splitting.",
+                    "Missing Dental Casts", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+                return;
             }
 
-            RefreshCombinedModel();
-            StatusText = $"Split complete. Condylar axis saved. L=({LeftCondyleCenter?.X:F1},{LeftCondyleCenter?.Y:F1},{LeftCondyleCenter?.Z:F1}) R=({RightCondyleCenter?.X:F1},{RightCondyleCenter?.Y:F1},{RightCondyleCenter?.Z:F1})";
+            StatusText = "Opening Cranium/Mandible Split wizard...";
+
+            var wizard = new CondyleSplitWindow(boneSegment.Vertices, upper.Vertices, lower.Vertices);
+            wizard.Owner = System.Windows.Application.Current.MainWindow;
+
+            if (wizard.ShowDialog() == true && wizard.Accepted)
+            {
+                SaveStateForUndo();
+
+                // Store condylar axis data
+                LeftCondyleCenter = wizard.LeftCondyleCenter;
+                RightCondyleCenter = wizard.RightCondyleCenter;
+
+                // Create Cranium segment
+                if (wizard.CraniumResult != null && wizard.CraniumResult.Count > 0)
+                {
+                    var cranVm = new SegmentViewModel
+                    {
+                        Label = (byte)(Segments.Count + 1),
+                        Name = "Cranium (Split)",
+                        ColorR = 220, ColorG = 200, ColorB = 170,
+                        Vertices = wizard.CraniumResult,
+                        IsVisible = true
+                    };
+                    cranVm.BuildModel();
+                    cranVm.OnVisibilityChanged = RefreshCombinedModel;
+                    Segments.Add(cranVm);
+                }
+
+                // Create Mandible segment
+                if (wizard.MandibleResult != null && wizard.MandibleResult.Count > 0)
+                {
+                    var mandVm = new SegmentViewModel
+                    {
+                        Label = (byte)(Segments.Count + 1),
+                        Name = "Mandible (Split)",
+                        ColorR = 180, ColorG = 200, ColorB = 220,
+                        Vertices = wizard.MandibleResult,
+                        IsVisible = true
+                    };
+                    mandVm.BuildModel();
+                    mandVm.OnVisibilityChanged = RefreshCombinedModel;
+                    Segments.Add(mandVm);
+                }
+
+                RefreshCombinedModel();
+                StatusText = $"Split complete. Condylar axis saved. L=({LeftCondyleCenter?.X:F1},{LeftCondyleCenter?.Y:F1},{LeftCondyleCenter?.Z:F1}) R=({RightCondyleCenter?.X:F1},{RightCondyleCenter?.Y:F1},{RightCondyleCenter?.Z:F1})";
+            }
+            else
+            {
+                StatusText = "Cranium/Mandible split cancelled.";
+            }
         }
-        else
+        catch (Exception ex)
         {
-            StatusText = "Cranium/Mandible split cancelled.";
+            System.Windows.MessageBox.Show(
+                $"Cranium/Mandible split failed:\n{ex.Message}\n\n{ex.StackTrace}",
+                "Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+            StatusText = "Cranium/Mandible split failed.";
         }
     }
 

@@ -374,7 +374,7 @@ public partial class CondyleSplitWindow : Window
 
     private Point3D? GetHitPoint(Point screenPos)
     {
-        var result = MainViewport.Viewport.FindHits(screenPos);
+        var result = Viewport3DHelper.FindHits(MainViewport.Viewport, screenPos);
         if (result != null && result.Count > 0)
             return result[0].Position;
         return null;
