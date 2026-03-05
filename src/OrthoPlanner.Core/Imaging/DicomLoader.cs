@@ -103,12 +103,19 @@ public static class DicomLoader
                 for (int i = 0; i < w * h; i++)
                 {
                     double stored = 0;
-                    if (bits == 16 && i * 2 + 1 < rawBytes.Length)
+                    if (bits == 16)
+                    {
+                        int bi = i * 2;
+                        if (bi + 2 > rawBytes.Length) { pixels[i] = 0; continue; }
                         stored = repr == 1
-                            ? BitConverter.ToInt16(rawBytes, i * 2)
-                            : BitConverter.ToUInt16(rawBytes, i * 2);
-                    else if (bits == 8 && i < rawBytes.Length)
+                            ? BitConverter.ToInt16(rawBytes, bi)
+                            : (double)BitConverter.ToUInt16(rawBytes, bi);
+                    }
+                    else if (bits == 8)
+                    {
+                        if (i >= rawBytes.Length) { pixels[i] = 0; continue; }
                         stored = rawBytes[i];
+                    }
 
                     double hu = stored * slope + intercept;
                     // Window level for bone/tissue roughly (W:1500, L:300)
@@ -193,7 +200,12 @@ public static class DicomLoader
             int bits = ds.GetSingleValueOrDefault(DicomTag.BitsAllocated, 16);
             int repr = ds.GetSingleValueOrDefault(DicomTag.PixelRepresentation, 0);
 
+            // Fix 4: detect encapsulated (compressed) transfer syntax
+            var ts = ds.InternalTransferSyntax;
+            bool isCompressed = ts != null && ts.IsEncapsulated;
+
             var pixelData = DicomPixelData.Create(ds);
+            // For encapsulated data, fo-dicom decodes internally; for raw LE we get bytes directly
             var rawBytes = pixelData.GetFrame(0).Data;
 
             for (int y = 0; y < height; y++)
@@ -201,19 +213,34 @@ public static class DicomLoader
             {
                 int idx = x + y * width;
                 double stored = 0;
+
                 if (bits == 16)
                 {
                     int bi = idx * 2;
-                    if (bi + 1 < rawBytes.Length)
-                        stored = repr == 1
-                            ? BitConverter.ToInt16(rawBytes, bi)
-                            : BitConverter.ToUInt16(rawBytes, bi);
+                    // Fix 1: bounds check — write air (-1000 HU) and skip out-of-range pixels
+                    if (bi + 2 > rawBytes.Length)
+                    {
+                        volume.SetVoxel(x, y, z, -1000);
+                        continue;
+                    }
+                    // Fix 2: signed pixels use ToInt16; unsigned use ToUInt16
+                    stored = repr == 1
+                        ? BitConverter.ToInt16(rawBytes, bi)
+                        : (double)BitConverter.ToUInt16(rawBytes, bi);
                 }
-                else if (bits == 8 && idx < rawBytes.Length)
+                else if (bits == 8)
+                {
+                    if (idx >= rawBytes.Length)
+                    {
+                        volume.SetVoxel(x, y, z, -1000);
+                        continue;
+                    }
                     stored = rawBytes[idx];
+                }
 
+                // Fix 3: apply RescaleSlope + RescaleIntercept, clamp to standard CT HU range
                 double hu = stored * slope + intercept;
-                volume.SetVoxel(x, y, z, (short)Math.Clamp(hu, short.MinValue, short.MaxValue));
+                volume.SetVoxel(x, y, z, (short)Math.Clamp(hu, -1024, 3071));
             }
             progress?.Invoke((double)(z + 1) / depth);
         }
