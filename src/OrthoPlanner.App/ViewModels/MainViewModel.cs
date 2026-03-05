@@ -1389,7 +1389,7 @@ public partial class MainViewModel : ObservableObject
 
             var wizard = new CondyleSplitWindow(
                 boneSegment.Vertices, upper.Vertices, lower.Vertices,
-                Volume, _segVolume, boneSegment.Label);
+                Volume, _segVolume, boneSegment.Label, BoneMinHU);
             wizard.Owner = System.Windows.Application.Current.MainWindow;
 
             if (wizard.ShowDialog() == true && wizard.Accepted)
