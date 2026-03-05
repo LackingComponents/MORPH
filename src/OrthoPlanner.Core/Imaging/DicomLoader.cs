@@ -92,21 +92,21 @@ public static class DicomLoader
                 info.PreviewHeight = h;
                 
                 double slope = ds.GetSingleValueOrDefault(DicomTag.RescaleSlope, 1.0);
-                double intercept = ds.GetSingleValueOrDefault(DicomTag.RescaleIntercept, 0.0);
+                double intercept = ds.GetSingleValueOrDefault(DicomTag.RescaleIntercept, -1024.0);
                 int bits = ds.GetSingleValueOrDefault(DicomTag.BitsAllocated, 16);
                 int repr = ds.GetSingleValueOrDefault(DicomTag.PixelRepresentation, 0);
 
                 var pixelData = DicomPixelData.Create(ds);
                 var rawBytes = pixelData.GetFrame(0).Data;
-                
+
                 var pixels = new byte[w * h];
                 for (int i = 0; i < w * h; i++)
                 {
                     double stored = 0;
                     if (bits == 16 && i * 2 + 1 < rawBytes.Length)
-                        stored = repr == 1 
-                            ? (short)(rawBytes[i*2] | (rawBytes[i*2+1] << 8))
-                            : (ushort)(rawBytes[i*2] | (rawBytes[i*2+1] << 8));
+                        stored = repr == 1
+                            ? BitConverter.ToInt16(rawBytes, i * 2)
+                            : BitConverter.ToUInt16(rawBytes, i * 2);
                     else if (bits == 8 && i < rawBytes.Length)
                         stored = rawBytes[i];
 
@@ -189,7 +189,7 @@ public static class DicomLoader
         {
             var ds = slices[z].File.Dataset;
             double slope = ds.GetSingleValueOrDefault(DicomTag.RescaleSlope, 1.0);
-            double intercept = ds.GetSingleValueOrDefault(DicomTag.RescaleIntercept, 0.0);
+            double intercept = ds.GetSingleValueOrDefault(DicomTag.RescaleIntercept, -1024.0);
             int bits = ds.GetSingleValueOrDefault(DicomTag.BitsAllocated, 16);
             int repr = ds.GetSingleValueOrDefault(DicomTag.PixelRepresentation, 0);
 
@@ -206,8 +206,8 @@ public static class DicomLoader
                     int bi = idx * 2;
                     if (bi + 1 < rawBytes.Length)
                         stored = repr == 1
-                            ? (short)(rawBytes[bi] | (rawBytes[bi + 1] << 8))
-                            : (ushort)(rawBytes[bi] | (rawBytes[bi + 1] << 8));
+                            ? BitConverter.ToInt16(rawBytes, bi)
+                            : BitConverter.ToUInt16(rawBytes, bi);
                 }
                 else if (bits == 8 && idx < rawBytes.Length)
                     stored = rawBytes[idx];

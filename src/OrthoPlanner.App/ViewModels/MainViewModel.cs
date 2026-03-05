@@ -720,6 +720,10 @@ public partial class MainViewModel : ObservableObject
             IsoMin = -1000; // Always start exactly at -1000 (air) for predictable UI
             IsoMax = Volume.MaxValue;
 
+            // Reset to bone window (W:2000, C:400) so CT slices show correctly on every load
+            WindowCenter = 400;
+            WindowWidth = 2000;
+
             IsVolumeLoaded = true;
             UpdateAllSlices();
             UpdateHistograms();
