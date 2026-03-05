@@ -83,7 +83,7 @@ public static class DicomLoader
             try
             {
                 int midIdx = slices.Count / 2;
-                var midDcm = await DicomFile.OpenAsync(slices[midIdx].File);
+                var midDcm = await DicomFile.OpenAsync(slices[midIdx].File, FileReadOption.ReadAll);
                 var ds = midDcm.Dataset;
                 
                 int w = ds.GetSingleValue<int>(DicomTag.Columns);
@@ -145,20 +145,23 @@ public static class DicomLoader
         if (filePaths == null || filePaths.Count == 0)
             throw new ArgumentException("File paths list is empty.");
 
-        var slices = new List<(DicomFile File, double SlicePosition)>();
+        // ── Phase 1: scan for slice positions (metadata only, no pixel data held in memory) ──
+        var slices = new List<(string Path, double SlicePosition)>();
         foreach (var filePath in filePaths)
         {
             try
             {
+                // Default open is fine here — we only read small metadata tags
                 var dcm = await DicomFile.OpenAsync(filePath);
                 if (!dcm.Dataset.Contains(DicomTag.PixelData)) continue;
+
                 double slicePos = dcm.Dataset.GetSingleValueOrDefault(DicomTag.SliceLocation, 0.0);
                 if (slicePos == 0.0 && dcm.Dataset.Contains(DicomTag.ImagePositionPatient))
                 {
                     var ipp = dcm.Dataset.GetValues<double>(DicomTag.ImagePositionPatient);
                     if (ipp.Length >= 3) slicePos = ipp[2];
                 }
-                slices.Add((dcm, slicePos));
+                slices.Add((filePath, slicePos));
             }
             catch { continue; }
         }
@@ -168,7 +171,10 @@ public static class DicomLoader
 
         slices.Sort((a, b) => a.SlicePosition.CompareTo(b.SlicePosition));
 
-        var first = slices[0].File.Dataset;
+        // Read volume geometry from first slice
+        var firstDcm = await DicomFile.OpenAsync(slices[0].Path);
+        var first = firstDcm.Dataset;
+
         int width = first.GetSingleValue<int>(DicomTag.Columns);
         int height = first.GetSingleValue<int>(DicomTag.Rows);
         int depth = slices.Count;
@@ -192,56 +198,64 @@ public static class DicomLoader
         volume.StudyDate = first.GetSingleValueOrDefault(DicomTag.StudyDate, "");
         volume.SeriesDescription = first.GetSingleValueOrDefault(DicomTag.SeriesDescription, "");
 
+        // ── Phase 2: read pixel data slice by slice ──
+        // Each file is re-opened with FileReadOption.ReadAll to guarantee that pixel
+        // bytes are fully loaded into memory — avoids fo-dicom's lazy IByteBuffer
+        // returning garbage for Implicit VR / large-tag deferred reads.
         for (int z = 0; z < depth; z++)
         {
-            var ds = slices[z].File.Dataset;
-            double slope = ds.GetSingleValueOrDefault(DicomTag.RescaleSlope, 1.0);
-            double intercept = ds.GetSingleValueOrDefault(DicomTag.RescaleIntercept, -1024.0);
-            int bits = ds.GetSingleValueOrDefault(DicomTag.BitsAllocated, 16);
-            int repr = ds.GetSingleValueOrDefault(DicomTag.PixelRepresentation, 0);
-
-            // Fix 4: detect encapsulated (compressed) transfer syntax
-            var ts = ds.InternalTransferSyntax;
-            bool isCompressed = ts != null && ts.IsEncapsulated;
-
-            var pixelData = DicomPixelData.Create(ds);
-            // For encapsulated data, fo-dicom decodes internally; for raw LE we get bytes directly
-            var rawBytes = pixelData.GetFrame(0).Data;
-
-            for (int y = 0; y < height; y++)
-            for (int x = 0; x < width; x++)
+            try
             {
-                int idx = x + y * width;
-                double stored = 0;
+                var dcm = await DicomFile.OpenAsync(slices[z].Path, FileReadOption.ReadAll);
+                var ds = dcm.Dataset;
 
-                if (bits == 16)
-                {
-                    int bi = idx * 2;
-                    // Fix 1: bounds check — write air (-1000 HU) and skip out-of-range pixels
-                    if (bi + 2 > rawBytes.Length)
-                    {
-                        volume.SetVoxel(x, y, z, -1000);
-                        continue;
-                    }
-                    // Fix 2: signed pixels use ToInt16; unsigned use ToUInt16
-                    stored = repr == 1
-                        ? BitConverter.ToInt16(rawBytes, bi)
-                        : (double)BitConverter.ToUInt16(rawBytes, bi);
-                }
-                else if (bits == 8)
-                {
-                    if (idx >= rawBytes.Length)
-                    {
-                        volume.SetVoxel(x, y, z, -1000);
-                        continue;
-                    }
-                    stored = rawBytes[idx];
-                }
+                double slope = ds.GetSingleValueOrDefault(DicomTag.RescaleSlope, 1.0);
+                double intercept = ds.GetSingleValueOrDefault(DicomTag.RescaleIntercept, -1024.0);
+                int bits = ds.GetSingleValueOrDefault(DicomTag.BitsAllocated, 16);
+                int repr = ds.GetSingleValueOrDefault(DicomTag.PixelRepresentation, 0);
 
-                // Fix 3: apply RescaleSlope + RescaleIntercept, clamp to standard CT HU range
-                double hu = stored * slope + intercept;
-                volume.SetVoxel(x, y, z, (short)Math.Clamp(hu, -1024, 3071));
+                var pixelData = DicomPixelData.Create(ds);
+                byte[] rawBytes = pixelData.GetFrame(0).Data;
+
+                for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                {
+                    int idx = x + y * width;
+
+                    if (bits == 16)
+                    {
+                        int bi = idx * 2;
+                        if (bi + 2 > rawBytes.Length)
+                        {
+                            volume.SetVoxel(x, y, z, -1000); // out-of-bounds → air
+                            continue;
+                        }
+                        double raw = repr == 1
+                            ? BitConverter.ToInt16(rawBytes, bi)   // SIGNED Int16
+                            : (double)BitConverter.ToUInt16(rawBytes, bi);
+                        double hu = raw * slope + intercept;
+                        volume.SetVoxel(x, y, z, (short)Math.Clamp(hu, -1024, 3071));
+                    }
+                    else if (bits == 8)
+                    {
+                        if (idx >= rawBytes.Length)
+                        {
+                            volume.SetVoxel(x, y, z, -1000);
+                            continue;
+                        }
+                        double hu = rawBytes[idx] * slope + intercept;
+                        volume.SetVoxel(x, y, z, (short)Math.Clamp(hu, -1024, 3071));
+                    }
+                }
             }
+            catch
+            {
+                // Failed slice → fill with air so volume isn't corrupted
+                for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                    volume.SetVoxel(x, y, z, -1000);
+            }
+
             progress?.Invoke((double)(z + 1) / depth);
         }
 
