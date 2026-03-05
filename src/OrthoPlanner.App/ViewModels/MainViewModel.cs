@@ -1387,7 +1387,7 @@ public partial class MainViewModel : ObservableObject
 
             StatusText = "Opening Cranium/Mandible Split wizard...";
 
-            var wizard = new CondyleSplitWindow(boneSegment.Vertices, upper.Vertices, lower.Vertices);
+            var wizard = new CondyleSplitWindow(boneSegment.Vertices, upper.Vertices, lower.Vertices, Volume);
             wizard.Owner = System.Windows.Application.Current.MainWindow;
 
             if (wizard.ShowDialog() == true && wizard.Accepted)

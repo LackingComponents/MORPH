@@ -8,6 +8,7 @@ using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using HelixToolkit.Wpf;
 using OrthoPlanner.Core.Geometry;
+using OrthoPlanner.Core.Imaging;
 using OrthoPlanner.App.ViewModels;
 
 namespace OrthoPlanner.App;
@@ -18,17 +19,18 @@ public partial class CondyleSplitWindow : Window
     private readonly List<float[]> _boneVerts;
     private readonly List<float[]> _upperCastVerts;
     private readonly List<float[]> _lowerCastVerts;
+    private readonly VolumeData? _ctVolume; // CT bone mask for future use
 
-    // User-picked arch landmarks (3D points along the occlusal arch)
+    // User-picked arch landmarks
     private readonly List<(double X, double Y, double Z)> _archLandmarks = new();
     private readonly List<Visual3D> _archMarkerVisuals = new();
 
     // Condylar bounding boxes
     private float[]? _leftCondyleCenter;
     private float[]? _rightCondyleCenter;
-    private static readonly float[] DefaultHalfExtents = { 12.5f, 12.5f, 12.5f };
+    private static readonly float[] DefaultHalfExtents = { 15f, 15f, 15f }; // 30mm cube
 
-    // Intermediate mesh after arch subtraction (before condyle split)
+    // Intermediate mesh after arch subtraction
     private List<float[]>? _archSubtractedBone;
 
     // Final results
@@ -53,17 +55,20 @@ public partial class CondyleSplitWindow : Window
     public (double X, double Y, double Z)? LeftCondyleCenter { get; private set; }
     public (double X, double Y, double Z)? RightCondyleCenter { get; private set; }
 
-    public CondyleSplitWindow(List<float[]> boneVerts, List<float[]> upperCastVerts, List<float[]> lowerCastVerts)
+    public CondyleSplitWindow(
+        List<float[]> boneVerts, List<float[]> upperCastVerts, List<float[]> lowerCastVerts,
+        VolumeData? ctVolume = null)
     {
         InitializeComponent();
         _boneVerts = boneVerts.Select(v => new float[] { v[0], v[1], v[2] }).ToList();
         _upperCastVerts = upperCastVerts;
         _lowerCastVerts = lowerCastVerts;
+        _ctVolume = ctVolume;
         Loaded += (_, _) => SetupStep1();
     }
 
     // ════════════════════════════════════════
-    // STEP 1: Pick arch landmarks on the occlusal surface
+    // STEP 1: Pick arch landmarks
     // ════════════════════════════════════════
     private void SetupStep1()
     {
@@ -89,16 +94,19 @@ public partial class CondyleSplitWindow : Window
         MainViewport.ZoomExtents(500);
 
         StepTitle.Text = "Step 1: Pick Occlusal Arch Points";
-        StepInstructions.Text = "Click 3–5 points along the dental arch: between the central incisors + occlusal surface of posterior teeth (left & right). Then click 'Remove Occlusal Region'.";
+        StepInstructions.Text =
+            "Click 3–5 points along the dental arch: between the central incisors + " +
+            "occlusal surface of most posterior teeth (left & right). Then click 'Remove Occlusal Region'.";
         StatusText.Text = "0 arch points placed (need at least 3)";
         SplitBtn.Visibility = Visibility.Visible;
         SplitBtn.Content = "Remove Occlusal Region";
+        SplitBtn.IsEnabled = true;
         ConfirmBtn.Visibility = Visibility.Collapsed;
         AcceptBtn.Visibility = Visibility.Collapsed;
     }
 
     // ════════════════════════════════════════
-    // STEP 1→2: Remove occlusal region, then show condyle placement
+    // STEP 1→2: Arch subtraction (dental cast removal + arch tube)
     // ════════════════════════════════════════
     private async void PerformArchSubtraction()
     {
@@ -109,57 +117,72 @@ public partial class CondyleSplitWindow : Window
             return;
         }
 
+        SplitBtn.IsEnabled = false;
+        StatusText.Text = "Computing arch subtraction... please wait.";
+
         try
         {
-            SplitBtn.IsEnabled = false;
-            StatusText.Text = "Computing arch subtraction...";
+            // Run heavy computation on background thread
+            var archLandmarksCopy = _archLandmarks.ToList();
+            var boneVertsCopy = _boneVerts;
+            var upperCopy = _upperCastVerts;
+            var lowerCopy = _lowerCastVerts;
 
-            await Task.Run(() =>
+            var result = await Task.Run(() =>
             {
-                // 1. Build a 3D spline through the arch landmarks
-                var spline3D = BuildDense3DSpline(_archLandmarks, stepsPerSegment: 40);
+                // 1. Build dense 3D Catmull-Rom spline through the arch landmarks
+                var spline3D = SplineHelper.ComputeCatmullRom3D(archLandmarksCopy, stepsPerSegment: 50);
 
-                // 2. Remove bone triangles near dental casts
-                var allCastVerts = MeshOps.MergeVertices(_upperCastVerts, _lowerCastVerts);
+                // 2. Remove bone triangles near dental casts (proximity subtraction)
+                var allCastVerts = MeshOps.MergeVertices(upperCopy, lowerCopy);
                 var castTree = new KdTree();
                 castTree.Build(allCastVerts);
-                var cleaned = MeshOps.SubtractByProximity(_boneVerts, castTree, 2.0f);
+                var cleaned = MeshOps.SubtractByProximity(boneVertsCopy, castTree, 2.0f);
 
-                // 3. Remove bone triangles inside the 20mm arch tube
+                // 3. Remove bone inside the arch tube (10mm radius = 20mm diameter in all directions)
                 cleaned = MeshOps.SubtractByArchVolume(cleaned, spline3D, 10.0f);
 
-                _archSubtractedBone = cleaned;
+                return cleaned;
             });
 
-            // 4. Show the result — bone with arch gap, plus the dental casts
-            MainViewport.Children.Clear();
-            AddLighting();
+            _archSubtractedBone = result;
 
-            var boneModel = MeshHelper.BuildModel3D(_archSubtractedBone!, 200, 190, 180);
-            MainViewport.Children.Add(new ModelVisual3D { Content = boneModel });
+            // Show the result
+            Dispatcher.Invoke(() =>
+            {
+                MainViewport.Children.Clear();
+                AddLighting();
 
-            // Show casts faintly for reference
-            var upperModel = MeshHelper.BuildModel3D(_upperCastVerts, 255, 220, 80, 100);
-            MainViewport.Children.Add(new ModelVisual3D { Content = upperModel });
-            var lowerModel = MeshHelper.BuildModel3D(_lowerCastVerts, 80, 160, 255, 100);
-            MainViewport.Children.Add(new ModelVisual3D { Content = lowerModel });
+                var boneModel = MeshHelper.BuildModel3D(_archSubtractedBone, 200, 190, 180);
+                MainViewport.Children.Add(new ModelVisual3D { Content = boneModel });
 
-            MainViewport.ZoomExtents(500);
+                // Dental casts faintly
+                var upperModel = MeshHelper.BuildModel3D(_upperCastVerts, 255, 220, 80, 100);
+                MainViewport.Children.Add(new ModelVisual3D { Content = upperModel });
+                var lowerModel = MeshHelper.BuildModel3D(_lowerCastVerts, 80, 160, 255, 100);
+                MainViewport.Children.Add(new ModelVisual3D { Content = lowerModel });
 
-            // Move to step 2: condyle placement
-            _currentStep = 2;
-            StepTitle.Text = "Step 2: Place Condylar Bounding Boxes";
-            StepInstructions.Text = "Click on each lateral condyle (left, then right) to place a 25mm bounding box. Drag to adjust. Then click 'Split'.";
-            StatusText.Text = $"Arch subtracted. Remaining: {_archSubtractedBone!.Count / 3} tris. Now place condylar boxes.";
-            SplitBtn.Content = "Split";
-            SplitBtn.IsEnabled = true;
-            // SplitBtn now does the final split with condyles
+                MainViewport.ZoomExtents(500);
+
+                _currentStep = 2;
+                StepTitle.Text = "Step 2: Place Condylar Bounding Boxes";
+                StepInstructions.Text =
+                    "Click on the lateral aspect of each condyle (left, then right) to grow " +
+                    "a 30mm bounding box. Drag boxes to reposition. Then click 'Split'.";
+                StatusText.Text = $"Arch subtracted. {_archSubtractedBone.Count / 3} tris remaining. Place condylar boxes now.";
+                SplitBtn.Content = "Split";
+                SplitBtn.IsEnabled = true;
+            });
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Arch subtraction failed:\n{ex.Message}\n\n{ex.StackTrace}",
-                "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            SplitBtn.IsEnabled = true;
+            Dispatcher.Invoke(() =>
+            {
+                MessageBox.Show($"Arch subtraction failed:\n{ex.Message}\n\n{ex.StackTrace}",
+                    "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                SplitBtn.IsEnabled = true;
+                StatusText.Text = "Error during arch subtraction. Try again.";
+            });
         }
     }
 
@@ -170,90 +193,100 @@ public partial class CondyleSplitWindow : Window
     {
         if (_leftCondyleCenter == null || _rightCondyleCenter == null)
         {
-            MessageBox.Show("Please place both left and right condylar bounding boxes before splitting.",
+            MessageBox.Show("Please place both condylar bounding boxes first.",
                 "Missing Condyles", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         if (_archSubtractedBone == null) return;
 
+        SplitBtn.IsEnabled = false;
+        StatusText.Text = "Computing final split... please wait.";
+
         try
         {
-            SplitBtn.IsEnabled = false;
-            StatusText.Text = "Computing final split...";
+            var bone = _archSubtractedBone;
+            var leftC = _leftCondyleCenter;
+            var rightC = _rightCondyleCenter;
 
-            await Task.Run(() =>
+            var (cranium, mandible) = await Task.Run(() =>
             {
-                // Remove bone triangles inside each condylar bounding box — this disconnects the condyles
-                var bone = _archSubtractedBone;
-                bone = MeshOps.ExcludeBoundingBox(bone, _leftCondyleCenter, DefaultHalfExtents);
-                bone = MeshOps.ExcludeBoundingBox(bone, _rightCondyleCenter, DefaultHalfExtents);
+                // Remove triangles inside each condylar bounding box to disconnect the TMJ
+                var separated = MeshOps.ExcludeBoundingBox(bone, leftC, DefaultHalfExtents);
+                separated = MeshOps.ExcludeBoundingBox(separated, rightC, DefaultHalfExtents);
 
                 // Connected component labeling to find the pieces
-                var components = MeshOps.LabelConnectedComponents(bone);
+                var components = MeshOps.LabelConnectedComponents(separated);
 
                 // Largest = cranium, second = mandible
-                _craniumVerts = components.Count > 0 ? components[0] : new List<float[]>();
-                _mandibleVerts = components.Count > 1 ? components[1] : new List<float[]>();
+                var cran = components.Count > 0 ? components[0] : new List<float[]>();
+                var mand = components.Count > 1 ? components[1] : new List<float[]>();
 
-                // Now re-add the condylar box contents to the appropriate pieces.
-                // Condylar content above the midpoint Z of the boxes goes to cranium,
-                // below goes to mandible.
-                float condyleMidZ = (_leftCondyleCenter[2] + _rightCondyleCenter[2]) / 2f;
-
-                var leftBoxTris = MeshOps.ClipToBoundingBox(_archSubtractedBone, _leftCondyleCenter, DefaultHalfExtents);
-                var rightBoxTris = MeshOps.ClipToBoundingBox(_archSubtractedBone, _rightCondyleCenter, DefaultHalfExtents);
+                // Re-add condylar box contents: above midZ → cranium, below → mandible
+                float midZ = (leftC[2] + rightC[2]) / 2f;
+                var leftBoxTris = MeshOps.ClipToBoundingBox(bone, leftC, DefaultHalfExtents);
+                var rightBoxTris = MeshOps.ClipToBoundingBox(bone, rightC, DefaultHalfExtents);
                 var condyleTris = MeshOps.MergeVertices(leftBoxTris, rightBoxTris);
+                var (above, below) = MeshOps.SplitByZPlane(condyleTris, midZ);
 
-                var (condAbove, condBelow) = MeshOps.SplitByZPlane(condyleTris, condyleMidZ);
-                _craniumVerts = MeshOps.MergeVertices(_craniumVerts, condAbove);
-                _mandibleVerts = MeshOps.MergeVertices(_mandibleVerts, condBelow);
+                cran = MeshOps.MergeVertices(cran, above);
+                mand = MeshOps.MergeVertices(mand, below);
+
+                return (cran, mand);
             });
 
-            // Show result
-            MainViewport.Children.Clear();
-            AddLighting();
+            _craniumVerts = cranium;
+            _mandibleVerts = mandible;
 
-            if (_craniumVerts!.Count > 0)
+            Dispatcher.Invoke(() =>
             {
-                var cranModel = MeshHelper.BuildModel3D(_craniumVerts, 220, 200, 170);
-                MainViewport.Children.Add(new ModelVisual3D { Content = cranModel });
-            }
-            if (_mandibleVerts!.Count > 0)
-            {
-                var mandModel = MeshHelper.BuildModel3D(_mandibleVerts, 180, 200, 220);
-                MainViewport.Children.Add(new ModelVisual3D { Content = mandModel });
-            }
+                MainViewport.Children.Clear();
+                AddLighting();
 
-            // Condylar axis
-            var axisLine = new LinesVisual3D { Color = Colors.Red, Thickness = 3 };
-            axisLine.Points.Add(new Point3D(_leftCondyleCenter[0], _leftCondyleCenter[1], _leftCondyleCenter[2]));
-            axisLine.Points.Add(new Point3D(_rightCondyleCenter[0], _rightCondyleCenter[1], _rightCondyleCenter[2]));
-            MainViewport.Children.Add(axisLine);
+                if (_craniumVerts.Count > 0)
+                {
+                    var cranModel = MeshHelper.BuildModel3D(_craniumVerts, 220, 200, 170);
+                    MainViewport.Children.Add(new ModelVisual3D { Content = cranModel });
+                }
+                if (_mandibleVerts.Count > 0)
+                {
+                    var mandModel = MeshHelper.BuildModel3D(_mandibleVerts, 180, 200, 220);
+                    MainViewport.Children.Add(new ModelVisual3D { Content = mandModel });
+                }
 
-            AddSphereMarker(_leftCondyleCenter, Colors.LimeGreen, 3);
-            AddSphereMarker(_rightCondyleCenter, Colors.OrangeRed, 3);
-            RebuildBoxVisuals();
+                // Condylar axis
+                var axisLine = new LinesVisual3D { Color = Colors.Red, Thickness = 3 };
+                axisLine.Points.Add(new Point3D(_leftCondyleCenter[0], _leftCondyleCenter[1], _leftCondyleCenter[2]));
+                axisLine.Points.Add(new Point3D(_rightCondyleCenter[0], _rightCondyleCenter[1], _rightCondyleCenter[2]));
+                MainViewport.Children.Add(axisLine);
 
-            MainViewport.ZoomExtents(500);
+                AddSphereMarker(_leftCondyleCenter, Colors.LimeGreen, 3);
+                AddSphereMarker(_rightCondyleCenter, Colors.OrangeRed, 3);
+                RebuildBoxVisuals();
+                MainViewport.ZoomExtents(500);
 
-            // Set results
-            CraniumResult = _craniumVerts;
-            MandibleResult = _mandibleVerts;
-            LeftCondyleCenter = (_leftCondyleCenter[0], _leftCondyleCenter[1], _leftCondyleCenter[2]);
-            RightCondyleCenter = (_rightCondyleCenter[0], _rightCondyleCenter[1], _rightCondyleCenter[2]);
+                // Set public results
+                CraniumResult = _craniumVerts;
+                MandibleResult = _mandibleVerts;
+                LeftCondyleCenter = (_leftCondyleCenter[0], _leftCondyleCenter[1], _leftCondyleCenter[2]);
+                RightCondyleCenter = (_rightCondyleCenter[0], _rightCondyleCenter[1], _rightCondyleCenter[2]);
 
-            _currentStep = 3;
-            StepTitle.Text = "Step 3: Review & Accept";
-            StepInstructions.Text = "Warm = Cranium, Cool = Mandible. Red line = condylar rotation axis. Accept or Cancel to redo.";
-            StatusText.Text = $"Cranium: {_craniumVerts.Count / 3} tris | Mandible: {_mandibleVerts.Count / 3} tris";
-            SplitBtn.Visibility = Visibility.Collapsed;
-            AcceptBtn.Visibility = Visibility.Visible;
+                _currentStep = 3;
+                StepTitle.Text = "Step 3: Review & Accept";
+                StepInstructions.Text = "Warm = Cranium, Cool = Mandible. Red = condylar axis. Accept or Cancel.";
+                StatusText.Text = $"Cranium: {_craniumVerts.Count / 3} tris | Mandible: {_mandibleVerts.Count / 3} tris";
+                SplitBtn.Visibility = Visibility.Collapsed;
+                AcceptBtn.Visibility = Visibility.Visible;
+            });
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Final split failed:\n{ex.Message}\n\n{ex.StackTrace}",
-                "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            SplitBtn.IsEnabled = true;
+            Dispatcher.Invoke(() =>
+            {
+                MessageBox.Show($"Split failed:\n{ex.Message}\n\n{ex.StackTrace}",
+                    "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                SplitBtn.IsEnabled = true;
+                StatusText.Text = "Error during split. Try again.";
+            });
         }
     }
 
@@ -268,36 +301,38 @@ public partial class CondyleSplitWindow : Window
 
         if (_currentStep == 1)
         {
-            // Place arch landmark
             _archLandmarks.Add((hit.Value.X, hit.Value.Y, hit.Value.Z));
             var marker = new SphereVisual3D
             {
-                Center = hit.Value,
-                Radius = 1.5,
+                Center = hit.Value, Radius = 1.5,
                 Fill = new SolidColorBrush(Colors.Yellow)
             };
             _archMarkerVisuals.Add(marker);
             MainViewport.Children.Add(marker);
-            StatusText.Text = $"{_archLandmarks.Count} arch point(s) placed (need at least 3)";
+
+            // Draw spline preview if 2+ points
+            if (_archLandmarks.Count >= 2) DrawSplinePreview();
+
+            StatusText.Text = $"{_archLandmarks.Count} arch points placed (need at least 3)";
             e.Handled = true;
         }
         else if (_currentStep == 2)
         {
-            // Check for condyle drag
-            if (_leftCondyleCenter != null && DistanceTo(hit.Value, _leftCondyleCenter) < 15)
+            // Drag existing box?
+            if (_leftCondyleCenter != null && DistanceTo(hit.Value, _leftCondyleCenter) < 20)
             { _isDragging = true; _draggingLeft = true; e.Handled = true; return; }
-            if (_rightCondyleCenter != null && DistanceTo(hit.Value, _rightCondyleCenter) < 15)
+            if (_rightCondyleCenter != null && DistanceTo(hit.Value, _rightCondyleCenter) < 20)
             { _isDragging = true; _draggingLeft = false; e.Handled = true; return; }
 
-            // Place new condyle box
+            // Place new condyle (grow box from click point)
             if (_leftCondyleCenter == null)
             {
-                _leftCondyleCenter = new float[] { (float)hit.Value.X, (float)hit.Value.Y, (float)hit.Value.Z };
-                StatusText.Text = "Left condyle placed. Now click on the RIGHT lateral condyle.";
+                _leftCondyleCenter = new[] { (float)hit.Value.X, (float)hit.Value.Y, (float)hit.Value.Z };
+                StatusText.Text = "Left condyle placed. Now click the RIGHT lateral condyle.";
             }
             else if (_rightCondyleCenter == null)
             {
-                _rightCondyleCenter = new float[] { (float)hit.Value.X, (float)hit.Value.Y, (float)hit.Value.Z };
+                _rightCondyleCenter = new[] { (float)hit.Value.X, (float)hit.Value.Y, (float)hit.Value.Z };
                 StatusText.Text = "Both condyles placed. Drag to adjust, then click 'Split'.";
             }
             RebuildBoxVisuals();
@@ -316,10 +351,7 @@ public partial class CondyleSplitWindow : Window
 
         var center = _draggingLeft ? _leftCondyleCenter : _rightCondyleCenter;
         if (center == null) return;
-
-        center[0] = (float)hit.Value.X;
-        center[1] = (float)hit.Value.Y;
-        center[2] = (float)hit.Value.Z;
+        center[0] = (float)hit.Value.X; center[1] = (float)hit.Value.Y; center[2] = (float)hit.Value.Z;
         RebuildBoxVisuals();
         StatusText.Text = $"{(_draggingLeft ? "Left" : "Right")} condyle: ({center[0]:F1}, {center[1]:F1}, {center[2]:F1})";
     }
@@ -330,46 +362,25 @@ public partial class CondyleSplitWindow : Window
     }
 
     // ════════════════════════════════════════
-    // 3D Spline builder (X,Y,Z)
-    // ════════════════════════════════════════
-
-    /// <summary>
-    /// Build a dense 3D spline through the landmarks by doing Catmull-Rom on X,Y
-    /// and linearly interpolating Z.
-    /// </summary>
-    private static List<(double X, double Y, double Z)> BuildDense3DSpline(
-        List<(double X, double Y, double Z)> landmarks, int stepsPerSegment)
-    {
-        if (landmarks.Count < 2)
-            return landmarks.ToList();
-
-        var xy = landmarks.Select(p => (p.X, p.Y)).ToList();
-        var spline2D = SplineHelper.ComputeCatmullRom2D(xy, stepsPerSegment);
-
-        var result = new List<(double X, double Y, double Z)>(spline2D.Count);
-        int total = spline2D.Count;
-        for (int i = 0; i < total; i++)
-        {
-            double t = (double)i / Math.Max(1, total - 1);
-            double z = InterpolateZ(landmarks, t);
-            result.Add((spline2D[i].X, spline2D[i].Y, z));
-        }
-        return result;
-    }
-
-    private static double InterpolateZ(List<(double X, double Y, double Z)> pts, double t)
-    {
-        if (pts.Count == 1) return pts[0].Z;
-        double idx = t * (pts.Count - 1);
-        int lo = Math.Max(0, (int)Math.Floor(idx));
-        int hi = Math.Min(pts.Count - 1, lo + 1);
-        double frac = idx - lo;
-        return pts[lo].Z * (1 - frac) + pts[hi].Z * frac;
-    }
-
-    // ════════════════════════════════════════
     // Visual helpers
     // ════════════════════════════════════════
+    private Visual3D? _splinePreviewVisual;
+
+    private void DrawSplinePreview()
+    {
+        if (_splinePreviewVisual != null) MainViewport.Children.Remove(_splinePreviewVisual);
+
+        var spline3D = SplineHelper.ComputeCatmullRom3D(_archLandmarks, 20);
+        var lines = new LinesVisual3D { Color = Colors.Lime, Thickness = 2 };
+        for (int i = 0; i < spline3D.Count - 1; i++)
+        {
+            lines.Points.Add(new Point3D(spline3D[i].X, spline3D[i].Y, spline3D[i].Z));
+            lines.Points.Add(new Point3D(spline3D[i + 1].X, spline3D[i + 1].Y, spline3D[i + 1].Z));
+        }
+        _splinePreviewVisual = lines;
+        MainViewport.Children.Add(lines);
+    }
+
     private void AddLighting()
     {
         MainViewport.Children.Add(new ModelVisual3D { Content = new AmbientLight(Color.FromRgb(100, 100, 100)) });
@@ -383,21 +394,15 @@ public partial class CondyleSplitWindow : Window
         if (_leftBoxVisual != null) MainViewport.Children.Remove(_leftBoxVisual);
         if (_rightBoxVisual != null) MainViewport.Children.Remove(_rightBoxVisual);
         if (_leftCondyleCenter != null)
-        {
-            _leftBoxVisual = CreateBoxVisual(_leftCondyleCenter, DefaultHalfExtents, Colors.LimeGreen);
-            MainViewport.Children.Add(_leftBoxVisual);
-        }
+        { _leftBoxVisual = CreateBoxVisual(_leftCondyleCenter, DefaultHalfExtents, Colors.LimeGreen); MainViewport.Children.Add(_leftBoxVisual); }
         if (_rightCondyleCenter != null)
-        {
-            _rightBoxVisual = CreateBoxVisual(_rightCondyleCenter, DefaultHalfExtents, Colors.OrangeRed);
-            MainViewport.Children.Add(_rightBoxVisual);
-        }
+        { _rightBoxVisual = CreateBoxVisual(_rightCondyleCenter, DefaultHalfExtents, Colors.OrangeRed); MainViewport.Children.Add(_rightBoxVisual); }
     }
 
-    private ModelVisual3D CreateBoxVisual(float[] center, float[] halfExtents, Color color)
+    private ModelVisual3D CreateBoxVisual(float[] center, float[] he, Color color)
     {
         double cx = center[0], cy = center[1], cz = center[2];
-        double hx = halfExtents[0], hy = halfExtents[1], hz = halfExtents[2];
+        double hx = he[0], hy = he[1], hz = he[2];
         var c0 = new Point3D(cx-hx,cy-hy,cz-hz); var c1 = new Point3D(cx+hx,cy-hy,cz-hz);
         var c2 = new Point3D(cx+hx,cy+hy,cz-hz); var c3 = new Point3D(cx-hx,cy+hy,cz-hz);
         var c4 = new Point3D(cx-hx,cy-hy,cz+hz); var c5 = new Point3D(cx+hx,cy-hy,cz+hz);
@@ -407,7 +412,6 @@ public partial class CondyleSplitWindow : Window
         mesh.Positions = new Point3DCollection(new[]{c0,c1,c2,c3,c4,c5,c6,c7});
         mesh.TriangleIndices = new Int32Collection(new[]{0,1,2,0,2,3,4,6,5,4,7,6,0,4,5,0,5,1,2,6,7,2,7,3,0,3,7,0,7,4,1,5,6,1,6,2});
         mesh.Freeze();
-
         var brush = new SolidColorBrush(Color.FromArgb(40, color.R, color.G, color.B)); brush.Freeze();
         var mat = new DiffuseMaterial(brush); mat.Freeze();
         var model = new GeometryModel3D(mesh, mat) { BackMaterial = mat }; model.Freeze();
@@ -427,8 +431,7 @@ public partial class CondyleSplitWindow : Window
         MainViewport.Children.Add(new SphereVisual3D
         {
             Center = new Point3D(center[0], center[1], center[2]),
-            Radius = radius,
-            Fill = new SolidColorBrush(color)
+            Radius = radius, Fill = new SolidColorBrush(color)
         });
     }
 
@@ -442,7 +445,7 @@ public partial class CondyleSplitWindow : Window
     private float DistanceTo(Point3D p, float[] c)
     {
         double dx = p.X-c[0], dy = p.Y-c[1], dz = p.Z-c[2];
-        return (float)Math.Sqrt(dx*dx + dy*dy + dz*dz);
+        return (float)Math.Sqrt(dx*dx+dy*dy+dz*dz);
     }
 
     // ════════════════════════════════════════
@@ -454,20 +457,16 @@ public partial class CondyleSplitWindow : Window
         else if (_currentStep == 2) PerformFinalSplit();
     }
 
-    private void Confirm_Click(object sender, RoutedEventArgs e) { /* unused in new flow */ }
+    private void Confirm_Click(object sender, RoutedEventArgs e) { }
 
     private void Accept_Click(object sender, RoutedEventArgs e)
     {
-        Accepted = true;
-        DialogResult = true;
-        Close();
+        Accepted = true; DialogResult = true; Close();
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e)
     {
         if (_currentStep > 1) { SetupStep1(); return; }
-        Accepted = false;
-        DialogResult = false;
-        Close();
+        Accepted = false; DialogResult = false; Close();
     }
 }
