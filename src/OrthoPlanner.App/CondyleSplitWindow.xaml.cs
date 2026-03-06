@@ -264,10 +264,12 @@ public partial class CondyleSplitWindow : Window
             var ctVol = _ctVolume;
             var boneLabel = _boneLabel;
 
+            bool hardSeparation = Dispatcher.Invoke(() => HardSeparationCheck.IsChecked == true);
+
             var (cranium, mandible) = await Task.Run(() =>
                 SplitVoxelMask(normal, planeD, leftC, rightC,
                     _leftCondyleClickPoint ?? leftC, _rightCondyleClickPoint ?? rightC,
-                    leftHE, rightHE, segVol, ctVol, boneLabel));
+                    leftHE, rightHE, segVol, ctVol, boneLabel, hardSeparation));
 
             _craniumVerts = cranium;
             _mandibleVerts = mandible;
@@ -328,7 +330,7 @@ public partial class CondyleSplitWindow : Window
     private (List<float[]> cranium, List<float[]> mandible) SplitVoxelMask(
         Vector3D planeNormal, double planeD,
         float[] leftC, float[] rightC, float[] leftAnchor, float[] rightAnchor, float[] leftHE, float[] rightHE,
-        SegmentationVolume segVol, VolumeData ctVol, byte boneLabel)
+        SegmentationVolume segVol, VolumeData ctVol, byte boneLabel, bool hardSeparationMode)
     {
         byte cranLabel = 200; // Cranium top inside box
         byte mandLabel = 201; // Condyle bottom inside box
@@ -402,8 +404,24 @@ public partial class CondyleSplitWindow : Window
             
             if (segVol.Labels[idx] == unassignedAboveLabel || segVol.Labels[idx] == mandBodyLabel)
             {
-                segVol.Labels[idx] = mandLabel;
-                queue.Enqueue(idx);
+                // Expand the initial seed slightly to ensure we have a starting mass > 10 voxels
+                // otherwise the very first step of Region Growing might instantly fail bridge rejection.
+                for (int dz = -2; dz <= 2; dz++)
+                for (int dy = -2; dy <= 2; dy++)
+                for (int dx = -2; dx <= 2; dx++)
+                {
+                    int nx = cx + dx, ny = cy + dy, nz = cz + dz;
+                    if (nx >= 0 && nx < w && ny >= 0 && ny < h && nz >= 0 && nz < d)
+                    {
+                        int nIdx = nx + ny * w + nz * w * h;
+                        if ((segVol.Labels[nIdx] == unassignedAboveLabel || segVol.Labels[nIdx] == mandBodyLabel) &&
+                             ctVol.Voxels[nIdx] >= rawThreshold)
+                        {
+                            segVol.Labels[nIdx] = mandLabel;
+                            queue.Enqueue(nIdx);
+                        }
+                    }
+                }
             }
         };
 
@@ -427,6 +445,31 @@ public partial class CondyleSplitWindow : Window
                     
                     if (segVol.Labels[nIdx] == unassignedAboveLabel)
                     {
+                        // Hard Separation Mode: Ellipsoid constraint
+                        if (hardSeparationMode)
+                        {
+                            float pvx = (float)(nx * sx);
+                            float pvy = (float)(ny * sy);
+                            float pvz = (float)(nz * sz);
+
+                            // Determine which box we are closer to
+                            double distL = (pvx - leftC[0]) * (pvx - leftC[0]) + (pvy - leftC[1]) * (pvy - leftC[1]) + (pvz - leftC[2]) * (pvz - leftC[2]);
+                            double distR = (pvx - rightC[0]) * (pvx - rightC[0]) + (pvy - rightC[1]) * (pvy - rightC[1]) + (pvz - rightC[2]) * (pvz - rightC[2]);
+
+                            float[] curC = distL < distR ? leftC : rightC;
+                            float[] curHE = distL < distR ? leftHE : rightHE;
+
+                            // If we are geometrically near/inside the chosen condylar box, constrain to ellipsoid
+                            // Add a small buffer to the Z range check so we don't accidentally clip valid bone just below the box
+                            if (pvz >= curC[2] - curHE[2] && pvz <= curC[2] + curHE[2])
+                            {
+                                float dx = (pvx - curC[0]) / curHE[0];
+                                float dy = (pvy - curC[1]) / curHE[1];
+                                float dz = (pvz - curC[2]) / curHE[2];
+                                if (dx * dx + dy * dy + dz * dz > 1.0f) continue; // Outside rugby ball
+                            }
+                        }
+
                         // Bridge Rejection (>= 10 bone voxels in 3x3x3)
                         int boneNeighbors = 0;
                         for (int dz = -1; dz <= 1; dz++)
@@ -436,8 +479,8 @@ public partial class CondyleSplitWindow : Window
                             int tx = nx + dx, ty = ny + dy, tz = nz + dz;
                             if (tx >= 0 && tx < w && ty >= 0 && ty < h && tz >= 0 && tz < d)
                             {
-                                byte l = segVol.Labels[tx + ty * w + tz * w * h];
-                                if (l != 0) boneNeighbors++;
+                                int tidx = tx + ty * w + tz * w * h;
+                                if (ctVol.Voxels[tidx] >= rawThreshold) boneNeighbors++;
                             }
                         }
 

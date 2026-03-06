@@ -38,8 +38,11 @@
         </Border>
 
         <!-- Status bar -->
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,4">
-            <TextBlock x:Name="StatusText" Text="" FontSize="10" Foreground="#AAB"/>
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,4" VerticalAlignment="Center">
+            <TextBlock x:Name="StatusText" Text="" FontSize="10" Foreground="#AAB" VerticalAlignment="Center"/>
+            <CheckBox x:Name="HardSeparationCheck" Content="Hard Separation Mode" Foreground="White" 
+                      Margin="15,0,0,0" VerticalAlignment="Center" FontSize="11"
+                      ToolTip="Constrains condylar growth to an inscribed ellipsoid within the box. Use as rescue for fused joints."/>
         </StackPanel>
 
         <!-- Footer buttons -->
