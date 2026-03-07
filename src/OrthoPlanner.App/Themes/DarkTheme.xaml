@@ -218,13 +218,89 @@
     </Style>
 
     <!-- ═══ EXPANDER ═══ -->
-    <Style TargetType="Expander">
+    <Style x:Key="TransparentExpander" TargetType="Expander">
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
         <Setter Property="BorderThickness" Value="0,0,0,1" />
-        <Setter Property="Padding" Value="0,4" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Expander">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition x:Name="ContentRow" Height="0" />
+                            </Grid.RowDefinitions>
+                            
+                            <ToggleButton x:Name="HeaderSite"
+                                          IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                                          Padding="{TemplateBinding Padding}"
+                                          Background="Transparent"
+                                          BorderThickness="0">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="{TemplateBinding Background}" Padding="2,4">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <!-- Custom Simple Arrow -->
+                                                <Path x:Name="Arrow"
+                                                      Data="M 0,0 L 4,4 L 0,8"
+                                                      Stroke="White"
+                                                      StrokeThickness="1.5"
+                                                      VerticalAlignment="Center"
+                                                      HorizontalAlignment="Center"
+                                                      Width="6" Height="10"
+                                                      Margin="4,0,8,0">
+                                                    <Path.RenderTransform>
+                                                        <RotateTransform Angle="0" CenterX="3" CenterY="5" />
+                                                    </Path.RenderTransform>
+                                                </Path>
+                                                <ContentPresenter Grid.Column="1"
+                                                                  Content="{TemplateBinding Content}"
+                                                                  VerticalAlignment="Center" />
+                                            </Grid>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="Arrow" Property="RenderTransform">
+                                                    <Setter.Value>
+                                                        <RotateTransform Angle="90" CenterX="3" CenterY="5" />
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                                <ContentPresenter Content="{TemplateBinding Header}"
+                                                  ContentTemplate="{TemplateBinding HeaderTemplate}"
+                                                  ContentStringFormat="{TemplateBinding HeaderStringFormat}" />
+                            </ToggleButton>
+                            
+                            <ContentPresenter Grid.Row="1" x:Name="ExpandSite"
+                                              Margin="{TemplateBinding Padding}"
+                                              Visibility="Collapsed"
+                                              Focusable="false" />
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsExpanded" Value="True">
+                            <Setter TargetName="ExpandSite" Property="Visibility" Value="Visible" />
+                            <Setter TargetName="ContentRow" Property="Height" Value="*" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
+
+    <Style TargetType="Expander" BasedOn="{StaticResource TransparentExpander}" />
 
     <!-- ═══ CONTEXT MENU ═══ -->
     <Style TargetType="ContextMenu">

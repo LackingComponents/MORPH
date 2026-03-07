@@ -104,6 +104,7 @@ public partial class MainViewModel : ObservableObject
 
     // ─── Segmentation (Independent Thresholds) ───
     private SegmentationVolume? _segVolume;
+    private SegmentationVolume? _boneOnlySegVolume; // A pristine backup purely for the Cranium/Mandible split
     [ObservableProperty] private double _boneMinHU = 400;
     [ObservableProperty] private double _boneMaxHU = 3071;
     [ObservableProperty] private bool _showBoneOverlay;
@@ -301,6 +302,7 @@ public partial class MainViewModel : ObservableObject
     }
 
     [ObservableProperty] private bool _enhanceSegmentation = true;
+    [ObservableProperty] private bool _closeHolesAfterMerge = false;
     [ObservableProperty] private bool _cleanDentalSegmentation = true;
 
     // ─── Environment Lighting ───
@@ -1043,6 +1045,14 @@ public partial class MainViewModel : ObservableObject
 
         StatusText = $"Segmented {count:N0} voxels ({min}–{max} HU)";
         LoadProgress = 100;
+
+        // Isolate the pure bone mask so that subsequent segmentations (e.g., Dental) do not overwrite and destroy it
+        if (name.Contains("Bone"))
+        {
+            _boneOnlySegVolume = new SegmentationVolume(Volume);
+            Array.Copy(_segVolume.Labels, _boneOnlySegVolume.Labels, _segVolume.Labels.Length);
+        }
+
         IsLoading = false;
     }
 
@@ -1335,17 +1345,27 @@ public partial class MainViewModel : ObservableObject
 
             StatusText = $"Aligning {scan.Name}...";
 
-            var wizard = new DentalAlignmentWindow(Volume, ctSegment.Vertices, scan.Vertices);
+            var wizard = new DentalAlignmentWindow(Volume!, ctSegment.Vertices, scan.Vertices);
             wizard.Owner = System.Windows.Application.Current.MainWindow;
             wizard.Title = $"Align: {scan.Name}";
 
             if (wizard.ShowDialog() == true && wizard.Accepted && wizard.FinalTransform != null)
             {
+                SaveStateForUndo();
+                
                 // Apply the transform to the actual vertices
                 await Task.Run(() => IcpAligner.TransformVertices(scan.Vertices, wizard.FinalTransform));
                 scan.BuildModel();
+
+                if (wizard.CleanMerged && wizard.CleanMergedVertices != null)
+                {
+                    ctSegment.Vertices = wizard.CleanMergedVertices;
+                    ctSegment.BuildModel();
+                    scan.IsVisible = false; // Hide the separate STL cast since it is now part of the bone body
+                }
+
                 RefreshCombinedModel();
-                StatusText = $"Aligned: {scan.Name}";
+                StatusText = $"Aligned{(wizard.CleanMerged ? " and Merged" : "")}: {scan.Name}";
             }
             else
             {
@@ -1373,23 +1393,14 @@ public partial class MainViewModel : ObservableObject
                 return;
             }
 
-            // Find upper and lower dental casts
-            var upper = ImportedMeshes.FirstOrDefault(m => m.ScanType == DentalScanType.Upper);
-            var lower = ImportedMeshes.FirstOrDefault(m => m.ScanType == DentalScanType.Lower);
-
-            if (upper?.Vertices == null || lower?.Vertices == null)
-            {
-                System.Windows.MessageBox.Show(
-                    "Please import and align both Upper and Lower dental casts before splitting.",
-                    "Missing Dental Casts", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
-                return;
-            }
-
             StatusText = "Opening Cranium/Mandible Split wizard...";
 
+            // Use the isolated bone mask if available, so Dental/SoftTissue overwrites don't interfere
+            var splitTargetVolume = _boneOnlySegVolume ?? _segVolume;
+
             var wizard = new CondyleSplitWindow(
-                boneSegment.Vertices, upper.Vertices, lower.Vertices,
-                Volume, _segVolume, boneSegment.Label, BoneMinHU);
+                boneSegment.Vertices,
+                Volume, splitTargetVolume, boneSegment.Label, BoneMinHU);
             wizard.Owner = System.Windows.Application.Current.MainWindow;
 
             if (wizard.ShowDialog() == true && wizard.Accepted)
@@ -1446,6 +1457,88 @@ public partial class MainViewModel : ObservableObject
                 $"Cranium/Mandible split failed:\n{ex.Message}\n\n{ex.StackTrace}",
                 "Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
             StatusText = "Cranium/Mandible split failed.";
+        }
+    }
+
+    [RelayCommand]
+    private async Task CleanMergeCastAsync()
+    {
+        await Task.Yield(); // Ensure UI stays responsive
+
+        try
+        {
+            // First we need a base model (usually Mandible or Maxilla, falling back to HardTissueModel)
+            // But since this replaces the existing segment we need to know exactly which one.
+            // A more robust way: Find the aligned dental cast, then its corresponding bone.
+            var scansToMerge = ImportedMeshes
+                .Where(m => (m.ScanType == DentalScanType.Upper || m.ScanType == DentalScanType.Lower) && m.Vertices != null && m.IsVisible)
+                .ToList();
+
+            if (scansToMerge.Count == 0)
+            {
+                System.Windows.MessageBox.Show(
+                    "No visible aligned Upper or Lower dental casts found.\nPlease import, align, and make visible the cast you wish to merge.",
+                    "No Dental Cast", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+                return;
+            }
+
+            // Prefer an already split Mandible or Maxilla, then fallback to general bone
+            var mandible = Segments.FirstOrDefault(s => s.Name.Contains("Mandible"));
+            var maxilla = Segments.FirstOrDefault(s => s.Name.Contains("Maxilla") || s.Name.Contains("Cranium"));
+            
+            bool modifiedAny = false;
+
+            foreach (var scan in scansToMerge)
+            {
+                SegmentViewModel? targetBone = null;
+
+                if (scan.ScanType == DentalScanType.Lower) targetBone = mandible ?? HardTissueModel;
+                else if (scan.ScanType == DentalScanType.Upper) targetBone = maxilla ?? HardTissueModel;
+
+                if (targetBone?.Vertices == null || targetBone.Vertices.Count == 0)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Corresponding bone segment not found for {scan.Name}. Skipping.");
+                    continue;
+                }
+
+                StatusText = $"Cleaning {targetBone.Name} and merging with {scan.Name}...";
+                IsLoading = true;
+                LoadProgress = 0;
+
+                SaveStateForUndo();
+
+                var mergedVertices = await Task.Run(() => MeshOps.CleanAndMergeDentalCast(targetBone.Vertices, scan.Vertices!, CloseHolesAfterMerge));
+
+                if (mergedVertices.Count > 0)
+                {
+                    targetBone.Vertices = mergedVertices;
+                    targetBone.BuildModel();
+                    scan.IsVisible = false; // Hide original cast
+                    modifiedAny = true;
+                }
+            }
+
+            if (modifiedAny)
+            {
+                RefreshCombinedModel();
+                StatusText = $"Successfully cleaned and merged all visible casts!";
+            }
+            else
+            {
+                StatusText = "Clean & Merge operation failed to produce geometry.";
+            }
+
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show(
+                $"Clean and Merge failed:\n{ex.Message}\n\n{ex.StackTrace}",
+                "Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+            StatusText = "Clean and merge failed.";
+        }
+        finally
+        {
+            IsLoading = false;
         }
     }
 

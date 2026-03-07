@@ -42,6 +42,8 @@ public partial class DentalAlignmentWindow : Window
 
     public bool Accepted { get; private set; }
     public double[,]? FinalTransform { get; private set; }
+    public bool CleanMerged { get; private set; }
+    public List<float[]>? CleanMergedVertices { get; private set; }
 
     public DentalAlignmentWindow(OrthoPlanner.Core.Imaging.VolumeData ctVolume, List<float[]> ctVertices, List<float[]> stlVertices)
     {
@@ -301,6 +303,7 @@ public partial class DentalAlignmentWindow : Window
         UpdateLandmarkUI();
         RmsText.Text = "";
         AcceptBtn.Visibility = Visibility.Collapsed;
+        CleanMergeBtn.Visibility = Visibility.Collapsed;
     }
 
     // ═══ ICP Compute & Vivid Overlay ═══
@@ -390,6 +393,8 @@ public partial class DentalAlignmentWindow : Window
             StepTitle.Text = "Step 3: Review Alignment";
             StepInstructions.Text = "Review the right viewport! (Blue = CT, Gold = Scan). Pan/Rotate to check accuracy. If good, click Accept.";
             AcceptBtn.Visibility = Visibility.Visible;
+            CleanMergeBtn.Visibility = Visibility.Visible;
+            CloseHolesCheckBox.Visibility = Visibility.Visible;
             SkipIcpCheckBox.Visibility = Visibility.Collapsed;
 
             // ─── Generate 2D Panoramic MPR Overlay ───
@@ -444,6 +449,39 @@ public partial class DentalAlignmentWindow : Window
         }
     }
 
+    private async void CleanMerge_Click(object sender, RoutedEventArgs e)
+    {
+        if (FinalTransform == null) return;
+        
+        StepTitle.Text = "Step 4: Cleaning and Merging...";
+        StepInstructions.Text = "Executing complex boolean mesh operations. Please wait...";
+        CleanMergeBtn.IsEnabled = false;
+        AcceptBtn.IsEnabled = false;
+
+        try
+        {
+            var previewVerts = _stlOriginalVertices.Select(v => new float[] { v[0], v[1], v[2] }).ToList();
+            IcpAligner.TransformVertices(previewVerts, FinalTransform);
+
+            bool closeHoles = CloseHolesCheckBox.IsChecked == true;
+            var mergedBone = await Task.Run(() => MeshOps.CleanAndMergeDentalCast(_ctVertices, previewVerts, closeHoles));
+
+            CleanMerged = true;
+            CleanMergedVertices = mergedBone;
+            Accepted = true;
+            DialogResult = true;
+            Close();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Clean & Merge failed: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            StepTitle.Text = "Step 3: Review Alignment";
+            StepInstructions.Text = "Clean & Merge failed. You can still Accept the standard alignment.";
+            CleanMergeBtn.IsEnabled = true;
+            AcceptBtn.IsEnabled = true;
+        }
+    }
+
     private void Accept_Click(object sender, RoutedEventArgs e)
     {
         Accepted = true;
@@ -457,6 +495,8 @@ public partial class DentalAlignmentWindow : Window
         if (AcceptBtn.Visibility == Visibility.Visible)
         {
             AcceptBtn.Visibility = Visibility.Collapsed;
+            CleanMergeBtn.Visibility = Visibility.Collapsed;
+            CloseHolesCheckBox.Visibility = Visibility.Collapsed;
             SkipIcpCheckBox.Visibility = Visibility.Visible;
             PanoramicRow.Height = new GridLength(0); // Hide MPR
             StlViewport.Children.Clear(); // Clear alignment preview

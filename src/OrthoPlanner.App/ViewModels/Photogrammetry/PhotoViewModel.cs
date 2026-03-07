@@ -2,6 +2,7 @@ using System;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using System.Collections.ObjectModel;
 
 namespace OrthoPlanner.App.ViewModels.Photogrammetry;
@@ -26,7 +27,7 @@ public enum PhotoExpression
 
 public class MeasurementViewModel : ObservableObject
 {
-    private string _name;
+    private string _name = string.Empty;
     public string Name
     {
         get => _name;
@@ -67,7 +68,7 @@ public partial class PhotoViewModel : ObservableObject
     [ObservableProperty] private PhotoExpression _expression = PhotoExpression.Uncategorized;
 
     // Viewport transform states for interactivity
-    [ObservableProperty] private double _scale = 0; // 0 means not auto-fitted yet
+    [ObservableProperty] private double _scale = 1.0;
     [ObservableProperty] private double _panX = 0;
     [ObservableProperty] private double _panY = 0;
     [ObservableProperty] private double _rotationAngle = 0;
@@ -145,5 +146,11 @@ public partial class PhotoViewModel : ObservableObject
             double distPix = Math.Sqrt(dx * dx + dy * dy);
             m.DistanceMm = distPix / PixelsPerMm;
         }
+    }
+
+    [RelayCommand]
+    private void Rotate90()
+    {
+        RotationAngle = (RotationAngle + 90) % 360;
     }
 }

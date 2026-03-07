@@ -141,6 +141,10 @@
                 <Button x:Name="AcceptBtn" Content="✔ Accept" Padding="10,6" Margin="8,0,0,0"
                         Background="#FF2ECC71" Foreground="White" BorderThickness="0" FontWeight="Bold"
                         Visibility="Collapsed" Click="Accept_Click"/>
+                <Button x:Name="CleanMergeBtn" Content="🧹 Clean &amp; Merge Cast" Padding="10,6" Margin="8,0,0,0"
+                        Background="#FFA020F0" Foreground="White" BorderThickness="0" FontWeight="Bold"
+                        Visibility="Collapsed" Click="CleanMerge_Click"/>
+                <CheckBox x:Name="CloseHolesCheckBox" Content="Make Watertight" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="#AAB" FontSize="11" Visibility="Collapsed" />
                 <Button Content="Cancel" Padding="10,6" Margin="8,0,0,0"
                         Background="#30FFFFFF" Foreground="White" BorderThickness="0" Click="Cancel_Click"/>
             </StackPanel>

@@ -42,7 +42,7 @@ public class EnumToBoolConverter : IValueConverter
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
     {
         if (value is bool b && b)
-            return Enum.Parse(targetType, parameter.ToString());
+            return Enum.Parse(targetType, parameter.ToString()!);
         return Binding.DoNothing;
     }
 }

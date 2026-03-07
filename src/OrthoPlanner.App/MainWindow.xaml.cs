@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using System.Windows.Shapes;
@@ -160,12 +161,75 @@ public partial class MainWindow : Window
     }
 
     // ═══ Grid overlay ═══
+    private System.Windows.Point _gridCenter = new System.Windows.Point(-1, -1);
+    private System.Windows.Point _newCenter = new System.Windows.Point(-1, -1);
+    private bool _isDraggingGrid = false;
+    private System.Windows.Point _gridDragStart;
+    private System.Windows.Point _initialGridCenter;
 
     private void OnGridToggled(object sender, RoutedEventArgs e)
     {
         var show = (sender as CheckBox)?.IsChecked == true;
         GridOverlay.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         if (show) DrawGrid();
+    }
+
+    private void OnGridDragToggled(object sender, RoutedEventArgs e)
+    {
+        var dragging = (sender as ToggleButton)?.IsChecked == true;
+        GridOverlay.IsHitTestVisible = dragging;
+    }
+
+    private void SetAsNewCenter_Click(object sender, RoutedEventArgs e)
+    {
+        _newCenter = _gridCenter;
+    }
+
+    private void Recentre_Click(object sender, RoutedEventArgs e)
+    {
+        _gridCenter = _newCenter.X >= 0 ? _newCenter : new System.Windows.Point(GridOverlay.ActualWidth / 2.0, GridOverlay.ActualHeight / 2.0);
+        DrawGrid();
+    }
+
+    private void Reset_Click(object sender, RoutedEventArgs e)
+    {
+        _gridCenter = new System.Windows.Point(-1, -1);
+        _newCenter = new System.Windows.Point(-1, -1);
+        DrawGrid();
+    }
+
+    private void GridOverlay_MouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (e.LeftButton == System.Windows.Input.MouseButtonState.Pressed)
+        {
+            _isDraggingGrid = true;
+            _gridDragStart = e.GetPosition(this);
+            _initialGridCenter = _gridCenter.X >= 0 ? _gridCenter : new System.Windows.Point(GridOverlay.ActualWidth / 2.0, GridOverlay.ActualHeight / 2.0);
+            GridOverlay.CaptureMouse();
+            e.Handled = true;
+        }
+    }
+
+    private void GridOverlay_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (_isDraggingGrid)
+        {
+            var currentPos = e.GetPosition(this);
+            var delta = currentPos - _gridDragStart;
+            _gridCenter = new System.Windows.Point(_initialGridCenter.X + delta.X, _initialGridCenter.Y + delta.Y);
+            DrawGrid();
+            e.Handled = true;
+        }
+    }
+
+    private void GridOverlay_MouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (_isDraggingGrid)
+        {
+            _isDraggingGrid = false;
+            GridOverlay.ReleaseMouseCapture();
+            e.Handled = true;
+        }
     }
 
     private void DrawGrid()
@@ -176,8 +240,8 @@ public partial class MainWindow : Window
         double h = GridOverlay.ActualHeight;
         if (w < 10 || h < 10) return;
 
-        double cx = w / 2.0;
-        double cy = h / 2.0;
+        double cx = _gridCenter.X >= 0 ? _gridCenter.X : w / 2.0;
+        double cy = _gridCenter.Y >= 0 ? _gridCenter.Y : h / 2.0;
 
         // Grid spacing in pixels (fixed screen-space grid)
         const double spacing = 20.0; // pixels per unit cell

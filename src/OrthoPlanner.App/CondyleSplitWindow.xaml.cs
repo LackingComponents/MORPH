@@ -18,8 +18,6 @@ public partial class CondyleSplitWindow : Window
 {
     // Input
     private readonly List<float[]> _boneVerts;
-    private readonly List<float[]> _upperCastVerts;
-    private readonly List<float[]> _lowerCastVerts;
     private readonly VolumeData? _ctVolume;
     private readonly SegmentationVolume? _segVolume;
     private readonly byte _boneLabel;
@@ -69,13 +67,11 @@ public partial class CondyleSplitWindow : Window
     public (double X, double Y, double Z)? RightCondyleCenter { get; private set; }
 
     public CondyleSplitWindow(
-        List<float[]> boneVerts, List<float[]> upperCastVerts, List<float[]> lowerCastVerts,
+        List<float[]> boneVerts,
         VolumeData? ctVolume = null, SegmentationVolume? segVolume = null, byte boneLabel = 1, double boneMinHu = 400.0)
     {
         InitializeComponent();
         _boneVerts = boneVerts.Select(v => new float[] { v[0], v[1], v[2] }).ToList();
-        _upperCastVerts = upperCastVerts;
-        _lowerCastVerts = lowerCastVerts;
         _ctVolume = ctVolume;
         _segVolume = segVolume;
         _boneLabel = boneLabel;
@@ -103,17 +99,11 @@ public partial class CondyleSplitWindow : Window
         var boneModel = MeshHelper.BuildModel3D(_boneVerts, 200, 190, 180, 220);
         MainViewport.Children.Add(new ModelVisual3D { Content = boneModel });
 
-        var upperModel = MeshHelper.BuildModel3D(_upperCastVerts, 255, 220, 80, 180);
-        MainViewport.Children.Add(new ModelVisual3D { Content = upperModel });
-
-        var lowerModel = MeshHelper.BuildModel3D(_lowerCastVerts, 80, 160, 255, 180);
-        MainViewport.Children.Add(new ModelVisual3D { Content = lowerModel });
-
         MainViewport.ZoomExtents(500);
 
         StepTitle.Text = "Step 1: Define Separation Plane";
         StepInstructions.Text =
-            "Click 3 points: (1) between central incisors, (2) distal-occlusal of last left molar, " +
+            "Click 3 points: (1) between central incisors (or anterior ridge), (2) distal-occlusal of last left molar (or posterior ridge), " +
             "(3) distal-occlusal of last right molar. Drag points to widen. Then 'Next: Condyles'.";
         StatusText.Text = "0/3 points placed";
         SplitBtn.Visibility = Visibility.Visible;
@@ -330,7 +320,7 @@ public partial class CondyleSplitWindow : Window
     private (List<float[]> cranium, List<float[]> mandible) SplitVoxelMask(
         Vector3D planeNormal, double planeD,
         float[] leftC, float[] rightC, float[] leftAnchor, float[] rightAnchor, float[] leftHE, float[] rightHE,
-        SegmentationVolume segVol, VolumeData ctVol, byte boneLabel, bool hardSeparationMode)
+        SegmentationVolume inputSegVol, VolumeData ctVol, byte boneLabel, bool hardSeparationMode)
     {
         byte cranLabel = 200; // Cranium top inside box
         byte mandLabel = 201; // Condyle bottom inside box
@@ -339,6 +329,10 @@ public partial class CondyleSplitWindow : Window
 
         int w = ctVol.Width, h = ctVol.Height, d = ctVol.Depth;
         double sx = ctVol.Spacing[0], sy = ctVol.Spacing[1], sz = ctVol.Spacing[2];
+
+        // Create a deep clone of the segmentation mask to prevent permanent global state mutation across runs!
+        var segVol = new SegmentationVolume(ctVol);
+        Array.Copy(inputSegVol.Labels, segVol.Labels, inputSegVol.Labels.Length);
 
         Dispatcher.Invoke(() => StatusText.Text = "Generating pristine bone mask...");
 
@@ -350,7 +344,7 @@ public partial class CondyleSplitWindow : Window
         for (int x = 0; x < w; x++)
         {
             int idx = x + y * w + z * w * h;
-            if (segVol.Labels[idx] != boneLabel) continue;
+            if (inputSegVol.Labels[idx] != boneLabel) continue;
             
             // Drop software-bridged soft tissue voxels that fall below the physical bone HU threshold
             if (ctVol.Voxels[idx] < rawThreshold)
@@ -385,9 +379,9 @@ public partial class CondyleSplitWindow : Window
             if (segVol.Labels[idx] != unassignedAboveLabel && segVol.Labels[idx] != mandBodyLabel)
             {
                 double minDist = double.MaxValue;
-                for(int zoff=-5; zoff<=5; zoff++)
-                for(int yoff=-5; yoff<=5; yoff++)
-                for(int xoff=-5; xoff<=5; xoff++)
+                for(int zoff=-8; zoff<=8; zoff++)
+                for(int yoff=-8; yoff<=8; yoff++)
+                for(int xoff=-8; xoff<=8; xoff++)
                 {
                     int nx = cx+xoff, ny = cy+yoff, nz = cz+zoff;
                     if (nx>=0 && nx<w && ny>=0 && ny<h && nz>=0 && nz<d)
@@ -404,24 +398,8 @@ public partial class CondyleSplitWindow : Window
             
             if (segVol.Labels[idx] == unassignedAboveLabel || segVol.Labels[idx] == mandBodyLabel)
             {
-                // Expand the initial seed slightly to ensure we have a starting mass > 10 voxels
-                // otherwise the very first step of Region Growing might instantly fail bridge rejection.
-                for (int dz = -2; dz <= 2; dz++)
-                for (int dy = -2; dy <= 2; dy++)
-                for (int dx = -2; dx <= 2; dx++)
-                {
-                    int nx = cx + dx, ny = cy + dy, nz = cz + dz;
-                    if (nx >= 0 && nx < w && ny >= 0 && ny < h && nz >= 0 && nz < d)
-                    {
-                        int nIdx = nx + ny * w + nz * w * h;
-                        if ((segVol.Labels[nIdx] == unassignedAboveLabel || segVol.Labels[nIdx] == mandBodyLabel) &&
-                             ctVol.Voxels[nIdx] >= rawThreshold)
-                        {
-                            segVol.Labels[nIdx] = mandLabel;
-                            queue.Enqueue(nIdx);
-                        }
-                    }
-                }
+                segVol.Labels[idx] = mandLabel;
+                queue.Enqueue(idx);
             }
         };
 
@@ -459,8 +437,7 @@ public partial class CondyleSplitWindow : Window
                             float[] curC = distL < distR ? leftC : rightC;
                             float[] curHE = distL < distR ? leftHE : rightHE;
 
-                            // If we are geometrically near/inside the chosen condylar box, constrain to ellipsoid
-                            // Add a small buffer to the Z range check so we don't accidentally clip valid bone just below the box
+                            // If we are in the vertical Z range of the chosen condylar box, constrain to ellipsoid
                             if (pvz >= curC[2] - curHE[2] && pvz <= curC[2] + curHE[2])
                             {
                                 float dx = (pvx - curC[0]) / curHE[0];
@@ -479,8 +456,8 @@ public partial class CondyleSplitWindow : Window
                             int tx = nx + dx, ty = ny + dy, tz = nz + dz;
                             if (tx >= 0 && tx < w && ty >= 0 && ty < h && tz >= 0 && tz < d)
                             {
-                                int tidx = tx + ty * w + tz * w * h;
-                                if (ctVol.Voxels[tidx] >= rawThreshold) boneNeighbors++;
+                                byte l = segVol.Labels[tx + ty * w + tz * w * h];
+                                if (l != 0) boneNeighbors++;
                             }
                         }
 
@@ -523,12 +500,6 @@ public partial class CondyleSplitWindow : Window
 
         var craniumMesh = SegmentationEngine.ExtractSegmentMesh(ctVol, segVol, cranLabel, 1);
         var mandibleMesh = SegmentationEngine.ExtractSegmentMesh(ctVol, segVol, finalMandibleLabel, 1);
-
-        for (int i = 0; i < segVol.Labels.Length; i++)
-        {
-            if (segVol.Labels[i] == cranLabel || segVol.Labels[i] == finalMandibleLabel)
-                segVol.Labels[i] = boneLabel; 
-        }
 
         return (craniumMesh, mandibleMesh);
     }

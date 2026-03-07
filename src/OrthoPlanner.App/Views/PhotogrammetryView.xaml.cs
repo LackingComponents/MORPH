@@ -44,13 +44,6 @@ public partial class PhotogrammetryView : UserControl
             {
                 vm.ActivePhoto.PropertyChanged -= ActivePhoto_PropertyChanged;
                 vm.ActivePhoto.PropertyChanged += ActivePhoto_PropertyChanged;
-                
-                // Try initial fit
-                if (vm.ActivePhoto.Scale == 0)
-                {
-                    FitImageToViewport(vm.ActivePhoto);
-                }
-                
                 UpdateGrid();
             }
         }
@@ -71,43 +64,6 @@ public partial class PhotogrammetryView : UserControl
         }
     }
 
-    private void FitImageToViewport(PhotoViewModel photo)
-    {
-        if (photo.ImageSource == null) return;
-        
-        double viewW = ViewportGrid.ActualWidth;
-        double viewH = ViewportGrid.ActualHeight;
-        
-        if (viewW == 0 || viewH == 0)
-        {
-            // If layout hasn't happened yet, defer to SizeChanged
-            ViewportGrid.SizeChanged += ViewportGrid_SizeChanged;
-            return;
-        }
-
-        double imgW = photo.ImageSource.Width;
-        double imgH = photo.ImageSource.Height;
-        
-        if (imgW == 0 || imgH == 0) return;
-        
-        double scaleX = viewW / imgW;
-        double scaleY = viewH / imgH;
-        
-        // Fit entirely with 90% padding
-        photo.Scale = Math.Min(scaleX, scaleY) * 0.95;
-        photo.PanX = (viewW - imgW) / 2;
-        photo.PanY = (viewH - imgH) / 2;
-    }
-
-    private void ViewportGrid_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        ViewportGrid.SizeChanged -= ViewportGrid_SizeChanged;
-        
-        if (DataContext is PhotogrammetryViewModel vm && vm.ActivePhoto != null && vm.ActivePhoto.Scale == 0)
-        {
-            FitImageToViewport(vm.ActivePhoto);
-        }
-    }
 
     private void Viewport_MouseWheel(object sender, MouseWheelEventArgs e)
     {
@@ -161,7 +117,7 @@ public partial class PhotogrammetryView : UserControl
                 X2 = _toolStartPoint.Value.X,
                 Y2 = _toolStartPoint.Value.Y,
                 Stroke = new SolidColorBrush(vm.ActiveTool == PhotogrammetryToolMode.Measure ? Colors.SpringGreen : Colors.DeepSkyBlue),
-                StrokeThickness = 2 / vm.ActivePhoto.Scale, // Keep line thickness visually constant
+                StrokeThickness = 2 / Math.Max(0.001, vm.ActivePhoto.Scale), // Keep line thickness visually constant
                 Opacity = 0.8
             };
             DrawingCanvas.Children.Add(_activeInteractionLine);
@@ -189,7 +145,7 @@ public partial class PhotogrammetryView : UserControl
             Point currentPos = e.GetPosition(DrawingCanvas);
             _activeInteractionLine.X2 = currentPos.X;
             _activeInteractionLine.Y2 = currentPos.Y;
-            _activeInteractionLine.StrokeThickness = 2 / vm.ActivePhoto.Scale;
+            _activeInteractionLine.StrokeThickness = 2 / Math.Max(0.001, vm.ActivePhoto.Scale);
         }
     }
 
@@ -242,7 +198,7 @@ public partial class PhotogrammetryView : UserControl
                             X2 = endPoint.X,
                             Y2 = endPoint.Y,
                             Stroke = Brushes.SpringGreen,
-                            StrokeThickness = 2 / vm.ActivePhoto.Scale
+                            StrokeThickness = 2 / Math.Max(0.001, vm.ActivePhoto.Scale)
                         };
                         DrawingCanvas.Children.Add(permLine);
                     }
@@ -307,7 +263,7 @@ public partial class PhotogrammetryView : UserControl
     {
         GridOverlayCanvas.Children.Clear();
 
-        if (DataContext is not PhotogrammetryViewModel vm || !vm.ShowGridOverlay || vm.ActivePhoto == null || !vm.ActivePhoto.IsNormalized)
+        if (DataContext is not PhotogrammetryViewModel vm || !vm.ShowGridOverlay || vm.ActivePhoto == null || !vm.ActivePhoto.IsNormalized || vm.ActivePhoto.ImageSource == null)
             return;
 
         double ppmm = vm.ActivePhoto.PixelsPerMm;
@@ -320,23 +276,40 @@ public partial class PhotogrammetryView : UserControl
 
         if (canvasWidth == 0 || canvasHeight == 0) return;
 
+        double imgW = vm.ActivePhoto.ImageSource.PixelWidth;
+        double imgH = vm.ActivePhoto.ImageSource.PixelHeight;
+        
+        if (imgW == 0 || imgH == 0) return;
+
+        // Viewbox uniform scale ratio
+        double viewboxScale = Math.Min(canvasWidth / imgW, canvasHeight / imgH);
+
         // Visual screen pixels per physical mm
-        double scaledPpmm = ppmm * scale;
+        double scaledPpmm = ppmm * viewboxScale * scale;
+
+        // Failsafe to prevent infinity loop / OOM crashes if zoomed out aggressively
+        if (scaledPpmm < 0.05) return; 
 
         // If zoomed out too far, stop drawing 1mm lines to prevent dense mess
         bool drawSmall = scaledPpmm > 5;     // Only draw 1mm if they are at least 5px apart visually
         bool drawMedium = scaledPpmm > 1;    // Only draw 5mm if 1mm is at least 1px apart
 
         // Image Center in Viewport coords
-        double imgW = vm.ActivePhoto.ImageSource.Width;
-        double imgH = vm.ActivePhoto.ImageSource.Height;
-        Point imgCenter = new Point(imgW / 2 + vm.ActivePhoto.PanX, imgH / 2 + vm.ActivePhoto.PanY);
+        Point imgCenter = new Point(canvasWidth / 2 + vm.ActivePhoto.PanX, canvasHeight / 2 + vm.ActivePhoto.PanY);
         
         // Let's draw the grid extending outwards from the image center
         // Grid spacing in visual pixels
         double step1mm = scaledPpmm;
         double step5mm = scaledPpmm * 5;
         double step10mm = scaledPpmm * 10;
+        
+        // Use the largest step possible for the loop to avoid millions of iterations
+        double stepLoop = step10mm;
+        if (drawSmall) stepLoop = step1mm;
+        else if (drawMedium) stepLoop = step5mm;
+
+        // Failsafe 2
+        if (stepLoop < 5) return; 
 
         var brush1mm = new SolidColorBrush(Color.FromArgb(40, 255, 255, 255));
         var brush5mm = new SolidColorBrush(Color.FromArgb(80, 255, 255, 255));
@@ -345,15 +318,15 @@ public partial class PhotogrammetryView : UserControl
         // Start from center and go both ways
         
         // Verticals
-        for (double x = imgCenter.X; x < canvasWidth; x += step1mm)
+        for (double x = imgCenter.X; x < canvasWidth; x += stepLoop)
             if(x >= 0) DrawVertical(x, step1mm, step5mm, step10mm, imgCenter.X, brush1mm, brush5mm, brush10mm, canvasHeight, drawSmall, drawMedium);
-        for (double x = imgCenter.X - step1mm; x > 0; x -= step1mm)
+        for (double x = imgCenter.X - stepLoop; x > 0; x -= stepLoop)
             if(x < canvasWidth) DrawVertical(x, step1mm, step5mm, step10mm, imgCenter.X, brush1mm, brush5mm, brush10mm, canvasHeight, drawSmall, drawMedium);
 
         // Horizontals
-        for (double y = imgCenter.Y; y < canvasHeight; y += step1mm)
+        for (double y = imgCenter.Y; y < canvasHeight; y += stepLoop)
             if(y >= 0) DrawHorizontal(y, step1mm, step5mm, step10mm, imgCenter.Y, brush1mm, brush5mm, brush10mm, canvasWidth, drawSmall, drawMedium);
-        for (double y = imgCenter.Y - step1mm; y > 0; y -= step1mm)
+        for (double y = imgCenter.Y - stepLoop; y > 0; y -= stepLoop)
             if(y < canvasHeight) DrawHorizontal(y, step1mm, step5mm, step10mm, imgCenter.Y, brush1mm, brush5mm, brush10mm, canvasWidth, drawSmall, drawMedium);
     }
 

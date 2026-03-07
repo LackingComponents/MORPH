@@ -97,6 +97,7 @@
                             </Grid.RowDefinitions>
                             
                             <StackPanel Grid.Row="0" Margin="0,0,0,8">
+                                <Button Content="↻ Rotate 90°" Command="{Binding Rotate90Command}" Background="#FF30343D" Foreground="White" BorderBrush="{StaticResource BorderBrush}" Margin="0,0,0,12" Padding="0,4"/>
                                 <TextBlock Text="CATEGORY" Style="{StaticResource PanelHeader}" FontSize="9" Margin="0,0,0,4"/>
                                 <ComboBox SelectedItem="{Binding Category}" Background="{StaticResource BgMediumBrush}" Foreground="White" Margin="0,0,0,8">
                                     <ComboBoxItem Content="Uncategorized" />
@@ -206,26 +207,24 @@
                   MouseWheel="Viewport_MouseWheel"
                   MouseLeftButtonDown="Viewport_MouseLeftButtonDown"
                   MouseLeftButtonUp="Viewport_MouseLeftButtonUp"
-                  MouseMove="Viewport_MouseMove"
-                  SizeChanged="ViewportGrid_SizeChanged">
+                  MouseMove="Viewport_MouseMove">
                 
-                <Canvas x:Name="ViewportCanvas">
-                    <!-- Render transform container for Image -->
-                    <Grid x:Name="ImageContainer" DataContext="{Binding ActivePhoto}" RenderTransformOrigin="0.5,0.5">
-                        <Grid.RenderTransform>
-                            <TransformGroup>
-                                <RotateTransform Angle="{Binding RotationAngle}" />
-                                <ScaleTransform ScaleX="{Binding Scale}" ScaleY="{Binding Scale}" />
-                                <TranslateTransform X="{Binding PanX}" Y="{Binding PanY}" />
-                            </TransformGroup>
-                        </Grid.RenderTransform>
-                        
-                        <Image x:Name="MainImage" Source="{Binding ImageSource}" Stretch="None" SnapsToDevicePixels="True"/>
-                        
-                        <!-- Drawn interaction elements (drawn via code-behind mapping logical coords to physical coords) -->
-                        <Canvas x:Name="DrawingCanvas" IsHitTestVisible="False" Width="{Binding ElementName=MainImage, Path=ActualWidth}" Height="{Binding ElementName=MainImage, Path=ActualHeight}"/>
-                    </Grid>
-                </Canvas>
+                <Grid x:Name="ImageContainer" DataContext="{Binding ActivePhoto}" HorizontalAlignment="Center" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
+                    <Grid.RenderTransform>
+                        <TransformGroup>
+                            <RotateTransform Angle="{Binding RotationAngle}" />
+                            <ScaleTransform ScaleX="{Binding Scale}" ScaleY="{Binding Scale}" />
+                            <TranslateTransform X="{Binding PanX}" Y="{Binding PanY}" />
+                        </TransformGroup>
+                    </Grid.RenderTransform>
+                    
+                    <Viewbox Stretch="Uniform">
+                        <Grid Width="{Binding ImageSource.PixelWidth, FallbackValue=1000}" Height="{Binding ImageSource.PixelHeight, FallbackValue=1000}">
+                            <Image x:Name="MainImage" Source="{Binding ImageSource}" Stretch="Fill" SnapsToDevicePixels="True"/>
+                            <Canvas x:Name="DrawingCanvas" IsHitTestVisible="False" Background="Transparent"/>
+                        </Grid>
+                    </Viewbox>
+                </Grid>
 
                 <!-- Screen-space Grid Overlay (drawn dynamically in code behind based on PixelsPerMm and current scale) -->
                 <Canvas x:Name="GridOverlayCanvas" IsHitTestVisible="False" Visibility="{Binding ShowGridOverlay, Converter={StaticResource BoolToVisibility}}" />

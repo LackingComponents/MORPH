@@ -251,7 +251,7 @@
                         <StackPanel>
 
                             <!-- 1. SEGMENTATION -->
-                            <Expander Header="🦴  Segmentation" IsExpanded="True" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                            <Expander Header="💀  Segmentation" IsExpanded="True" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
                                       Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
                                 <StackPanel Margin="4,6,4,4">
                                     <!-- 1. BONE SEGMENTATION -->
@@ -272,7 +272,7 @@
                                         </DockPanel>
                                         <CheckBox Content="Preview Overlay" IsChecked="{Binding ShowBoneOverlay}"
                                                   Margin="0,4,0,0" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
-                                        <CheckBox Content="Enhance Segmentation (Thin Bone + Morphology)" IsChecked="{Binding EnhanceSegmentation}"
+                                        <CheckBox Content="Enhance Segmentation" IsChecked="{Binding EnhanceSegmentation}"
                                                   Margin="0,4,0,4" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
                                         <Button Content="🔧 Compute Bone Model" Command="{Binding RunBoneSegmentCommand}"
                                                 Margin="0,0,0,6" IsEnabled="{Binding IsVolumeLoaded}" />
@@ -320,7 +320,7 @@
                                         </DockPanel>
                                         <CheckBox Content="Preview Overlay" IsChecked="{Binding ShowDentalOverlay}"
                                                   Margin="0,4,0,4" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
-                                        <CheckBox Content="Remove 70% of Smaller Objects" IsChecked="{Binding CleanDentalSegmentation}"
+                                        <CheckBox Content="Decimate parts" IsChecked="{Binding CleanDentalSegmentation}"
                                                   Margin="0,0,0,8" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
                                         <Button Content="🔧 Compute Dental Model" Command="{Binding RunDentalSegmentCommand}"
                                                 Margin="0,0,0,6" IsEnabled="{Binding IsVolumeLoaded}" />
@@ -424,7 +424,11 @@
                                 <Button Content="🔄 Align to CT" Command="{Binding AlignDentalScansCommand}" Margin="0,0,0,4"
                                         Background="#FF1B98E0" Foreground="White" FontWeight="Bold" />
                                 <Button Content="🔪 Split Cranium / Mandible" Command="{Binding SplitCraniumMandibleCommand}" Margin="0,0,0,4"
-                                        Background="#FF8B4513" Foreground="White" FontWeight="Bold" />
+                                        Background="#FF1B98E0" Foreground="White" FontWeight="Bold" />
+                                <Button Content="🧹 Clean &amp; Merge Cast" Command="{Binding CleanMergeCastCommand}" Margin="0,0,0,4"
+                                        Background="#FFA020F0" Foreground="White" FontWeight="Bold" />
+                                <CheckBox Content="Make meshes watertight" IsChecked="{Binding CloseHolesAfterMerge}" 
+                                          Margin="0,0,0,8" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" />
                                 <ItemsControl ItemsSource="{Binding ImportedMeshes}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
@@ -558,9 +562,43 @@
                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="11"
                                   Margin="0,0,12,0"
                                   Checked="OnProjectionChanged" Unchecked="OnProjectionChanged" />
-                        <CheckBox Content="Grid" IsChecked="{Binding ShowGrid}"
+                        <CheckBox IsChecked="{Binding ShowGrid}"
                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="11"
+                                  Margin="0" VerticalAlignment="Center"
                                   Checked="OnGridToggled" Unchecked="OnGridToggled" />
+
+                        <ToggleButton x:Name="GridDragButton" Content="Grid"
+                                      FontSize="11"
+                                      Background="Transparent" BorderThickness="0" Padding="0"
+                                      Margin="0,0,12,0" VerticalAlignment="Center"
+                                      Checked="OnGridDragToggled" Unchecked="OnGridDragToggled">
+                            <ToggleButton.Style>
+                                <Style TargetType="ToggleButton">
+                                    <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="ToggleButton">
+                                                <TextBlock Text="{TemplateBinding Content}" 
+                                                           Foreground="{TemplateBinding Foreground}" 
+                                                           VerticalAlignment="Center" Cursor="Hand" />
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                    <Style.Triggers>
+                                        <Trigger Property="IsChecked" Value="True">
+                                            <Setter Property="Foreground" Value="#FF1B98E0" />
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ToggleButton.Style>
+                            <ToggleButton.ContextMenu>
+                                <ContextMenu x:Name="GridContextMenu">
+                                    <MenuItem Header="Set as new center" Click="SetAsNewCenter_Click" />
+                                    <MenuItem Header="Recentre" Click="Recentre_Click" />
+                                    <MenuItem Header="Reset" Click="Reset_Click" />
+                                </ContextMenu>
+                            </ToggleButton.ContextMenu>
+                        </ToggleButton>
                     </StackPanel>
 
                     <!-- 3D Viewport -->
@@ -604,10 +642,14 @@
                             <Path Data="M 8,26 L 18,26 L 18,22 L 23,22 L 25,18 L 25,12 C 25,6 14,6 10,6 C 6,6 4,14 8,20 Z M 18,12 A 2,2 0 1,1 18.1,12 M 22,18 L 20,18" Stroke="White" StrokeThickness="1.5" Stretch="Uniform" Margin="6"/>
                         </Button>
                     </StackPanel>
-
+                    
                     <!-- Grid overlay (drawn in code-behind) -->
                     <Canvas x:Name="GridOverlay" Grid.Row="1"
-                            IsHitTestVisible="False" Visibility="Collapsed" />
+                            IsHitTestVisible="False" Visibility="Collapsed"
+                            Background="Transparent"
+                            MouseLeftButtonDown="GridOverlay_MouseDown"
+                            MouseMove="GridOverlay_MouseMove"
+                            MouseLeftButtonUp="GridOverlay_MouseUp" />
 
                     <!-- Enlarged MPR view overlay -->
                     <Border x:Name="EnlargedOverlay" Grid.Row="1" Background="#FF0C1018"
