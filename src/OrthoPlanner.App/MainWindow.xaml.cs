@@ -11,8 +11,7 @@ namespace OrthoPlanner.App;
 
 public partial class MainWindow : Window
 {
-    private DispatcherTimer? _styleCubeTimer;
-    private int _styleAttempts;
+
 
     [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
@@ -23,7 +22,14 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        Loaded += OnLoaded;
+
+
+        if (Viewport3D != null)
+        {
+            Viewport3D.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
+        }
+
+
         SourceInitialized += MainWindow_SourceInitialized;
     }
 
@@ -44,33 +50,20 @@ public partial class MainWindow : Window
         {
             vm.PropertyChanged += (s, args) =>
             {
-                if (args.PropertyName == nameof(ViewModels.MainViewModel.BoneModel))
+                if (args.PropertyName == nameof(ViewModels.MainViewModel.BoneOnlyBounds))
                 {
                     Dispatcher.InvokeAsync(() => {
-                        Viewport3D.ZoomExtents();
-                        
-                        // Force rotation center to model centroid
-                        var bounds = Rect3D.Empty;
-                        foreach (var child in Viewport3D.Children)
+                        var mainVm = VM;
+                        if (mainVm != null && !mainVm.BoneOnlyBounds.IsEmpty)
                         {
-                            var childBounds = HelixToolkit.Wpf.Visual3DHelper.FindBounds(child, Transform3D.Identity);
-                            if (!childBounds.IsEmpty)
-                            {
-                                if (bounds.IsEmpty) bounds = childBounds;
-                                else bounds.Union(childBounds);
-                            }
-                        }
-
-                        if (!bounds.IsEmpty)
-                        {
+                            var b = mainVm.BoneOnlyBounds;
                             var centroid = new Point3D(
-                                bounds.X + bounds.SizeX / 2,
-                                bounds.Y + bounds.SizeY / 2,
-                                bounds.Z + bounds.SizeZ / 2);
+                                b.X + b.SizeX / 2,
+                                b.Y + b.SizeY / 2,
+                                b.Z + b.SizeZ / 2);
                             
                             // Align camera target to centroid
-                            if (Viewport3D.Camera is ProjectionCamera cam)
-                            {
+                            if (Viewport3D.Camera is HelixToolkit.Wpf.SharpDX.ProjectionCamera cam) {
                                 var dist = cam.LookDirection.Length;
                                 var dir = cam.LookDirection;
                                 dir.Normalize();
@@ -78,29 +71,14 @@ public partial class MainWindow : Window
                                 cam.LookDirection = new Vector3D(dir.X * dist, dir.Y * dist, dir.Z * dist);
                             }
                             
-                            // Prevent right-click pan from detaching the pivot
                             Viewport3D.FixedRotationPointEnabled = true;
                             Viewport3D.FixedRotationPoint = centroid;
                         }
+                        Viewport3D.ZoomExtents();
                     });
                 }
             };
         }
-
-        // The ViewCube overlay viewport gets created lazily by HelixToolkit.
-        _styleAttempts = 0;
-        _styleCubeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
-        _styleCubeTimer.Tick += (s, _) =>
-        {
-            _styleAttempts++;
-            bool found = TryStyleViewCube(Viewport3D);
-            if (found || _styleAttempts > 15)
-            {
-                _styleCubeTimer.Stop();
-                _styleCubeTimer = null;
-            }
-        };
-        _styleCubeTimer.Start();
 
         // Redraw grid on resize
         GridOverlay.SizeChanged += (_, __) => { if (GridOverlay.Visibility == Visibility.Visible) DrawGrid(); };
@@ -130,11 +108,10 @@ public partial class MainWindow : Window
         var isOrtho = (sender as CheckBox)?.IsChecked == true;
         var currentCam = Viewport3D.Camera;
 
-        if (isOrtho && currentCam is PerspectiveCamera pc)
+        if (isOrtho && currentCam is HelixToolkit.Wpf.SharpDX.PerspectiveCamera pc)
         {
             // Switch to orthographic, preserving orientation
-            var ortho = new OrthographicCamera
-            {
+            var newOrtho = new HelixToolkit.Wpf.SharpDX.OrthographicCamera {
                 Position = pc.Position,
                 LookDirection = pc.LookDirection,
                 UpDirection = pc.UpDirection,
@@ -142,13 +119,12 @@ public partial class MainWindow : Window
                 NearPlaneDistance = pc.NearPlaneDistance,
                 FarPlaneDistance = pc.FarPlaneDistance
             };
-            Viewport3D.Camera = ortho;
+            Viewport3D.Camera = newOrtho;
         }
-        else if (!isOrtho && currentCam is OrthographicCamera oc)
+        else if (!isOrtho && currentCam is HelixToolkit.Wpf.SharpDX.OrthographicCamera oc)
         {
             // Switch back to perspective
-            var persp = new PerspectiveCamera
-            {
+            var newPersp = new HelixToolkit.Wpf.SharpDX.PerspectiveCamera {
                 Position = oc.Position,
                 LookDirection = oc.LookDirection,
                 UpDirection = oc.UpDirection,
@@ -156,7 +132,7 @@ public partial class MainWindow : Window
                 NearPlaneDistance = oc.NearPlaneDistance,
                 FarPlaneDistance = oc.FarPlaneDistance
             };
-            Viewport3D.Camera = persp;
+            Viewport3D.Camera = newPersp;
         }
     }
 
@@ -656,238 +632,31 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    // ═══ ViewCube styling ═══
 
-    private bool TryStyleViewCube(DependencyObject parent)
-    {
-        bool found = false;
-        int childCount = VisualTreeHelper.GetChildrenCount(parent);
-        for (int i = 0; i < childCount; i++)
-        {
-            var child = VisualTreeHelper.GetChild(parent, i);
-
-            if (child is System.Windows.Controls.Viewport3D vp3d)
-            {
-                foreach (Visual3D v3d in vp3d.Children)
-                {
-                    if (v3d.GetType().Name == "ViewCubeVisual3D" && v3d is ModelVisual3D vcMv)
-                    {
-                        StyleViewCubeModel(vcMv);
-                        found = true;
-                    }
-                }
-            }
-
-            if (TryStyleViewCube(child))
-                found = true;
-        }
-        return found;
-    }
-
-    private void StyleViewCubeModel(ModelVisual3D vcVisual)
-    {
-        if (vcVisual.Content is Model3DGroup grp)
-            StyleModel3DGroup(grp);
-
-        foreach (Visual3D child in vcVisual.Children)
-        {
-            if (child is ModelVisual3D childMv)
-                StyleViewCubeModel(childMv);
-        }
-    }
-
-    private void StyleModel3DGroup(Model3DGroup grp)
-    {
-        var grey = new SolidColorBrush(Color.FromRgb(75, 75, 75));
-        grey.Freeze();
-        var greyBorder = new SolidColorBrush(Color.FromRgb(100, 100, 100));
-        greyBorder.Freeze();
-
-        foreach (var m3d in grp.Children)
-        {
-            if (m3d is GeometryModel3D gm)
-            {
-                if (gm.Geometry is MeshGeometry3D mesh && mesh.Positions.Count > 30)
-                {
-                    gm.Material = new DiffuseMaterial(Brushes.Transparent);
-                    gm.BackMaterial = new DiffuseMaterial(Brushes.Transparent);
-                }
-                else if (gm.Material is DiffuseMaterial dm)
-                {
-                    if (dm.Brush is VisualBrush vb)
-                    {
-                        if (vb.Visual is Border border)
-                        {
-                            border.Background = grey;
-                            border.BorderBrush = greyBorder;
-                            if (border.Child is TextBlock tb)
-                                tb.Foreground = Brushes.White;
-                        }
-                    }
-                    else if (dm.Brush is SolidColorBrush)
-                    {
-                        gm.Material = new DiffuseMaterial(grey);
-                        if (gm.BackMaterial != null)
-                            gm.BackMaterial = new DiffuseMaterial(grey);
-                    }
-                }
-            }
-            else if (m3d is Model3DGroup subGrp)
-            {
-                StyleModel3DGroup(subGrp);
-            }
-        }
-    }
-
-    // ═══ Viewport Navigation ═══
-
-    private void Viewport3D_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
-    {
-        if (sender is System.Windows.Controls.Viewport3D vp3d)
-        {
-            var hitParams = new PointHitTestParameters(e.GetPosition(vp3d));
-            HelixToolkit.Wpf.ViewCubeVisual3D? hitCube = null;
-            Point3D hitPoint = new Point3D();
-
-            VisualTreeHelper.HitTest(vp3d, null, result =>
-            {
-                if (result is RayMeshGeometry3DHitTestResult meshHit)
-                {
-                    DependencyObject? current = meshHit.VisualHit;
-                    while (current != null)
-                    {
-                        if (current is HelixToolkit.Wpf.ViewCubeVisual3D cube)
-                        {
-                            hitCube = cube;
-                            hitPoint = meshHit.PointHit;
-                            return HitTestResultBehavior.Stop;
-                        }
-                        current = VisualTreeHelper.GetParent(current);
-                    }
-                }
-                return HitTestResultBehavior.Continue;
-            }, hitParams);
-
-            if (hitCube != null && vp3d.Camera is ProjectionCamera cam && VM != null && VM.BoneModel != null && !VM.BoneModel.Bounds.IsEmpty)
-            {
-                // Calculate which Face was clicked by creating a Normal Vector from the Cube Center to the Hit Point
-                var cubeBounds = HelixToolkit.Wpf.Visual3DHelper.FindBounds(hitCube, Transform3D.Identity);
-                var cubeCenter = cubeBounds.Location + new Vector3D(
-                    cubeBounds.SizeX / 2,
-                    cubeBounds.SizeY / 2,
-                    cubeBounds.SizeZ / 2);
-
-                var lookDirection = new Vector3D(
-                    cubeCenter.X - hitPoint.X,
-                    cubeCenter.Y - hitPoint.Y,
-                    cubeCenter.Z - hitPoint.Z);
-                    
-                lookDirection.Normalize();
-                
-                // Fetch the absolute model centroid
-                var centroid = VM.ModelCenter;
-
-                // Obtain the true spatial bounding box of only the dicom mesh, modified by NHP.
-                // We use BoneOnlyBounds so the camera doesn't zoom out miles away when a dental scan is loaded off-center!
-                var boneBounds = VM.BoneOnlyBounds.IsEmpty ? VM.BoneModel.Bounds : VM.BoneOnlyBounds;
-                var worldBounds = VM.BoneModel.Transform != null 
-                    ? VM.BoneModel.Transform.TransformBounds(boneBounds) 
-                    : boneBounds;
-
-                // Animate the camera angle mathematically based on the clicked Cube face.
-                HelixToolkit.Wpf.CameraHelper.ChangeDirection(cam, lookDirection, new Vector3D(0, 0, 1), 500);
-                
-                // Instruct Helix to completely discard all panning translations internally, 
-                // calculate the mathematically perfect focal distance, and snap the camera squarely onto the 3D model.
-                Viewport3D.ZoomExtents(worldBounds, 500);
-
-                // Override hidden spatial tracking mechanic
-                if (Viewport3D.CameraController != null)
-                {
-                    Viewport3D.CameraController.CameraTarget = centroid;
-                }
-
-                // FATAL OVERRIDE: Prevent HelixToolkit from triggering its own ViewCube click logic entirely!
-                e.Handled = true;
-            }
-        }
-    }
 
     private void CenterCamera_Click(object sender, RoutedEventArgs e)
     {
-        // 1. Refocus the camera keeping exactly its current LookDirection
-        if (VM != null && VM.BoneModel != null && !VM.BoneModel.Bounds.IsEmpty)
-        {
-            var boneBounds = VM.BoneOnlyBounds.IsEmpty ? VM.BoneModel.Bounds : VM.BoneOnlyBounds;
-            var worldBounds = VM.BoneModel.Transform != null 
-                ? VM.BoneModel.Transform.TransformBounds(boneBounds) 
-                : boneBounds;
-            
-            // Keep the exact same look direction and up direction.
-            // ZoomExtents alone will natively purge the panning offsets by snapping the Position to the bounds!
-            Viewport3D.ZoomExtents(worldBounds, 500);
-            
-            if (Viewport3D.CameraController != null)
-            {
-                Viewport3D.CameraController.CameraTarget = VM.ModelCenter;
-            }
-        }
-        else
-        {
-            Viewport3D.ZoomExtents(500);
-        }
+        Viewport3D.ZoomExtents(500);
     }
 
     private void AnteriorView_Click(object sender, RoutedEventArgs e)
     {
-        if (VM != null && VM.BoneModel != null && !VM.BoneModel.Bounds.IsEmpty)
-        {
-            var boneBounds = VM.BoneOnlyBounds.IsEmpty ? VM.BoneModel.Bounds : VM.BoneOnlyBounds;
-            var worldBounds = VM.BoneModel.Transform != null 
-                ? VM.BoneModel.Transform.TransformBounds(boneBounds) 
-                : boneBounds;
-            
-            // Vector pointing from -Y to +Y is Anterior view.
-            var anteriorLookDirection = new Vector3D(0, 1, 0);
-            HelixToolkit.Wpf.CameraHelper.ChangeDirection(Viewport3D.Camera, anteriorLookDirection, new Vector3D(0, 0, 1), 500);
-
-            Viewport3D.ZoomExtents(worldBounds, 500);
-            
-            if (Viewport3D.CameraController != null)
-            {
-                Viewport3D.CameraController.CameraTarget = VM.ModelCenter;
-            }
+        var anteriorLookDirection = new Vector3D(0, 1, 0);
+        if (Viewport3D.Camera != null) {
+            Viewport3D.Camera.LookDirection = anteriorLookDirection;
+            Viewport3D.Camera.UpDirection = new Vector3D(0, 0, 1);
         }
-        else
-        {
-            Viewport3D.ZoomExtents(500);
-        }
+        Viewport3D.ZoomExtents(500);
     }
 
     private void RightProfile_Click(object sender, RoutedEventArgs e)
     {
-        if (VM != null && VM.BoneModel != null && !VM.BoneModel.Bounds.IsEmpty)
-        {
-            var boneBounds = VM.BoneOnlyBounds.IsEmpty ? VM.BoneModel.Bounds : VM.BoneOnlyBounds;
-            var worldBounds = VM.BoneModel.Transform != null 
-                ? VM.BoneModel.Transform.TransformBounds(boneBounds) 
-                : boneBounds;
-            
-            // Looking towards the Right Profile (1, 0, 0)
-            var rightProfileLookDirection = new Vector3D(1, 0, 0);
-            HelixToolkit.Wpf.CameraHelper.ChangeDirection(Viewport3D.Camera, rightProfileLookDirection, new Vector3D(0, 0, 1), 500);
-
-            Viewport3D.ZoomExtents(worldBounds, 500);
-            
-            if (Viewport3D.CameraController != null)
-            {
-                Viewport3D.CameraController.CameraTarget = VM.ModelCenter;
-            }
+        var rightProfileLookDirection = new Vector3D(1, 0, 0);
+        if (Viewport3D.Camera != null) {
+            Viewport3D.Camera.LookDirection = rightProfileLookDirection;
+            Viewport3D.Camera.UpDirection = new Vector3D(0, 0, 1);
         }
-        else
-        {
-            Viewport3D.ZoomExtents(500);
-        }
+        Viewport3D.ZoomExtents(500);
     }
 
     private void NhpTextBox_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)

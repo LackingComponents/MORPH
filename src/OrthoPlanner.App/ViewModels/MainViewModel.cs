@@ -83,9 +83,9 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private WriteableBitmap? _axialImage;
     [ObservableProperty] private WriteableBitmap? _coronalImage;
     [ObservableProperty] private WriteableBitmap? _sagittalImage;
-
-    // ─── 3D Model ───
-    [ObservableProperty] private Model3DGroup? _boneModel; // The combined 3D rendering scene
+    [ObservableProperty] private HelixToolkit.SharpDX.Geometry3D? _geometry;
+    [ObservableProperty] private HelixToolkit.Wpf.SharpDX.Material? _material;
+    [ObservableProperty] private System.Windows.Media.Media3D.Transform3D _transform = System.Windows.Media.Media3D.Transform3D.Identity;
 
     // ─── Named Anatomy ───
     public SegmentViewModel? HardTissueModel { get; private set; }
@@ -187,6 +187,11 @@ public partial class MainViewModel : ObservableObject
                               Math.Abs(NhpPitch - _cPitch) > 0.01 ||
                               Math.Abs(NhpYaw - _cYaw) > 0.01;
 
+    public bool HasModelLoaded => !BoneOnlyBounds.IsEmpty || Volume != null || Segments.Count > 0;
+    
+    public bool IsCompletelyLoaded =>
+        HasModelLoaded && (Volume != null || !BoneOnlyBounds.IsEmpty) && !IsLoading;
+
     partial void OnNhpLateralChanged(double value) { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); }
     partial void OnNhpAnteroposteriorChanged(double value) { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); }
     partial void OnNhpVerticalChanged(double value) { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); }
@@ -220,11 +225,10 @@ public partial class MainViewModel : ObservableObject
 
     private void UpdateNhpTransform()
     {
-        if (BoneModel == null) return;
+        if (BoneOnlyBounds.IsEmpty) return;
 
         // Use bone-only bounds for camera centering (ignore imported STL meshes)
-        var bounds = BoneOnlyBounds.IsEmpty ? BoneModel.Bounds : BoneOnlyBounds;
-        if (bounds.IsEmpty) return;
+        var bounds = BoneOnlyBounds;
         var center = new Point3D(bounds.X + bounds.SizeX/2, bounds.Y + bounds.SizeY/2, bounds.Z + bounds.SizeZ/2);
 
         // DELTA MATH: Only visually rotate/translate by the *difference* between the current UI values
@@ -248,7 +252,11 @@ public partial class MainViewModel : ObservableObject
         // Translate back + User Translation
         group.Children.Add(new TranslateTransform3D(center.X + dLat, center.Y + dAnt, center.Z + dVert));
 
-        BoneModel.Transform = group;
+        if (HardTissueModel != null) HardTissueModel.Transform = group;
+        if (SoftTissueModel != null) SoftTissueModel.Transform = group;
+        if (DentalModel != null) DentalModel.Transform = group;
+        foreach (var seg in Segments) seg.Transform = group;
+        foreach (var mesh in ImportedMeshes) mesh.Transform = group;
         
         // Dynamically enforce the freehand rotation pivot point!
         ModelCenter = group.Transform(center);
@@ -307,19 +315,27 @@ public partial class MainViewModel : ObservableObject
 
     // ─── Environment Lighting ───
     [ObservableProperty] private byte _frontLightIntensity = 0;
-    partial void OnFrontLightIntensityChanged(byte value) => RefreshCombinedModel();
+    partial void OnFrontLightIntensityChanged(byte value) { OnPropertyChanged(nameof(FrontLightColor)); RefreshCombinedModel(); }
 
     [ObservableProperty] private double _frontLightZ = 0.0; // Straight frontal
-    partial void OnFrontLightZChanged(double value) => RefreshCombinedModel();
+    partial void OnFrontLightZChanged(double value) { OnPropertyChanged(nameof(FrontLightDirection)); RefreshCombinedModel(); }
 
     [ObservableProperty] private byte _bottomLightIntensity = 0;
-    partial void OnBottomLightIntensityChanged(byte value) => RefreshCombinedModel();
+    partial void OnBottomLightIntensityChanged(byte value) { OnPropertyChanged(nameof(BottomLightColor)); RefreshCombinedModel(); }
 
     [ObservableProperty] private byte _leftRightLightIntensity = 0;
-    partial void OnLeftRightLightIntensityChanged(byte value) => RefreshCombinedModel();
+    partial void OnLeftRightLightIntensityChanged(byte value) { OnPropertyChanged(nameof(LeftRightLightColor)); RefreshCombinedModel(); }
 
     [ObservableProperty] private byte _backLightIntensity = 0;
-    partial void OnBackLightIntensityChanged(byte value) => RefreshCombinedModel();
+    partial void OnBackLightIntensityChanged(byte value) { OnPropertyChanged(nameof(BackLightColor)); RefreshCombinedModel(); }
+
+    // Color properties for XAML Binding
+    public Color AmbientLightColor => Color.FromRgb(30, 30, 35);
+    public Color FrontLightColor => Color.FromRgb(FrontLightIntensity, FrontLightIntensity, FrontLightIntensity);
+    public Color BottomLightColor => Color.FromRgb(BottomLightIntensity, BottomLightIntensity, BottomLightIntensity);
+    public Color LeftRightLightColor => Color.FromRgb(LeftRightLightIntensity, LeftRightLightIntensity, LeftRightLightIntensity);
+    public Color BackLightColor => Color.FromRgb(BackLightIntensity, BackLightIntensity, BackLightIntensity);
+    public Vector3D FrontLightDirection => new Vector3D(0, 1, FrontLightZ);
     partial void OnShowSoftOverlayChanged(bool value)
     {
         if (value) { ShowBoneOverlay = false; ShowDentalOverlay = false; ShowCustomOverlay = false; }
@@ -659,7 +675,6 @@ public partial class MainViewModel : ObservableObject
             Segments.Clear();
             ImportedMeshes.Clear();
             _segVolume = null;
-            BoneModel = null;
 
             var seriesList = await Task.Run(() =>
                 DicomLoader.ScanFolderAsync(folderPath, p =>
@@ -1189,7 +1204,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task SplitComponentsAsync()
     {
-        if (Volume == null || _segVolume == null || IsLoading) return;
+        if (!HasModelLoaded) return;
 
         IsLoading = true;
         StatusText = "Analyzing connected components...";
@@ -1738,44 +1753,23 @@ public partial class MainViewModel : ObservableObject
 
     private void RefreshCombinedModel()
     {
-        var group = new Model3DGroup();
-
-        // Very low ambient light to barely prevent pitch black shadows, letting Headlamp do the work
-        group.Children.Add(new AmbientLight(Color.FromRgb(30, 30, 35)));
-        
-        // Strong key light directly from the front (patient faces Y = -1, so light shines towards +Y)
-        group.Children.Add(new DirectionalLight(Color.FromRgb(FrontLightIntensity, FrontLightIntensity, FrontLightIntensity), new Vector3D(0, 1, FrontLightZ)));
-        
-        // Moderate fill light from the bottom to illuminate undercuts (looking up)
-        group.Children.Add(new DirectionalLight(Color.FromRgb(BottomLightIntensity, BottomLightIntensity, BottomLightIntensity), new Vector3D(0, 0, 1)));
-        
-        // Weak fill light from the left side
-        group.Children.Add(new DirectionalLight(Color.FromRgb(LeftRightLightIntensity, LeftRightLightIntensity, LeftRightLightIntensity), new Vector3D(1, 0, 0)));
-        
-        // Weak fill light from the right side
-        group.Children.Add(new DirectionalLight(Color.FromRgb(LeftRightLightIntensity, LeftRightLightIntensity, LeftRightLightIntensity), new Vector3D(-1, 0, 0)));
-        
-        // Weak fill light from the back
-        group.Children.Add(new DirectionalLight(Color.FromRgb(BackLightIntensity, BackLightIntensity, BackLightIntensity), new Vector3D(0, -1, 0)));
-
-        // Track bone-only bounds for camera centering (segments only, NOT imported meshes)
         BoneOnlyBounds = Rect3D.Empty;
 
-        // Add segment models
-        foreach (var seg in Segments.Where(s => s.IsVisible && s.Model3D != null))
+        foreach (var seg in Segments.Where(s => s.IsVisible && s.Vertices != null && s.Vertices.Count > 0))
         {
-            group.Children.Add(seg.Model3D!);
-            if (BoneOnlyBounds.IsEmpty) BoneOnlyBounds = seg.Model3D!.Bounds;
-            else BoneOnlyBounds.Union(seg.Model3D!.Bounds);
+            double minX = double.MaxValue, minY = double.MaxValue, minZ = double.MaxValue;
+            double maxX = double.MinValue, maxY = double.MinValue, maxZ = double.MinValue;
+            foreach (var v in seg.Vertices!)
+            {
+                if (v[0] < minX) minX = v[0]; if (v[0] > maxX) maxX = v[0];
+                if (v[1] < minY) minY = v[1]; if (v[1] > maxY) maxY = v[1];
+                if (v[2] < minZ) minZ = v[2]; if (v[2] > maxZ) maxZ = v[2];
+            }
+            var r = new Rect3D(minX, minY, minZ, maxX - minX, maxY - minY, maxZ - minZ);
+            if (BoneOnlyBounds.IsEmpty) BoneOnlyBounds = r;
+            else BoneOnlyBounds.Union(r);
         }
 
-        // Add imported meshes (these should NOT affect the camera center)
-        foreach (var mesh in ImportedMeshes.Where(m => m.IsVisible && m.Model3D != null))
-            group.Children.Add(mesh.Model3D!);
-
-        BoneModel = group;
-        
-        // Crucial: Always re-apply active NHP transforms and calculate the active Pivot offset!
         UpdateNhpTransform();
     }
 
@@ -1874,13 +1868,13 @@ public partial class MainViewModel : ObservableObject
 
     private async Task PerformPhysicalResliceAsync()
     {
-        if (Volume == null || BoneModel == null) return;
+        if (Volume == null || BoneOnlyBounds.IsEmpty) return;
 
         StatusText = "Calculating exact physical volume bounds...";
         IsLoading = true;
         
         // --- 1. Calculate Spatial Centroid Pivot ---
-        var bounds = BoneModel.Bounds;
+        var bounds = BoneOnlyBounds;
         Point3D center;
         if (!bounds.IsEmpty)
             center = new Point3D(bounds.X + bounds.SizeX / 2, bounds.Y + bounds.SizeY / 2, bounds.Z + bounds.SizeZ / 2);
@@ -1977,7 +1971,9 @@ public partial class SegmentViewModel : ObservableObject
     [ObservableProperty] private bool _isSelectedForExport = true;
     [ObservableProperty] private byte _colorR = 200, _colorG = 180, _colorB = 140;
     public List<float[]>? Vertices { get; set; }
-    public GeometryModel3D? Model3D { get; set; }
+    public HelixToolkit.SharpDX.Geometry3D? Geometry { get; set; }
+    public HelixToolkit.Wpf.SharpDX.Material? Material { get; set; }
+    public System.Windows.Media.Media3D.Transform3D Transform { get; set; } = System.Windows.Media.Media3D.Transform3D.Identity;
 
     /// <summary>Callback so the parent ViewModel can refresh 3D when visibility toggles.</summary>
     public Action? OnVisibilityChanged { get; set; }
@@ -1987,7 +1983,9 @@ public partial class SegmentViewModel : ObservableObject
     public void BuildModel()
     {
         if (Vertices == null || Vertices.Count < 3) return;
-        Model3D = MeshHelper.BuildModel3D(Vertices, ColorR, ColorG, ColorB);
+        MeshHelper.BuildModel3D(Vertices, ColorR, ColorG, ColorB, out var geom, out var mat);
+        Geometry = (HelixToolkit.SharpDX.Geometry3D)geom;
+        Material = mat;
     }
 }
 
@@ -2000,7 +1998,9 @@ public partial class MeshViewModel : ObservableObject
     [ObservableProperty] private byte _colorR = 245, _colorG = 245, _colorB = 230;
     [ObservableProperty] private DentalScanType _scanType = DentalScanType.Other;
     public List<float[]>? Vertices { get; set; }
-    public GeometryModel3D? Model3D { get; set; }
+    public object? Geometry { get; set; }
+    public HelixToolkit.Wpf.SharpDX.Material? Material { get; set; }
+    public System.Windows.Media.Media3D.Transform3D Transform { get; set; } = System.Windows.Media.Media3D.Transform3D.Identity;
 
     public Action? OnVisibilityChanged { get; set; }
     partial void OnIsVisibleChanged(bool value) => OnVisibilityChanged?.Invoke();
@@ -2008,58 +2008,41 @@ public partial class MeshViewModel : ObservableObject
     public void BuildModel()
     {
         if (Vertices == null || Vertices.Count < 3) return;
-        Model3D = MeshHelper.BuildModel3D(Vertices, ColorR, ColorG, ColorB);
+        MeshHelper.BuildModel3D(Vertices, ColorR, ColorG, ColorB, out var geom, out var mat);
+        Geometry = geom;
+        Material = mat;
     }
 }
 
 public static class MeshHelper
 {
-    public static GeometryModel3D BuildModel3D(List<float[]> vertices, byte r, byte g, byte b, byte a = 255)
+    public static HelixToolkit.Wpf.SharpDX.MeshGeometryModel3D BuildModel3D(List<float[]> vertices, byte r, byte g, byte b, byte a = 255)
     {
-        var mesh = new MeshGeometry3D();
-        var positions = new Point3DCollection(vertices.Count);
-        var indices = new Int32Collection(vertices.Count);
-
-        for (int i = 0; i < vertices.Count; i++)
+        BuildModel3D(vertices, r, g, b, out var geom, out var mat, a);
+        return new HelixToolkit.Wpf.SharpDX.MeshGeometryModel3D
         {
-            positions.Add(new Point3D(vertices[i][0], vertices[i][1], vertices[i][2]));
-            indices.Add(i);
-        }
-        mesh.Positions = positions;
-        mesh.TriangleIndices = indices;
-
-        // Compute normals
-        var normals = new Vector3DCollection(positions.Count);
-        for (int i = 0; i < positions.Count; i++) normals.Add(new Vector3D(0, 0, 0));
-        for (int i = 0; i < indices.Count; i += 3)
-        {
-            var p0 = positions[indices[i]]; var p1 = positions[indices[i + 1]]; var p2 = positions[indices[i + 2]];
-            var u = new Vector3D(p1.X - p0.X, p1.Y - p0.Y, p1.Z - p0.Z);
-            var v = new Vector3D(p2.X - p0.X, p2.Y - p0.Y, p2.Z - p0.Z);
-            var n = Vector3D.CrossProduct(u, v);
-            normals[indices[i]] += n; normals[indices[i + 1]] += n; normals[indices[i + 2]] += n;
-        }
-        for (int i = 0; i < normals.Count; i++) { var n = normals[i]; n.Normalize(); normals[i] = n; }
-        mesh.Normals = normals;
-
-        mesh.Freeze();
-
-        // Solid or translucent material based on alpha
-        var brush = new SolidColorBrush(Color.FromArgb(a, r, g, b));
-        brush.Freeze();
-        var material = new DiffuseMaterial(brush);
-        material.Freeze();
-
-        var backBrush = new SolidColorBrush(Color.FromArgb(a, (byte)(r * 0.8), (byte)(g * 0.8), (byte)(b * 0.8)));
-        backBrush.Freeze();
-        var backMaterial = new DiffuseMaterial(backBrush);
-        backMaterial.Freeze();
-
-        var geomModel = new GeometryModel3D(mesh, material)
-        {
-            BackMaterial = backMaterial
+            Geometry = (HelixToolkit.SharpDX.Geometry3D)geom,
+            Material = mat
         };
-        geomModel.Freeze();
-        return geomModel;
+    }
+
+    public static void BuildModel3D(List<float[]> vertices, byte r, byte g, byte b, out object geometry, out HelixToolkit.Wpf.SharpDX.Material material, byte a = 255)
+    {
+        var builder = new HelixToolkit.Geometry.MeshBuilder();
+        for (int i = 0; i < vertices.Count; i += 3)
+        {
+            builder.AddTriangle(
+                new System.Numerics.Vector3(vertices[i][0], vertices[i][1], vertices[i][2]),
+                new System.Numerics.Vector3(vertices[i + 1][0], vertices[i + 1][1], vertices[i + 1][2]),
+                new System.Numerics.Vector3(vertices[i + 2][0], vertices[i + 2][1], vertices[i + 2][2]));
+        }
+        geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh());
+        
+        material = new HelixToolkit.Wpf.SharpDX.PhongMaterial()
+        {
+            DiffuseColor = new HelixToolkit.Maths.Color4(r / 255f, g / 255f, b / 255f, a / 255f)
+        };
     }
 }
+
+

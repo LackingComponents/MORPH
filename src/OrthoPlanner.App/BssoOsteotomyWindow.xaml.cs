@@ -5,7 +5,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
-using HelixToolkit.Wpf;
+using HelixToolkit.Wpf.SharpDX;
 using OrthoPlanner.Core.Geometry;
 
 namespace OrthoPlanner.App;
@@ -20,57 +20,56 @@ public partial class BssoOsteotomyWindow : Window
     public bool Accepted { get; private set; } = false;
 
     // Viewport elements
-    private ModelVisual3D _modelVisual = new();
-    private Model3DGroup _mainGroup = new();
-    private GeometryModel3D _boneMesh;
-    private GeometryModel3D _polyplaneMesh;
+    private MeshGeometryModel3D _boneMesh;
+    private MeshGeometryModel3D _polyplaneMesh;
     
     // Control points
     private List<Point3D> _lingualPoints = new();
     private List<Point3D> _buccalPoints = new();
     private List<Point3D> _lowerBorderPoints = new();
     
-    private List<SphereVisual3D> _pointVisuals = new();
+    private List<MeshGeometryModel3D> _pointVisuals = new();
     
     // Interaction state
     private int _step = 1; // 1: Lingual, 2: Buccal, 3: Adjust
-    private SphereVisual3D? _draggedPoint;
+    private MeshGeometryModel3D? _draggedPoint;
     private int _draggedIndex = -1;
     private int _draggedList = 0; // 0=Lingual, 1=Buccal, 2=LowerBorder
-    private Plane3D? _dragPlane;
+    private (Point3D Position, Vector3D Normal)? _dragPlane;
 
     public BssoOsteotomyWindow(List<float[]> mandibleVerts)
     {
         InitializeComponent();
+        
+        MainViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
+
         _mandibleVerts = mandibleVerts;
 
-        MainViewport.Children.Add(_modelVisual);
-        _modelVisual.Content = _mainGroup;
-        _mainGroup.Children.Add(new AmbientLight(Color.FromRgb(100, 100, 100)));
-
         _boneMesh = CreateMeshVisual(_mandibleVerts, Color.FromRgb(245, 230, 200), 1.0);
-        _mainGroup.Children.Add(_boneMesh);
+        MainGroup.Children.Add(_boneMesh);
 
         _polyplaneMesh = CreateMeshVisual(new List<float[]>(), Color.FromArgb(128, 50, 100, 200), 1.0);
-        _polyplaneMesh.BackMaterial = _polyplaneMesh.Material; // Double-sided
-        _mainGroup.Children.Add(_polyplaneMesh);
+        _polyplaneMesh.CullMode = SharpDX.Direct3D11.CullMode.None; // Make it double-sided
+        MainGroup.Children.Add(_polyplaneMesh);
     }
 
-    private GeometryModel3D CreateMeshVisual(List<float[]> verts, Color color, double opacity)
+    private MeshGeometryModel3D CreateMeshVisual(List<float[]> verts, Color color, double opacity)
     {
-        var pos = new Point3DCollection(verts.Count);
-        var idx = new Int32Collection(verts.Count);
-        for (int i = 0; i < verts.Count; i++)
+        var builder = new HelixToolkit.Geometry.MeshBuilder();
+        for (int i = 0; i < verts.Count; i += 3)
         {
-            pos.Add(new Point3D(verts[i][0], verts[i][1], verts[i][2]));
-            idx.Add(i);
+            if (i + 2 < verts.Count)
+            {
+                builder.AddTriangle(
+                    new System.Numerics.Vector3(verts[i][0], verts[i][1], verts[i][2]),
+                    new System.Numerics.Vector3(verts[i + 1][0], verts[i + 1][1], verts[i + 1][2]),
+                    new System.Numerics.Vector3(verts[i + 2][0], verts[i + 2][1], verts[i + 2][2]));
+            }
         }
         
-        var geom = new MeshGeometry3D { Positions = pos, TriangleIndices = idx };
-        geom.Normals = new Vector3DCollection();
-        var mat = new DiffuseMaterial(new SolidColorBrush(Color.FromArgb((byte)(opacity * 255), color.R, color.G, color.B)));
-        
-        return new GeometryModel3D { Geometry = geom, Material = mat };
+        var geom = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh());
+        var mat = new PhongMaterial { DiffuseColor = new HelixToolkit.Maths.Color4(color.R / 255f, color.G / 255f, color.B / 255f, (float)opacity) };
+        return new MeshGeometryModel3D { Geometry = geom, Material = mat };
     }
 
     // ═══════════════════════════════════
@@ -90,7 +89,9 @@ public partial class BssoOsteotomyWindow : Window
             for (int i = 0; i < _pointVisuals.Count; i++)
             {
                 var vis = _pointVisuals[i];
-                if (ptInfo.Value.Visual == vis || DistanceTo(ptInfo.Value.Point, vis.Center) < 2.0)
+                var center = GetPointCenter(i);
+                
+                if (ptInfo.Value.Visual == vis || DistanceTo(ptInfo.Value.Point, center) < 2.0)
                 {
                     _draggedPoint = vis;
                     
@@ -100,7 +101,7 @@ public partial class BssoOsteotomyWindow : Window
                     else { _draggedList = 2; _draggedIndex = i - 4; }
                     
                     var lookDir = MainViewport.Camera.LookDirection;
-                    _dragPlane = new Plane3D(vis.Center, new Vector3D(-lookDir.X, -lookDir.Y, -lookDir.Z));
+                    _dragPlane = (center, new Vector3D(-lookDir.X, -lookDir.Y, -lookDir.Z));
                     
                     MainViewport.CaptureMouse();
                     e.Handled = true;
@@ -110,11 +111,11 @@ public partial class BssoOsteotomyWindow : Window
         }
 
         // 2. Add points in Steps 1 and 2
-        if (ptInfo.Value.Visual == _modelVisual)
+        if (ptInfo.Value.Visual == _boneMesh)
         {
             if (_step == 1 && _lingualPoints.Count < 2)
             {
-                AddPoint(_lingualPoints, ptInfo.Value.Point, Brushes.Green);
+                AddPoint(_lingualPoints, ptInfo.Value.Point, System.Windows.Media.Colors.Green);
                 if (_lingualPoints.Count == 2)
                 {
                     NextBtn.IsEnabled = true;
@@ -123,7 +124,7 @@ public partial class BssoOsteotomyWindow : Window
             }
             else if (_step == 2 && _buccalPoints.Count < 2)
             {
-                AddPoint(_buccalPoints, ptInfo.Value.Point, Brushes.Blue);
+                AddPoint(_buccalPoints, ptInfo.Value.Point, System.Windows.Media.Colors.Blue);
                 if (_buccalPoints.Count == 2)
                 {
                     NextBtn.IsEnabled = true;
@@ -139,13 +140,18 @@ public partial class BssoOsteotomyWindow : Window
         if (_step == 3 && _draggedPoint != null && _dragPlane != null)
         {
             var pos = e.GetPosition(MainViewport);
-            var ray = Viewport3DHelper.Point2DtoRay3D(MainViewport.Viewport, pos);
-            if (ray != null)
+            var rayResult = MainViewport.UnProject(pos);
+            if (rayResult.Direction.LengthSquared() > 0)
             {
-                var intersect = RayPlaneIntersection(ray, _dragPlane);
+                var ray = rayResult;
+                var intersect = RayPlaneIntersection(
+                    new Point3D(ray.Position.X, ray.Position.Y, ray.Position.Z), 
+                    new Vector3D(ray.Direction.X, ray.Direction.Y, ray.Direction.Z), 
+                    _dragPlane.Value.Position, 
+                    _dragPlane.Value.Normal);
                 if (intersect.HasValue)
                 {
-                    _draggedPoint.Center = intersect.Value;
+                    _draggedPoint.Transform = new TranslateTransform3D(intersect.Value.X, intersect.Value.Y, intersect.Value.Z);
                     
                     if (_draggedList == 0) _lingualPoints[_draggedIndex] = intersect.Value;
                     else if (_draggedList == 1) _buccalPoints[_draggedIndex] = intersect.Value;
@@ -167,10 +173,14 @@ public partial class BssoOsteotomyWindow : Window
         }
     }
 
-    private (Point3D Point, Visual3D? Visual)? GetHitPoint(Point p)
+    private (Point3D Point, Element3D? Visual)? GetHitPoint(Point p)
     {
-        var hits = Viewport3DHelper.FindHits(MainViewport.Viewport, p);
-        foreach (var hit in hits) return (hit.Position, hit.Visual);
+        var hits = MainViewport.FindHits(p);
+        var hit = hits.FirstOrDefault(h => h.ModelHit is Element3D);
+        if (hit != null && hit.ModelHit is Element3D model)
+        {
+             return (new Point3D(hit.PointHit.X, hit.PointHit.Y, hit.PointHit.Z), model);
+        }
         return null;
     }
 
@@ -179,22 +189,40 @@ public partial class BssoOsteotomyWindow : Window
         double dx = a.X - b.X, dy = a.Y - b.Y, dz = a.Z - b.Z;
         return Math.Sqrt(dx * dx + dy * dy + dz * dz);
     }
-
-    private Point3D? RayPlaneIntersection(Ray3D ray, Plane3D plane)
+    
+    private Point3D GetPointCenter(int globalIndex)
     {
-        double nd = Vector3D.DotProduct(ray.Direction, plane.Normal);
-        if (Math.Abs(nd) < 0.0001) return null;
-        double t = Vector3D.DotProduct(plane.Position - ray.Origin, plane.Normal) / nd;
-        if (t < 0) return null;
-        return ray.Origin + ray.Direction * t;
+        if (globalIndex < 2) return _lingualPoints[globalIndex];
+        if (globalIndex < 4) return _buccalPoints[globalIndex - 2];
+        return _lowerBorderPoints[globalIndex - 4];
     }
 
-    private void AddPoint(List<Point3D> list, Point3D pt, Brush color)
+    private Point3D? RayPlaneIntersection(Point3D rayOrigin, Vector3D rayDirection, Point3D planePosition, Vector3D planeNormal)
+    {
+        double nd = Vector3D.DotProduct(rayDirection, planeNormal);
+        if (Math.Abs(nd) < 0.0001) return null;
+        double t = Vector3D.DotProduct(planePosition - rayOrigin, planeNormal) / nd;
+        if (t < 0) return null;
+        return rayOrigin + rayDirection * t;
+    }
+
+    private void AddPoint(List<Point3D> list, Point3D pt, System.Windows.Media.Color color)
     {
         list.Add(pt);
-        var sphere = new SphereVisual3D { Center = pt, Radius = 2.0, Fill = color };
+        var builder = new HelixToolkit.Geometry.MeshBuilder();
+        builder.AddSphere(new System.Numerics.Vector3(0, 0, 0), 2f);
+        var sphereGeom = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh());
+        var mat = new PhongMaterial { DiffuseColor = new HelixToolkit.Maths.Color4(color.R/255f, color.G/255f, color.B/255f, color.A/255f) };
+
+        var sphere = new MeshGeometryModel3D 
+        { 
+            Geometry = sphereGeom,
+            Material = mat,
+            Transform = new TranslateTransform3D(pt.X, pt.Y, pt.Z)
+        };
+
         _pointVisuals.Add(sphere);
-        MainViewport.Children.Add(sphere);
+        MainGroup.Children.Add(sphere);
     }
 
     // ═══════════════════════════════════
@@ -227,16 +255,13 @@ public partial class BssoOsteotomyWindow : Window
 
     private void GenerateLowerBorderHandles()
     {
-        // Simple logic: Extrapolate downward from the buccal points.
-        // P[0]=L1, P[1]=L2, P[2]=B1, P[3]=B2.
-        // Usually B2 is the lowest point on the buccal cut. Let's add 2 points below it.
         var pLast = _buccalPoints[1];
         
         var lb1 = new Point3D(pLast.X, pLast.Y - 5, pLast.Z - 10);
         var lb2 = new Point3D(pLast.X, pLast.Y - 10, pLast.Z - 20);
         
-        AddPoint(_lowerBorderPoints, lb1, Brushes.Yellow);
-        AddPoint(_lowerBorderPoints, lb2, Brushes.Yellow);
+        AddPoint(_lowerBorderPoints, lb1, System.Windows.Media.Colors.Yellow);
+        AddPoint(_lowerBorderPoints, lb2, System.Windows.Media.Colors.Yellow);
     }
 
     private void UpdatePolyplane()
@@ -244,23 +269,24 @@ public partial class BssoOsteotomyWindow : Window
         var polyplane = GetCurrentPolyplane();
         var meshVerts = polyplane.GenerateMesh(40.0);
         
-        var pos = new Point3DCollection(meshVerts.Count);
-        var idx = new Int32Collection(meshVerts.Count);
-        for (int i = 0; i < meshVerts.Count; i++)
+        var builder = new HelixToolkit.Geometry.MeshBuilder();
+        for (int i = 0; i < meshVerts.Count; i += 3)
         {
-            pos.Add(new Point3D(meshVerts[i][0], meshVerts[i][1], meshVerts[i][2]));
-            idx.Add(i);
+            if (i + 2 < meshVerts.Count)
+            {
+                builder.AddTriangle(
+                    new System.Numerics.Vector3(meshVerts[i][0], meshVerts[i][1], meshVerts[i][2]),
+                    new System.Numerics.Vector3(meshVerts[i + 1][0], meshVerts[i + 1][1], meshVerts[i + 1][2]),
+                    new System.Numerics.Vector3(meshVerts[i + 2][0], meshVerts[i + 2][1], meshVerts[i + 2][2]));
+            }
         }
-        
-        ((MeshGeometry3D)_polyplaneMesh.Geometry).Positions = pos;
-        ((MeshGeometry3D)_polyplaneMesh.Geometry).TriangleIndices = idx;
+        _polyplaneMesh.Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh());
     }
 
     private Polyplane GetCurrentPolyplane()
     {
         var polyplane = new Polyplane();
         
-        // Sequence: L1 -> L2 -> B1 -> B2 -> LB1 -> LB2
         var allPts = new List<Point3D>();
         allPts.AddRange(_lingualPoints);
         allPts.AddRange(_buccalPoints);
@@ -268,9 +294,7 @@ public partial class BssoOsteotomyWindow : Window
         
         polyplane.ControlPoints = allPts.Select(p => (p.X, p.Y, p.Z)).ToList();
         
-        // Extrude along X (Medial-Lateral)
         polyplane.ExtrusionDir = new double[] { 1, 0, 0 };
-        // Normal to cut along
         polyplane.UpVector = new double[] { 0, 1, 0 }; 
         return polyplane;
     }
@@ -282,11 +306,10 @@ public partial class BssoOsteotomyWindow : Window
         _buccalPoints.Clear();
         _lowerBorderPoints.Clear();
         
-        foreach (var p in _pointVisuals) MainViewport.Children.Remove(p);
+        foreach (var p in _pointVisuals) MainGroup.Children.Remove(p);
         _pointVisuals.Clear();
         
-        ((MeshGeometry3D)_polyplaneMesh.Geometry).Positions.Clear();
-        ((MeshGeometry3D)_polyplaneMesh.Geometry).TriangleIndices.Clear();
+        _polyplaneMesh.Geometry = null;
         
         NextBtn.Visibility = Visibility.Visible;
         NextBtn.IsEnabled = false;
@@ -297,7 +320,8 @@ public partial class BssoOsteotomyWindow : Window
         StepInstructions.Text = "Left-click on the lingual side of the mandible ramus to place 2 control points for the osteotomy.";
         StatusText.Text = "Waiting for 2 points...";
         
-        ((DiffuseMaterial)_boneMesh.Material).Brush = new SolidColorBrush(Color.FromRgb(245, 230, 200));
+        if (_boneMesh.Material is PhongMaterial pm)
+            pm.DiffuseColor = new HelixToolkit.Maths.Color4(245/255f, 230/255f, 200/255f, 1.0f);
     }
 
     private void Cut_Click(object sender, RoutedEventArgs e)
@@ -310,24 +334,23 @@ public partial class BssoOsteotomyWindow : Window
             var polyplane = GetCurrentPolyplane();
             var (above, below) = MeshOps.SplitByPolyplane(_mandibleVerts, polyplane);
 
-            // BSSO leaves a Proximal segment (Condyle + Ramus) and a Distal segment (Tooth-bearing)
             ProximalResult = MeshOps.CloseHoles(above);
             DistalResult = MeshOps.CloseHoles(below);
 
-            _mainGroup.Children.Remove(_boneMesh);
+            MainGroup.Children.Remove(_boneMesh);
             
             var proxMesh = CreateMeshVisual(ProximalResult, Color.FromRgb(200, 200, 255), 1.0);
             var distMesh = CreateMeshVisual(DistalResult, Color.FromRgb(255, 200, 200), 1.0);
             
-            _mainGroup.Children.Add(proxMesh);
-            _mainGroup.Children.Add(distMesh);
+            MainGroup.Children.Add(proxMesh);
+            MainGroup.Children.Add(distMesh);
             
             AcceptBtn.Visibility = Visibility.Visible;
             CutBtn.Visibility = Visibility.Collapsed;
             ClearBtn.Content = "Undo Cut";
             
-            _mainGroup.Children.Remove(_polyplaneMesh);
-            foreach (var p in _pointVisuals) MainViewport.Children.Remove(p);
+            MainGroup.Children.Remove(_polyplaneMesh);
+            foreach (var p in _pointVisuals) MainGroup.Children.Remove(p);
             
             StatusText.Text = "BSSO computed. Review the Proximal and Distal segments.";
         }
@@ -350,3 +373,7 @@ public partial class BssoOsteotomyWindow : Window
         Close();
     }
 }
+
+
+
+

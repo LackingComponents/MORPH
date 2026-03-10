@@ -5,7 +5,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
-using HelixToolkit.Wpf;
+using HelixToolkit.Wpf.SharpDX;
 using OrthoPlanner.Core.Geometry;
 
 namespace OrthoPlanner.App;
@@ -20,55 +20,56 @@ public partial class LeFortOsteotomyWindow : Window
     public bool Accepted { get; private set; } = false;
 
     // Viewport elements
-    private ModelVisual3D _modelVisual = new();
-    private Model3DGroup _mainGroup = new();
-    private GeometryModel3D _boneMesh;
-    private GeometryModel3D _polyplaneMesh;
+    private MeshGeometryModel3D _boneMesh;
+    private MeshGeometryModel3D _polyplaneMesh;
     
     // Control points
     private List<Point3D> _controlPoints = new();
-    private List<SphereVisual3D> _pointVisuals = new();
+    private List<MeshGeometryModel3D> _pointVisuals = new();
     
     // Interaction state
-    private SphereVisual3D? _draggedPoint;
+    private MeshGeometryModel3D? _draggedPoint;
     private int _draggedIndex = -1;
-    private Plane3D? _dragPlane; // Plane for moving points in 3D
+    private (Point3D Position, Vector3D Normal)? _dragPlane; // Plane for moving points in 3D
 
     public LeFortOsteotomyWindow(List<float[]> craniumVerts)
     {
         InitializeComponent();
+        
+        MainViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
+
         _craniumVerts = craniumVerts;
 
-        MainViewport.Children.Add(_modelVisual);
-        _modelVisual.Content = _mainGroup;
-
-        // Background lights
-        _mainGroup.Children.Add(new AmbientLight(Color.FromRgb(100, 100, 100)));
-
         _boneMesh = CreateMeshVisual(_craniumVerts, Color.FromRgb(245, 245, 230), 1.0);
-        _mainGroup.Children.Add(_boneMesh);
+        MainGroup.Children.Add(_boneMesh);
 
         _polyplaneMesh = CreateMeshVisual(new List<float[]>(), Color.FromArgb(128, 50, 200, 100), 1.0);
-        _polyplaneMesh.BackMaterial = _polyplaneMesh.Material; // Double-sided
-        _mainGroup.Children.Add(_polyplaneMesh);
+        
+        // HelixToolkit.SharpDX does not have BackMaterial, but rather IsDoubleSided flag
+        // However, setting it via geometry or group is not standard.
+        // What we do is set IsDoubleSided = true on the MeshGeometryModel3D:
+        _polyplaneMesh.CullMode = SharpDX.Direct3D11.CullMode.None; // Make it double-sided
+        
+        MainGroup.Children.Add(_polyplaneMesh);
     }
 
-    private GeometryModel3D CreateMeshVisual(List<float[]> verts, Color color, double opacity)
+    private MeshGeometryModel3D CreateMeshVisual(List<float[]> verts, Color color, double opacity)
     {
-        var pos = new Point3DCollection(verts.Count);
-        var idx = new Int32Collection(verts.Count);
-        for (int i = 0; i < verts.Count; i++)
+        var builder = new HelixToolkit.Geometry.MeshBuilder();
+        for (int i = 0; i < verts.Count; i += 3)
         {
-            pos.Add(new Point3D(verts[i][0], verts[i][1], verts[i][2]));
-            idx.Add(i);
+            if (i + 2 < verts.Count)
+            {
+                builder.AddTriangle(
+                    new System.Numerics.Vector3(verts[i][0], verts[i][1], verts[i][2]),
+                    new System.Numerics.Vector3(verts[i + 1][0], verts[i + 1][1], verts[i + 1][2]),
+                    new System.Numerics.Vector3(verts[i + 2][0], verts[i + 2][1], verts[i + 2][2]));
+            }
         }
         
-        var geom = new MeshGeometry3D { Positions = pos, TriangleIndices = idx };
-        geom.Normals = new Vector3DCollection(); // Auto-compute is fine if normals are missing, but let's just leave empty.
-        
-        var mat = new DiffuseMaterial(new SolidColorBrush(Color.FromArgb((byte)(opacity * 255), color.R, color.G, color.B)));
-        
-        return new GeometryModel3D { Geometry = geom, Material = mat };
+        var geom = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh());
+        var mat = new PhongMaterial { DiffuseColor = new HelixToolkit.Maths.Color4(color.R / 255f, color.G / 255f, color.B / 255f, (float)opacity) };
+        return new MeshGeometryModel3D { Geometry = geom, Material = mat };
     }
 
     // ═══════════════════════════════════
@@ -86,14 +87,15 @@ public partial class LeFortOsteotomyWindow : Window
         for (int i = 0; i < _pointVisuals.Count; i++)
         {
             var vis = _pointVisuals[i];
-            if (ptInfo.Value.Visual == vis || DistanceTo(ptInfo.Value.Point, vis.Center) < 2.0)
+            var center = _controlPoints[i];
+            
+            if (ptInfo.Value.Visual == vis || DistanceTo(ptInfo.Value.Point, center) < 2.0)
             {
                 _draggedPoint = vis;
                 _draggedIndex = i;
                 
-                // Establish a drag plane facing the camera, passing through the sphere
                 var lookDir = MainViewport.Camera.LookDirection;
-                _dragPlane = new Plane3D(vis.Center, new Vector3D(-lookDir.X, -lookDir.Y, -lookDir.Z));
+                _dragPlane = (center, new Vector3D(-lookDir.X, -lookDir.Y, -lookDir.Z));
                 
                 MainViewport.CaptureMouse();
                 e.Handled = true;
@@ -102,7 +104,7 @@ public partial class LeFortOsteotomyWindow : Window
         }
 
         // 2. Otherwise add a new point
-        if (ptInfo.Value.Visual == _modelVisual)
+        if (ptInfo.Value.Visual == _boneMesh)
         {
             AddControlPoint(ptInfo.Value.Point);
             e.Handled = true;
@@ -114,14 +116,19 @@ public partial class LeFortOsteotomyWindow : Window
         if (_draggedPoint != null && _dragPlane != null)
         {
             var pos = e.GetPosition(MainViewport);
-            var ray = Viewport3DHelper.Point2DtoRay3D(MainViewport.Viewport, pos);
-            if (ray != null)
+            var rayResult = MainViewport.UnProject(pos);
+            if (rayResult.Direction.LengthSquared() > 0)
             {
-                var intersect = RayPlaneIntersection(ray, _dragPlane);
+                var ray = rayResult;
+                var intersect = RayPlaneIntersection(
+                    new Point3D(ray.Position.X, ray.Position.Y, ray.Position.Z), 
+                    new Vector3D(ray.Direction.X, ray.Direction.Y, ray.Direction.Z), 
+                    _dragPlane.Value.Position, 
+                    _dragPlane.Value.Normal);
                 if (intersect.HasValue)
                 {
-                    _draggedPoint.Center = intersect.Value;
                     _controlPoints[_draggedIndex] = intersect.Value;
+                    _draggedPoint.Transform = new TranslateTransform3D(intersect.Value.X, intersect.Value.Y, intersect.Value.Z);
                     UpdatePolyplane();
                 }
             }
@@ -139,12 +146,13 @@ public partial class LeFortOsteotomyWindow : Window
         }
     }
 
-    private (Point3D Point, Visual3D? Visual)? GetHitPoint(Point p)
+    private (Point3D Point, Element3D? Visual)? GetHitPoint(Point p)
     {
-        var hits = Viewport3DHelper.FindHits(MainViewport.Viewport, p);
-        foreach (var hit in hits)
+        var hits = MainViewport.FindHits(p);
+        var hit = hits.FirstOrDefault(h => h.ModelHit is Element3D);
+        if (hit != null && hit.ModelHit is Element3D model)
         {
-            return (hit.Position, hit.Visual);
+             return (new Point3D(hit.PointHit.X, hit.PointHit.Y, hit.PointHit.Z), model);
         }
         return null;
     }
@@ -159,21 +167,32 @@ public partial class LeFortOsteotomyWindow : Window
     // Actions
     // ═══════════════════════════════════
 
-    private Point3D? RayPlaneIntersection(Ray3D ray, Plane3D plane)
+    private Point3D? RayPlaneIntersection(Point3D rayOrigin, Vector3D rayDirection, Point3D planePosition, Vector3D planeNormal)
     {
-        double nd = Vector3D.DotProduct(ray.Direction, plane.Normal);
+        double nd = Vector3D.DotProduct(rayDirection, planeNormal);
         if (Math.Abs(nd) < 0.0001) return null;
-        double t = Vector3D.DotProduct(plane.Position - ray.Origin, plane.Normal) / nd;
+        double t = Vector3D.DotProduct(planePosition - rayOrigin, planeNormal) / nd;
         if (t < 0) return null;
-        return ray.Origin + ray.Direction * t;
+        return rayOrigin + rayDirection * t;
     }
 
     private void AddControlPoint(Point3D pt)
     {
         _controlPoints.Add(pt);
-        var sphere = new SphereVisual3D { Center = pt, Radius = 2.0, Fill = Brushes.Red };
+        var builder = new HelixToolkit.Geometry.MeshBuilder();
+        builder.AddSphere(new System.Numerics.Vector3(0, 0, 0), 2f);
+        var sphereGeom = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh());
+        var mat = new PhongMaterial { DiffuseColor = new HelixToolkit.Maths.Color4(1f, 0f, 0f, 1f) };
+
+        var sphere = new MeshGeometryModel3D 
+        { 
+            Geometry = sphereGeom,
+            Material = mat,
+            Transform = new TranslateTransform3D(pt.X, pt.Y, pt.Z)
+        };
+
         _pointVisuals.Add(sphere);
-        MainViewport.Children.Add(sphere);
+        MainGroup.Children.Add(sphere);
         
         if (_controlPoints.Count >= 2)
         {
@@ -189,17 +208,18 @@ public partial class LeFortOsteotomyWindow : Window
         var polyplane = GetCurrentPolyplane();
         var meshVerts = polyplane.GenerateMesh(100.0);
         
-        // Update the visual geometry
-        var pos = new Point3DCollection(meshVerts.Count);
-        var idx = new Int32Collection(meshVerts.Count);
-        for (int i = 0; i < meshVerts.Count; i++)
+        var builder = new HelixToolkit.Geometry.MeshBuilder();
+        for (int i = 0; i < meshVerts.Count; i += 3)
         {
-            pos.Add(new Point3D(meshVerts[i][0], meshVerts[i][1], meshVerts[i][2]));
-            idx.Add(i);
+            if (i + 2 < meshVerts.Count)
+            {
+                builder.AddTriangle(
+                    new System.Numerics.Vector3(meshVerts[i][0], meshVerts[i][1], meshVerts[i][2]),
+                    new System.Numerics.Vector3(meshVerts[i + 1][0], meshVerts[i + 1][1], meshVerts[i + 1][2]),
+                    new System.Numerics.Vector3(meshVerts[i + 2][0], meshVerts[i + 2][1], meshVerts[i + 2][2]));
+            }
         }
-        
-        ((MeshGeometry3D)_polyplaneMesh.Geometry).Positions = pos;
-        ((MeshGeometry3D)_polyplaneMesh.Geometry).TriangleIndices = idx;
+        _polyplaneMesh.Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh());
     }
 
     private Polyplane GetCurrentPolyplane()
@@ -207,9 +227,7 @@ public partial class LeFortOsteotomyWindow : Window
         var polyplane = new Polyplane();
         polyplane.ControlPoints = _controlPoints.Select(p => (p.X, p.Y, p.Z)).ToList();
         
-        // Extrude along Y (anterior-posterior) inside the maxilla
         polyplane.ExtrusionDir = new double[] { 0, 1, 0 };
-        // Z is Up
         polyplane.UpVector = new double[] { 0, 0, 1 }; 
         return polyplane;
     }
@@ -217,17 +235,16 @@ public partial class LeFortOsteotomyWindow : Window
     private void Clear_Click(object sender, RoutedEventArgs e)
     {
         _controlPoints.Clear();
-        foreach (var p in _pointVisuals) MainViewport.Children.Remove(p);
+        foreach (var p in _pointVisuals) MainGroup.Children.Remove(p);
         _pointVisuals.Clear();
         
-        ((MeshGeometry3D)_polyplaneMesh.Geometry).Positions.Clear();
-        ((MeshGeometry3D)_polyplaneMesh.Geometry).TriangleIndices.Clear();
+        _polyplaneMesh.Geometry = null;
         
         CutBtn.IsEnabled = false;
         AcceptBtn.Visibility = Visibility.Collapsed;
         
-        // Reset bone colors if we cut
-        ((DiffuseMaterial)_boneMesh.Material).Brush = new SolidColorBrush(Color.FromRgb(245, 245, 230));
+        if (_boneMesh.Material is PhongMaterial pm)
+            pm.DiffuseColor = new HelixToolkit.Maths.Color4(245/255f, 245/255f, 230/255f, 1.0f);
     }
 
     private void Cut_Click(object sender, RoutedEventArgs e)
@@ -242,27 +259,23 @@ public partial class LeFortOsteotomyWindow : Window
             var polyplane = GetCurrentPolyplane();
             var (above, below) = MeshOps.SplitByPolyplane(_craniumVerts, polyplane);
 
-            // Optional: Close holes for watertightness
             UpperMaxillaResult = MeshOps.CloseHoles(above);
             LowerMaxillaResult = MeshOps.CloseHoles(below);
 
-            // Hide original bone, show two new pieces in different colors
-            _mainGroup.Children.Remove(_boneMesh);
+            MainGroup.Children.Remove(_boneMesh);
             
             var upperMesh = CreateMeshVisual(UpperMaxillaResult, Color.FromRgb(200, 200, 255), 1.0);
             var lowerMesh = CreateMeshVisual(LowerMaxillaResult, Color.FromRgb(255, 200, 200), 1.0);
             
-            _mainGroup.Children.Add(upperMesh);
-            _mainGroup.Children.Add(lowerMesh);
+            MainGroup.Children.Add(upperMesh);
+            MainGroup.Children.Add(lowerMesh);
             
-            // Allow accepting
             AcceptBtn.Visibility = Visibility.Visible;
             CutBtn.IsEnabled = false;
-            ClearBtn.Content = "Undo Cut"; // Allows resetting the visuals and trying again
+            ClearBtn.Content = "Undo Cut";
             
-            // Hide the handles and polyplane while reviewing the cut
-            _mainGroup.Children.Remove(_polyplaneMesh);
-            foreach (var p in _pointVisuals) MainViewport.Children.Remove(p);
+            MainGroup.Children.Remove(_polyplaneMesh);
+            foreach (var p in _pointVisuals) MainGroup.Children.Remove(p);
             
             StatusText.Text = "Osteotomy computed. Review the upper (blue) and lower (red) segments.";
         }
@@ -285,3 +298,6 @@ public partial class LeFortOsteotomyWindow : Window
         Close();
     }
 }
+
+
+

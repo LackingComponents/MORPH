@@ -4,7 +4,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
-using HelixToolkit.Wpf;
+using HelixToolkit.Wpf.SharpDX;
 using OrthoPlanner.Core.Geometry;
 using OrthoPlanner.App.ViewModels;
 
@@ -35,8 +35,8 @@ public partial class DentalAlignmentWindow : Window
 
     private readonly List<(double X, double Y, double Z)?> _ctLandmarks = new();
     private readonly List<(double X, double Y, double Z)?> _stlLandmarks = new();
-    private readonly List<Visual3D> _ctMarkerVisuals = new();
-    private readonly List<Visual3D> _stlMarkerVisuals = new();
+    private readonly List<Element3D> _ctMarkerVisuals = new();
+    private readonly List<Element3D> _stlMarkerVisuals = new();
 
     private readonly ObservableCollection<LandmarkPairItem> _pairs = new();
 
@@ -48,6 +48,11 @@ public partial class DentalAlignmentWindow : Window
     public DentalAlignmentWindow(OrthoPlanner.Core.Imaging.VolumeData ctVolume, List<float[]> ctVertices, List<float[]> stlVertices)
     {
         InitializeComponent();
+
+        var effManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
+        CtViewport.EffectsManager = effManager;
+        StlViewport.EffectsManager = effManager;
+
         _ctVolume = ctVolume;
         _ctVertices = ctVertices;
         _stlVertices = stlVertices;
@@ -61,24 +66,14 @@ public partial class DentalAlignmentWindow : Window
     {
         // CT Model
         var ctModel = MeshHelper.BuildModel3D(_ctVertices, 240, 230, 210);
-        CtViewport.Children.Add(new ModelVisual3D { Content = ctModel });
-        AddStandardLighting(CtViewport);
+        CtGroup.Children.Add(ctModel);
 
         // STL Model
         var stlModel = MeshHelper.BuildModel3D(_stlVertices, 245, 245, 230);
-        StlViewport.Children.Add(new ModelVisual3D { Content = stlModel });
-        AddStandardLighting(StlViewport);
+        StlGroup.Children.Add(stlModel);
 
         CtViewport.ZoomExtents(500);
         StlViewport.ZoomExtents(500);
-    }
-
-    private void AddStandardLighting(HelixViewport3D viewport)
-    {
-        // Mimic MainViewModel lighting exactly: 
-        // Very low ambient light to barely prevent pitch black shadows, letting Headlamp do the work
-        viewport.Children.Add(new ModelVisual3D { Content = new AmbientLight(Color.FromRgb(30, 30, 35)) });
-        // (The HelixViewport3D has IsHeadLightEnabled="True" in XAML, exactly like the Main viewport)
     }
 
     // ═══ Left-Click Add ═══
@@ -88,10 +83,10 @@ public partial class DentalAlignmentWindow : Window
         if (Keyboard.Modifiers != ModifierKeys.None) return; // allow shift/ctrl to pan/zoom if Helix uses it
         
         var pos = e.GetPosition(CtViewport);
-        var hits = Viewport3DHelper.FindHits(CtViewport.Viewport, pos);
+        var hits = CtViewport.FindHits(pos);
         if (hits == null || hits.Count == 0) return;
 
-        SetCtLandmark(GetNextCtIndex(), hits[0].Position);
+        SetCtLandmark(GetNextCtIndex(), new Point3D(hits[0].PointHit.X, hits[0].PointHit.Y, hits[0].PointHit.Z));
         e.Handled = true; // Consume to prevent Helix picking up the left click for orbital rotation
     }
 
@@ -100,10 +95,10 @@ public partial class DentalAlignmentWindow : Window
         if (Keyboard.Modifiers != ModifierKeys.None) return;
 
         var pos = e.GetPosition(StlViewport);
-        var hits = Viewport3DHelper.FindHits(StlViewport.Viewport, pos);
+        var hits = StlViewport.FindHits(pos);
         if (hits == null || hits.Count == 0) return;
 
-        SetStlLandmark(GetNextStlIndex(), hits[0].Position);
+        SetStlLandmark(GetNextStlIndex(), new Point3D(hits[0].PointHit.X, hits[0].PointHit.Y, hits[0].PointHit.Z));
         e.Handled = true;
     }
 
@@ -112,10 +107,10 @@ public partial class DentalAlignmentWindow : Window
     private void CtViewport_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
         var pos = e.GetPosition(CtViewport);
-        var hits = Viewport3DHelper.FindHits(CtViewport.Viewport, pos);
+        var hits = CtViewport.FindHits(pos);
         if (hits == null || hits.Count == 0) return;
 
-        var clickPos = hits[0].Position;
+        var clickPos = new Point3D(hits[0].PointHit.X, hits[0].PointHit.Y, hits[0].PointHit.Z);
         int closestIdx = FindClosestLandmark(_ctLandmarks, clickPos);
 
         if (closestIdx >= 0)
@@ -131,10 +126,10 @@ public partial class DentalAlignmentWindow : Window
     private void StlViewport_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
         var pos = e.GetPosition(StlViewport);
-        var hits = Viewport3DHelper.FindHits(StlViewport.Viewport, pos);
+        var hits = StlViewport.FindHits(pos);
         if (hits == null || hits.Count == 0) return;
 
-        var clickPos = hits[0].Position;
+        var clickPos = new Point3D(hits[0].PointHit.X, hits[0].PointHit.Y, hits[0].PointHit.Z);
         int closestIdx = FindClosestLandmark(_stlLandmarks, clickPos);
 
         if (closestIdx >= 0)
@@ -197,9 +192,9 @@ public partial class DentalAlignmentWindow : Window
         RemoveCtMarker(idx);
         _ctLandmarks[idx] = (point.X, point.Y, point.Z);
 
-        var (sphere, label) = CreateMarker(point, Colors.LimeGreen, idx + 1);
-        CtViewport.Children.Add(sphere);
-        CtViewport.Children.Add(label);
+        var (sphere, label) = CreateMarker(point, System.Windows.Media.Colors.LimeGreen, idx + 1);
+        CtGroup.Children.Add(sphere);
+        CtGroup.Children.Add(label);
         _ctMarkerVisuals[idx * 2] = sphere;
         _ctMarkerVisuals[idx * 2 + 1] = label;
 
@@ -221,9 +216,9 @@ public partial class DentalAlignmentWindow : Window
         RemoveStlMarker(idx);
         _stlLandmarks[idx] = (point.X, point.Y, point.Z);
 
-        var (sphere, label) = CreateMarker(point, Colors.OrangeRed, idx + 1);
-        StlViewport.Children.Add(sphere);
-        StlViewport.Children.Add(label);
+        var (sphere, label) = CreateMarker(point, System.Windows.Media.Colors.OrangeRed, idx + 1);
+        StlGroup.Children.Add(sphere);
+        StlGroup.Children.Add(label);
         _stlMarkerVisuals[idx * 2] = sphere;
         _stlMarkerVisuals[idx * 2 + 1] = label;
 
@@ -232,10 +227,15 @@ public partial class DentalAlignmentWindow : Window
         UpdateLandmarkUI();
     }
 
-    private (SphereVisual3D sphere, BillboardTextVisual3D label) CreateMarker(Point3D position, Color color, int number)
+    private (MeshGeometryModel3D sphere, BillboardTextModel3D label) CreateMarker(Point3D position, System.Windows.Media.Color color, int number)
     {
-        var sphere = new SphereVisual3D { Center = position, Radius = 1.5, Fill = new SolidColorBrush(color) };
-        var label = new BillboardTextVisual3D { Text = number.ToString(), Position = new Point3D(position.X, position.Y, position.Z + 3), Foreground = new SolidColorBrush(color), FontSize = 14 };
+        var builder = new HelixToolkit.Geometry.MeshBuilder();
+        builder.AddSphere(new System.Numerics.Vector3(0,0,0), 1.5f);
+        var sphere = new MeshGeometryModel3D { Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh()), Material = new PhongMaterial { DiffuseColor = new HelixToolkit.Maths.Color4(color.R/255f, color.G/255f, color.B/255f, color.A/255f) }, Transform = new TranslateTransform3D(position.X, position.Y, position.Z) };
+
+        var text3D = new HelixToolkit.SharpDX.BillboardText3D();
+        text3D.TextInfo.Add(new HelixToolkit.SharpDX.TextInfo(number.ToString(), new System.Numerics.Vector3((float)position.X, (float)position.Y, (float)position.Z + 3f)));
+        var label = new BillboardTextModel3D { Geometry = text3D };
         return (sphere, label);
     }
 
@@ -243,8 +243,8 @@ public partial class DentalAlignmentWindow : Window
     {
         if (idx * 2 + 1 < _ctMarkerVisuals.Count)
         {
-            if (_ctMarkerVisuals[idx * 2] != null) CtViewport.Children.Remove(_ctMarkerVisuals[idx * 2]);
-            if (_ctMarkerVisuals[idx * 2 + 1] != null) CtViewport.Children.Remove(_ctMarkerVisuals[idx * 2 + 1]);
+            if (_ctMarkerVisuals[idx * 2] != null) CtGroup.Children.Remove(_ctMarkerVisuals[idx * 2]);
+            if (_ctMarkerVisuals[idx * 2 + 1] != null) CtGroup.Children.Remove(_ctMarkerVisuals[idx * 2 + 1]);
         }
     }
 
@@ -252,8 +252,8 @@ public partial class DentalAlignmentWindow : Window
     {
         if (idx * 2 + 1 < _stlMarkerVisuals.Count)
         {
-            if (_stlMarkerVisuals[idx * 2] != null) StlViewport.Children.Remove(_stlMarkerVisuals[idx * 2]);
-            if (_stlMarkerVisuals[idx * 2 + 1] != null) StlViewport.Children.Remove(_stlMarkerVisuals[idx * 2 + 1]);
+            if (_stlMarkerVisuals[idx * 2] != null) StlGroup.Children.Remove(_stlMarkerVisuals[idx * 2]);
+            if (_stlMarkerVisuals[idx * 2 + 1] != null) StlGroup.Children.Remove(_stlMarkerVisuals[idx * 2 + 1]);
         }
     }
 
@@ -293,9 +293,9 @@ public partial class DentalAlignmentWindow : Window
     private void ClearLandmarks_Click(object sender, RoutedEventArgs e)
     {
         for (int i = 0; i < _ctMarkerVisuals.Count; i++)
-            if (_ctMarkerVisuals[i] != null) CtViewport.Children.Remove(_ctMarkerVisuals[i]);
+            if (_ctMarkerVisuals[i] != null) CtGroup.Children.Remove(_ctMarkerVisuals[i]);
         for (int i = 0; i < _stlMarkerVisuals.Count; i++)
-            if (_stlMarkerVisuals[i] != null) StlViewport.Children.Remove(_stlMarkerVisuals[i]);
+            if (_stlMarkerVisuals[i] != null) StlGroup.Children.Remove(_stlMarkerVisuals[i]);
 
         _ctMarkerVisuals.Clear(); _stlMarkerVisuals.Clear();
         _ctLandmarks.Clear(); _stlLandmarks.Clear();
@@ -370,22 +370,15 @@ public partial class DentalAlignmentWindow : Window
             IcpAligner.TransformVertices(previewVerts, result.Transform);
 
             // ──Vivid Visualization ── 
-            StlViewport.Children.Clear();
-            AddStandardLighting(StlViewport);
-            
-            // Add soft ambient + directional lighting for depth (so it is neither pitch black nor blown-out flat)
-            StlViewport.Children.Add(new ModelVisual3D { Content = new AmbientLight(Color.FromRgb(150, 150, 150)) });
-            StlViewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(100, 100, 100), new Vector3D(-1, -1, -0.5)) });
-            StlViewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(60, 60, 60), new Vector3D(1, 1, 0.5)) });
-            StlViewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(80, 80, 80), new Vector3D(0, 1, 0.5)) });     // Back
+            StlGroup.Children.Clear();
 
             // Dark Blue translucent CT model (increased opacity to 180 per request)
             var ctModel = MeshHelper.BuildModel3D(_ctVertices, 80, 160, 255, 180);
-            StlViewport.Children.Add(new ModelVisual3D { Content = ctModel });
+            StlGroup.Children.Add(ctModel);
 
             // Bright Golden solid STL model (alpha defaults to 255)
             var alignedModel = MeshHelper.BuildModel3D(previewVerts, 255, 230, 90);
-            StlViewport.Children.Add(new ModelVisual3D { Content = alignedModel });
+            StlGroup.Children.Add(alignedModel);
 
             StlViewport.ZoomExtents(500);
 
@@ -499,9 +492,10 @@ public partial class DentalAlignmentWindow : Window
             CloseHolesCheckBox.Visibility = Visibility.Collapsed;
             SkipIcpCheckBox.Visibility = Visibility.Visible;
             PanoramicRow.Height = new GridLength(0); // Hide MPR
-            StlViewport.Children.Clear(); // Clear alignment preview
-            AddStandardLighting(StlViewport);
-            StlViewport.Children.Add(new ModelVisual3D { Content = MeshHelper.BuildModel3D(_stlOriginalVertices, 255, 230, 90) }); // Restore original gold STL
+            StlGroup.Children.Clear(); // Clear alignment preview
+            StlGroup.Children.Add(MeshHelper.BuildModel3D(_stlOriginalVertices, 255, 230, 90)); // Restore original gold STL
+            for (int i = 0; i < _stlMarkerVisuals.Count; i++)
+                if (_stlMarkerVisuals[i] != null) StlGroup.Children.Add(_stlMarkerVisuals[i]);
             
             StepTitle.Text = "Step 1: Pick Matching Landmarks";
             StepInstructions.Text = "Adjust landmarks or right-click to remove. Then click Compute Alignment when ready.";
@@ -533,3 +527,7 @@ public partial class DentalAlignmentWindow : Window
         return Math.Sqrt(maxDistSq);
     }
 }
+
+
+
+

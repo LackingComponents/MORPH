@@ -6,7 +6,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
-using HelixToolkit.Wpf;
+using HelixToolkit.Wpf.SharpDX;
 using OrthoPlanner.Core.Geometry;
 using OrthoPlanner.Core.Imaging;
 using OrthoPlanner.Core.Segmentation;
@@ -25,21 +25,21 @@ public partial class CondyleSplitWindow : Window
 
     // 3 user-picked points defining the split plane
     private readonly List<Point3D> _planePoints = new();
-    private readonly List<SphereVisual3D> _planeMarkers = new();
+    private readonly List<MeshGeometryModel3D> _planeMarkers = new();
 
     // Plane: Ax + By + Cz + D = 0
     private Vector3D _planeNormal;
     private double _planeD;
     private Point3D _planeCentroid;
-    private ModelVisual3D? _planeTriangleVisual;
+    private GroupModel3D? _planeTriangleVisual;
 
     // Condylar bounding boxes: smaller default, adjustable
     private float[]? _leftCondyleCenter;
     private float[]? _rightCondyleCenter;
     private float[] _leftHalfExtents = { 15f, 10f, 10f };
     private float[] _rightHalfExtents = { 15f, 10f, 10f };
-    private ModelVisual3D? _leftBoxVisual;
-    private ModelVisual3D? _rightBoxVisual;
+    private GroupModel3D? _leftBoxVisual;
+    private GroupModel3D? _rightBoxVisual;
 
     // Drag state
     private int _dragPointIndex = -1;       // Step 1: dragging plane points
@@ -71,6 +71,9 @@ public partial class CondyleSplitWindow : Window
         VolumeData? ctVolume = null, SegmentationVolume? segVolume = null, byte boneLabel = 1, double boneMinHu = 400.0)
     {
         InitializeComponent();
+        
+        MainViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
+
         _boneVerts = boneVerts.Select(v => new float[] { v[0], v[1], v[2] }).ToList();
         _ctVolume = ctVolume;
         _segVolume = segVolume;
@@ -93,11 +96,11 @@ public partial class CondyleSplitWindow : Window
         _rightCondyleClickPoint = null;
         _dragPointIndex = -1;
 
-        MainViewport.Children.Clear();
-        AddLighting();
+        MainGroup.Children.Clear();
+        // AddLighting(); // Lighting is now handled in XAML directly via <hx:AmbientLight3D> and <hx:DirectionalLight3D>
 
         var boneModel = MeshHelper.BuildModel3D(_boneVerts, 200, 190, 180, 220);
-        MainViewport.Children.Add(new ModelVisual3D { Content = boneModel });
+        MainGroup.Children.Add(boneModel);
 
         MainViewport.ZoomExtents(500);
 
@@ -137,7 +140,7 @@ public partial class CondyleSplitWindow : Window
     /// </summary>
     private void ShowPlaneTriangle()
     {
-        if (_planeTriangleVisual != null) MainViewport.Children.Remove(_planeTriangleVisual);
+        if (_planeTriangleVisual != null) MainGroup.Children.Remove(_planeTriangleVisual);
         if (_planePoints.Count < 3) return;
 
         // Create local U, V vectors for the plane
@@ -168,26 +171,29 @@ public partial class CondyleSplitWindow : Window
         var c2 = _planeCentroid + u * maxU + v * maxV; // Top-Right
         var c3 = _planeCentroid + u * minU + v * maxV; // Top-Left
 
-        var mesh = new MeshGeometry3D();
-        mesh.Positions = new Point3DCollection(new[] { c0, c1, c2, c3 });
-        mesh.TriangleIndices = new Int32Collection(new[] { 0, 1, 2, 0, 2, 3 }); // double-sided (with BackMaterial)
-        mesh.Freeze();
+        var builder = new HelixToolkit.Geometry.MeshBuilder();
+        builder.AddQuad(
+            new System.Numerics.Vector3((float)c0.X, (float)c0.Y, (float)c0.Z),
+            new System.Numerics.Vector3((float)c1.X, (float)c1.Y, (float)c1.Z),
+            new System.Numerics.Vector3((float)c2.X, (float)c2.Y, (float)c2.Z),
+            new System.Numerics.Vector3((float)c3.X, (float)c3.Y, (float)c3.Z));
 
-        var brush = new SolidColorBrush(Color.FromArgb(60, 0, 255, 100)); brush.Freeze();
-        var mat = new DiffuseMaterial(brush); mat.Freeze();
-        var model = new GeometryModel3D(mesh, mat) { BackMaterial = mat }; model.Freeze();
+        var mat = new PhongMaterial { DiffuseColor = new HelixToolkit.Maths.Color4(0, 1.0f, 100/255f, 60/255f) };
+        var model = new MeshGeometryModel3D { Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh()), Material = mat };
 
-        // Border
-        var border = new LinesVisual3D { Color = Colors.Cyan, Thickness = 2 };
-        border.Points.Add(c0); border.Points.Add(c1);
-        border.Points.Add(c1); border.Points.Add(c2);
-        border.Points.Add(c2); border.Points.Add(c3);
-        border.Points.Add(c3); border.Points.Add(c0);
+        var lineBuilder = new HelixToolkit.SharpDX.LineBuilder();
+        lineBuilder.AddLine(new System.Numerics.Vector3((float)c0.X, (float)c0.Y, (float)c0.Z), new System.Numerics.Vector3((float)c1.X, (float)c1.Y, (float)c1.Z));
+        lineBuilder.AddLine(new System.Numerics.Vector3((float)c1.X, (float)c1.Y, (float)c1.Z), new System.Numerics.Vector3((float)c2.X, (float)c2.Y, (float)c2.Z));
+        lineBuilder.AddLine(new System.Numerics.Vector3((float)c2.X, (float)c2.Y, (float)c2.Z), new System.Numerics.Vector3((float)c3.X, (float)c3.Y, (float)c3.Z));
+        lineBuilder.AddLine(new System.Numerics.Vector3((float)c3.X, (float)c3.Y, (float)c3.Z), new System.Numerics.Vector3((float)c0.X, (float)c0.Y, (float)c0.Z));
+        
+        var border = new LineGeometryModel3D { Geometry = lineBuilder.ToLineGeometry3D(), Color = System.Windows.Media.Colors.Cyan, Thickness = 2 };
 
-        var parent = new ModelVisual3D { Content = model };
+        var parent = new GroupModel3D();
+        parent.Children.Add(model);
         parent.Children.Add(border);
         _planeTriangleVisual = parent;
-        MainViewport.Children.Add(parent);
+        MainGroup.Children.Add(parent);
     }
 
     private Point3D ExtendFromCentroid(Point3D pt, double scale)
@@ -266,27 +272,27 @@ public partial class CondyleSplitWindow : Window
 
             Dispatcher.Invoke(() =>
             {
-                MainViewport.Children.Clear();
-                AddLighting();
+                MainGroup.Children.Clear();
 
                 if (_craniumVerts != null && _craniumVerts.Count > 0)
                 {
                     var cranModel = MeshHelper.BuildModel3D(_craniumVerts, 220, 200, 170);
-                    MainViewport.Children.Add(new ModelVisual3D { Content = cranModel });
+                    MainGroup.Children.Add(cranModel);
                 }
                 if (_mandibleVerts != null && _mandibleVerts.Count > 0)
                 {
                     var mandModel = MeshHelper.BuildModel3D(_mandibleVerts, 180, 200, 220);
-                    MainViewport.Children.Add(new ModelVisual3D { Content = mandModel });
+                    MainGroup.Children.Add(mandModel);
                 }
 
                 // Condylar axis line
-                var axis = new LinesVisual3D { Color = Colors.Red, Thickness = 3 };
-                axis.Points.Add(new Point3D(leftC[0], leftC[1], leftC[2]));
-                axis.Points.Add(new Point3D(rightC[0], rightC[1], rightC[2]));
-                MainViewport.Children.Add(axis);
-                AddSphereMarker(leftC, Colors.LimeGreen, 2);
-                AddSphereMarker(rightC, Colors.OrangeRed, 2);
+                var lineBuilder = new HelixToolkit.SharpDX.LineBuilder();
+                lineBuilder.AddLine(new System.Numerics.Vector3(leftC[0], leftC[1], leftC[2]), new System.Numerics.Vector3(rightC[0], rightC[1], rightC[2]));
+                var axis = new LineGeometryModel3D { Geometry = lineBuilder.ToLineGeometry3D(), Color = System.Windows.Media.Colors.Red, Thickness = 3 };
+                MainGroup.Children.Add(axis);
+                
+                AddSphereMarker(leftC, System.Windows.Media.Colors.LimeGreen, 2);
+                AddSphereMarker(rightC, System.Windows.Media.Colors.OrangeRed, 2);
                 RebuildBoxVisuals();
                 MainViewport.ZoomExtents(500);
 
@@ -534,14 +540,17 @@ public partial class CondyleSplitWindow : Window
             if (_planePoints.Count < 3)
             {
                 _planePoints.Add(hit.Value);
-                var colors = new[] { Colors.Cyan, Colors.Yellow, Colors.Magenta };
-                var marker = new SphereVisual3D
+                var colors = new[] { System.Windows.Media.Colors.Cyan, System.Windows.Media.Colors.Yellow, System.Windows.Media.Colors.Magenta };
+                var builder = new HelixToolkit.Geometry.MeshBuilder();
+                builder.AddSphere(new System.Numerics.Vector3(0, 0, 0), 2f);
+                var marker = new MeshGeometryModel3D
                 {
-                    Center = hit.Value, Radius = 2,
-                    Fill = new SolidColorBrush(colors[_planePoints.Count - 1])
+                    Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh()),
+                    Material = new PhongMaterial { DiffuseColor = new HelixToolkit.Maths.Color4(colors[_planePoints.Count - 1].R / 255f, colors[_planePoints.Count - 1].G / 255f, colors[_planePoints.Count - 1].B / 255f, colors[_planePoints.Count - 1].A / 255f) },
+                    Transform = new TranslateTransform3D(hit.Value.X, hit.Value.Y, hit.Value.Z)
                 };
                 _planeMarkers.Add(marker);
-                MainViewport.Children.Add(marker);
+                MainGroup.Children.Add(marker);
 
                 string[] labels = { "Incisors", "Left posterior", "Right posterior" };
                 StatusText.Text = $"{_planePoints.Count}/3: {labels[_planePoints.Count - 1]} placed";
@@ -639,19 +648,21 @@ public partial class CondyleSplitWindow : Window
                 else if (_dragFaceAxis != -1)
                 {
                     // Moving along face normal using standard ray projection to camera-parallel plane
-                    var pt2Ray = Viewport3DHelper.Point2DtoRay3D(MainViewport.Viewport, pos);
-                    var cam = MainViewport.Viewport.Camera as PerspectiveCamera;
+                    var pt2RValue = MainViewport.UnProject(pos);
+                    var cam = MainViewport.Camera as HelixToolkit.Wpf.SharpDX.PerspectiveCamera;
 
-                    if (pt2Ray != null && cam != null)
+                    if (cam != null)
                     {
+                        var pt2RayOrigin = new Point3D(pt2RValue.Position.X, pt2RValue.Position.Y, pt2RValue.Position.Z);
+                        var pt2RayDirection = new Vector3D(pt2RValue.Direction.X, pt2RValue.Direction.Y, pt2RValue.Direction.Z);
                         var normal = cam.LookDirection; normal.Normalize();
                         var planeP = new Point3D(_dragStartCenter[0], _dragStartCenter[1], _dragStartCenter[2]);
                         
-                        double denom = Vector3D.DotProduct(normal, pt2Ray.Direction);
+                        double denom = Vector3D.DotProduct(normal, pt2RayDirection);
                         if (Math.Abs(denom) > 1e-6)
                         {
-                            double t = Vector3D.DotProduct(normal, planeP - pt2Ray.Origin) / denom;
-                            var planeHit = pt2Ray.Origin + pt2Ray.Direction * t;
+                            double t = Vector3D.DotProduct(normal, planeP - pt2RayOrigin) / denom;
+                            var planeHit = pt2RayOrigin + pt2RayDirection * t;
 
                             float delta = 0;
                             if (_dragFaceAxis == 0) delta = (float)(planeHit.X - _dragStartPoint.X);
@@ -742,71 +753,79 @@ public partial class CondyleSplitWindow : Window
     // ═══════════════════════════════════
     private void AddLighting()
     {
-        MainViewport.Children.Add(new ModelVisual3D { Content = new AmbientLight(Color.FromRgb(100, 100, 100)) });
-        MainViewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(160, 155, 145), new Vector3D(-1, -1, -0.5)) });
-        MainViewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(80, 80, 90), new Vector3D(1, 0.5, 0.3)) });
-        MainViewport.Children.Add(new ModelVisual3D { Content = new DirectionalLight(Color.FromRgb(60, 60, 70), new Vector3D(0, 1, 0.5)) });
     }
 
     private void RebuildBoxVisuals()
     {
-        if (_leftBoxVisual != null) MainViewport.Children.Remove(_leftBoxVisual);
-        if (_rightBoxVisual != null) MainViewport.Children.Remove(_rightBoxVisual);
+        if (_leftBoxVisual != null) MainGroup.Children.Remove(_leftBoxVisual);
+        if (_rightBoxVisual != null) MainGroup.Children.Remove(_rightBoxVisual);
         if (_leftCondyleCenter != null)
-        { _leftBoxVisual = CreateBoxVisual(_leftCondyleCenter, _leftHalfExtents, Colors.LimeGreen); MainViewport.Children.Add(_leftBoxVisual); }
+        { _leftBoxVisual = CreateBoxVisual(_leftCondyleCenter, _leftHalfExtents, System.Windows.Media.Colors.LimeGreen); MainGroup.Children.Add(_leftBoxVisual); }
         if (_rightCondyleCenter != null)
-        { _rightBoxVisual = CreateBoxVisual(_rightCondyleCenter, _rightHalfExtents, Colors.OrangeRed); MainViewport.Children.Add(_rightBoxVisual); }
+        { _rightBoxVisual = CreateBoxVisual(_rightCondyleCenter, _rightHalfExtents, System.Windows.Media.Colors.OrangeRed); MainGroup.Children.Add(_rightBoxVisual); }
     }
 
-    private ModelVisual3D CreateBoxVisual(float[] c, float[] he, Color color)
+    private GroupModel3D CreateBoxVisual(float[] c, float[] he, System.Windows.Media.Color color)
     {
         double cx = c[0], cy = c[1], cz = c[2], hx = he[0], hy = he[1], hz = he[2];
         var pts = new[]
         {
-            new Point3D(cx-hx,cy-hy,cz-hz), new Point3D(cx+hx,cy-hy,cz-hz),
-            new Point3D(cx+hx,cy+hy,cz-hz), new Point3D(cx-hx,cy+hy,cz-hz),
-            new Point3D(cx-hx,cy-hy,cz+hz), new Point3D(cx+hx,cy-hy,cz+hz),
-            new Point3D(cx+hx,cy+hy,cz+hz), new Point3D(cx-hx,cy+hy,cz+hz)
+            new System.Numerics.Vector3((float)(cx-hx),(float)(cy-hy),(float)(cz-hz)), new System.Numerics.Vector3((float)(cx+hx),(float)(cy-hy),(float)(cz-hz)),
+            new System.Numerics.Vector3((float)(cx+hx),(float)(cy+hy),(float)(cz-hz)), new System.Numerics.Vector3((float)(cx-hx),(float)(cy+hy),(float)(cz-hz)),
+            new System.Numerics.Vector3((float)(cx-hx),(float)(cy-hy),(float)(cz+hz)), new System.Numerics.Vector3((float)(cx+hx),(float)(cy-hy),(float)(cz+hz)),
+            new System.Numerics.Vector3((float)(cx+hx),(float)(cy+hy),(float)(cz+hz)), new System.Numerics.Vector3((float)(cx-hx),(float)(cy+hy),(float)(cz+hz))
         };
-        var mesh = new MeshGeometry3D();
-        mesh.Positions = new Point3DCollection(pts);
-        mesh.TriangleIndices = new Int32Collection(new[]{0,1,2,0,2,3,4,6,5,4,7,6,0,4,5,0,5,1,2,6,7,2,7,3,0,3,7,0,7,4,1,5,6,1,6,2});
-        mesh.Freeze();
-        var brush = new SolidColorBrush(Color.FromArgb(40, color.R, color.G, color.B)); brush.Freeze();
-        var mat = new DiffuseMaterial(brush); mat.Freeze();
-        var model = new GeometryModel3D(mesh, mat) { BackMaterial = mat }; model.Freeze();
+        var builder = new HelixToolkit.Geometry.MeshBuilder();
+        int[] tris = {0,1,2,0,2,3,4,6,5,4,7,6,0,4,5,0,5,1,2,6,7,2,7,3,0,3,7,0,7,4,1,5,6,1,6,2};
+        for (int i = 0; i < tris.Length; i+=3) {
+            builder.AddTriangle(pts[tris[i]], pts[tris[i+1]], pts[tris[i+2]]);
+        }
+        var mat = new PhongMaterial { DiffuseColor = new HelixToolkit.Maths.Color4(color.R/255f, color.G/255f, color.B/255f, 40f/255f) };
+        var model = new MeshGeometryModel3D { Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh()), Material = mat };
 
         int[,] edges = {{0,1},{1,2},{2,3},{3,0},{4,5},{5,6},{6,7},{7,4},{0,4},{1,5},{2,6},{3,7}};
-        var lines = new LinesVisual3D { Color = color, Thickness = 2 };
-        for (int e = 0; e < 12; e++) { lines.Points.Add(pts[edges[e,0]]); lines.Points.Add(pts[edges[e,1]]); }
+        var lineBuilder = new HelixToolkit.SharpDX.LineBuilder();
+        for (int e = 0; e < 12; e++) { lineBuilder.AddLine(pts[edges[e,0]], pts[edges[e,1]]); }
+        var lines = new LineGeometryModel3D { Geometry = lineBuilder.ToLineGeometry3D(), Color = color, Thickness = 2 };
 
-        var parent = new ModelVisual3D { Content = model };
+        var parent = new GroupModel3D();
+        parent.Children.Add(model);
         parent.Children.Add(lines);
 
         // Add corner handle on the lateral side
         double midlineX = _planePoints.Count == 3 ? (_planePoints[0].X + _planePoints[1].X + _planePoints[2].X) / 3.0 : 0;
         double signX = cx > midlineX ? 1.0 : -1.0; // Lateral side
-        var cornerSphere = new SphereVisual3D
+        
+        var sbuild = new HelixToolkit.Geometry.MeshBuilder();
+        sbuild.AddSphere(new System.Numerics.Vector3(0,0,0), 3f);
+        var cornerSphere = new MeshGeometryModel3D
         { 
-            Center = new Point3D(cx + hx * signX, cy + hy, cz + hz), 
-            Radius = 3, 
-            Fill = new SolidColorBrush(Colors.Yellow) 
+            Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(sbuild.ToMesh()),
+            Material = new PhongMaterial { DiffuseColor = new HelixToolkit.Maths.Color4(1f, 1f, 0f, 1f) },
+            Transform = new TranslateTransform3D(cx + hx * signX, cy + hy, cz + hz)
         };
         parent.Children.Add(cornerSphere);
 
         return parent;
     }
 
-    private void AddSphereMarker(float[] c, Color color, double r)
+    private void AddSphereMarker(float[] c, System.Windows.Media.Color color, double r)
     {
-        MainViewport.Children.Add(new SphereVisual3D
-        { Center = new Point3D(c[0], c[1], c[2]), Radius = r, Fill = new SolidColorBrush(color) });
+        var builder = new HelixToolkit.Geometry.MeshBuilder();
+        builder.AddSphere(new System.Numerics.Vector3(0,0,0), (float)r);
+        var sphere = new MeshGeometryModel3D
+        {
+            Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh()),
+            Material = new PhongMaterial { DiffuseColor = new HelixToolkit.Maths.Color4(color.R / 255f, color.G / 255f, color.B / 255f, color.A / 255f) },
+            Transform = new TranslateTransform3D(c[0], c[1], c[2])
+        };
+        MainGroup.Children.Add(sphere);
     }
 
     private Point3D? GetHitPoint(Point screenPos)
     {
-        var result = Viewport3DHelper.FindHits(MainViewport.Viewport, screenPos);
-        if (result != null && result.Count > 0) return result[0].Position;
+        var result = MainViewport.FindHits(screenPos);
+        if (result != null && result.Count > 0) return new Point3D(result[0].PointHit.X, result[0].PointHit.Y, result[0].PointHit.Z);
         return null;
     }
 
@@ -836,3 +855,7 @@ public partial class CondyleSplitWindow : Window
         Accepted = false; DialogResult = false; Close();
     }
 }
+
+
+
+
