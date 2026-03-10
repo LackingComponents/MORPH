@@ -1377,6 +1377,108 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void PlanLeFort1()
+    {
+        var cranium = Segments.FirstOrDefault(s => s.Name.Contains("Cranium"));
+        if (cranium == null || cranium.Vertices == null)
+        {
+            System.Windows.MessageBox.Show("Please isolate the Cranium segment first.", "Missing Segment", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            return;
+        }
+
+        var wizard = new LeFortOsteotomyWindow(cranium.Vertices);
+        wizard.Owner = System.Windows.Application.Current.MainWindow;
+        
+        if (wizard.ShowDialog() == true && wizard.Accepted)
+        {
+            SaveStateForUndo();
+            
+            // Hide original cranium
+            cranium.IsVisible = false;
+
+            // Add upper maxilla piece
+            var upperVm = new SegmentViewModel
+            {
+                Label = (byte)(Segments.Count + 1),
+                Name = "Cranium (Upper Maxilla)",
+                Vertices = wizard.UpperMaxillaResult,
+                ColorR = 200, ColorG = 200, ColorB = 255,
+                IsVisible = true
+            };
+            upperVm.OnVisibilityChanged = RefreshCombinedModel;
+            upperVm.BuildModel();
+            Segments.Add(upperVm);
+
+            // Add lower maxilla piece
+            var lowerVm = new SegmentViewModel
+            {
+                Label = (byte)(Segments.Count + 1),
+                Name = "Maxilla (LeFort 1 Separated)",
+                Vertices = wizard.LowerMaxillaResult,
+                ColorR = 255, ColorG = 200, ColorB = 200,
+                IsVisible = true
+            };
+            lowerVm.OnVisibilityChanged = RefreshCombinedModel;
+            lowerVm.BuildModel();
+            Segments.Add(lowerVm);
+
+            RefreshCombinedModel();
+            StatusText = "LeFort 1 Osteotomy applied successfully.";
+        }
+    }
+
+    [RelayCommand]
+    private void PlanBsso()
+    {
+        var mandible = Segments.FirstOrDefault(s => s.Name.Contains("Mandible"));
+        if (mandible == null || mandible.Vertices == null)
+        {
+            System.Windows.MessageBox.Show("Please isolate the Mandible segment first.", "Missing Segment", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            return;
+        }
+
+        var wizard = new BssoOsteotomyWindow(mandible.Vertices);
+        wizard.Owner = System.Windows.Application.Current.MainWindow;
+        
+        if (wizard.ShowDialog() == true && wizard.Accepted)
+        {
+            SaveStateForUndo();
+            
+            // Hide original mandible
+            mandible.IsVisible = false;
+
+            // Add proximal segment (Condyle + Ramus usually)
+            var proxVm = new SegmentViewModel
+            {
+                Label = (byte)(Segments.Count + 1),
+                Name = "Mandible (Proximal/Condyle)",
+                Vertices = wizard.ProximalResult,
+                ColorR = 200, ColorG = 200, ColorB = 255,
+                IsVisible = true
+            };
+            proxVm.OnVisibilityChanged = RefreshCombinedModel;
+            proxVm.BuildModel();
+            Segments.Add(proxVm);
+
+            // Add distal segment (Tooth-bearing usually)
+            var distVm = new SegmentViewModel
+            {
+                Label = (byte)(Segments.Count + 1),
+                Name = "Mandible (Distal/Symphysis)",
+                Vertices = wizard.DistalResult,
+                ColorR = 255, ColorG = 200, ColorB = 200,
+                IsVisible = true
+            };
+            distVm.OnVisibilityChanged = RefreshCombinedModel;
+            distVm.BuildModel();
+            Segments.Add(distVm);
+
+            RefreshCombinedModel();
+            StatusText = "BSSO Osteotomy applied successfully.";
+        }
+    }
+
+    [RelayCommand]
     private async Task SplitCraniumMandibleAsync()
     {
         await Task.Yield(); // Ensure UI stays responsive

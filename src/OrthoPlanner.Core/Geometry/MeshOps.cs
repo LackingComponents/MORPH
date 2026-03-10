@@ -458,6 +458,32 @@ public static class MeshOps
     }
 
     /// <summary>
+    /// Split a triangle-soup mesh into two parts using a custom Polyplane surface.
+    /// Triangles with centroid "above" the polyplane go to 'above', everything else to 'below'.
+    /// </summary>
+    public static (List<float[]> Above, List<float[]> Below) SplitByPolyplane(List<float[]> verts, Polyplane polyplane)
+    {
+        var above = new List<float[]>();
+        var below = new List<float[]>();
+
+        for (int i = 0; i + 2 < verts.Count; i += 3)
+        {
+            float cx = (verts[i][0] + verts[i + 1][0] + verts[i + 2][0]) / 3f;
+            float cy = (verts[i][1] + verts[i + 1][1] + verts[i + 2][1]) / 3f;
+            float cz = (verts[i][2] + verts[i + 1][2] + verts[i + 2][2]) / 3f;
+
+            double[] centroid = new double[] { cx, cy, cz };
+            var target = polyplane.IsAbove(centroid) ? above : below;
+            
+            target.Add(new float[] { verts[i][0], verts[i][1], verts[i][2] });
+            target.Add(new float[] { verts[i + 1][0], verts[i + 1][1], verts[i + 1][2] });
+            target.Add(new float[] { verts[i + 2][0], verts[i + 2][1], verts[i + 2][2] });
+        }
+
+        return (above, below);
+    }
+
+    /// <summary>
     /// Return only the triangles whose centroid lies inside the given axis-aligned bounding box.
     /// </summary>
     public static List<float[]> ClipToBoundingBox(List<float[]> verts, float[] center, float[] halfExtents)
