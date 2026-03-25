@@ -37,6 +37,298 @@ public partial class MainViewModel : ObservableObject
         IsPhotogrammetryOpen = false;
     }
 
+    // ─── Surgical Movements ───
+    [ObservableProperty] private bool _isSurgicalMovementsOpen;
+    [ObservableProperty] private bool _isMaxillaBasedSurgery = true;
+    [ObservableProperty] private bool _isMandibleBasedSurgery;
+
+
+    public bool IsMaxillaMoveable => IsMaxillaBasedSurgery;
+    public bool IsMandibleMoveable => IsMandibleBasedSurgery;
+
+    public ObservableCollection<MeshViewModel> LoadedOcclusions { get; } = new();
+
+    // Maxilla Transforms
+    [ObservableProperty] private double _surgMaxillaLat;
+    [ObservableProperty] private double _surgMaxillaAnt;
+    [ObservableProperty] private double _surgMaxillaVert;
+    [ObservableProperty] private double _surgMaxillaRoll;
+    [ObservableProperty] private double _surgMaxillaPitch;
+    [ObservableProperty] private double _surgMaxillaYaw;
+
+    // Mandible Transforms
+    [ObservableProperty] private double _surgMandibleLat;
+    [ObservableProperty] private double _surgMandibleAnt;
+    [ObservableProperty] private double _surgMandibleVert;
+    [ObservableProperty] private double _surgMandibleRoll;
+    [ObservableProperty] private double _surgMandiblePitch;
+    [ObservableProperty] private double _surgMandibleYaw;
+
+    // Right Ramus Transforms
+    [ObservableProperty] private double _surgRightRamusLat;
+    [ObservableProperty] private double _surgRightRamusAnt;
+    [ObservableProperty] private double _surgRightRamusVert;
+    [ObservableProperty] private double _surgRightRamusRoll;
+    [ObservableProperty] private double _surgRightRamusPitch;
+    [ObservableProperty] private double _surgRightRamusYaw;
+
+    // Left Ramus Transforms
+    [ObservableProperty] private double _surgLeftRamusLat;
+    [ObservableProperty] private double _surgLeftRamusAnt;
+    [ObservableProperty] private double _surgLeftRamusVert;
+    [ObservableProperty] private double _surgLeftRamusRoll;
+    [ObservableProperty] private double _surgLeftRamusPitch;
+    [ObservableProperty] private double _surgLeftRamusYaw;
+
+    // Chin Transforms
+    [ObservableProperty] private double _surgChinLat;
+    [ObservableProperty] private double _surgChinAnt;
+    [ObservableProperty] private double _surgChinVert;
+    [ObservableProperty] private double _surgChinRoll;
+    [ObservableProperty] private double _surgChinPitch;
+    [ObservableProperty] private double _surgChinYaw;
+
+    partial void OnIsMaxillaBasedSurgeryChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsMaxillaMoveable));
+        OnPropertyChanged(nameof(IsMandibleMoveable));
+        if (value) SyncSurgeryInputs(false);
+    }
+    partial void OnIsMandibleBasedSurgeryChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsMaxillaMoveable));
+        OnPropertyChanged(nameof(IsMandibleMoveable));
+        if (value) SyncSurgeryInputs(true);
+    }
+
+    private void SyncSurgeryInputs(bool toMandible)
+    {
+        if (toMandible)
+        {
+            SurgMandibleAnt = SurgMaxillaAnt; SurgMandibleLat = SurgMaxillaLat; SurgMandibleVert = SurgMaxillaVert;
+            SurgMandibleRoll = SurgMaxillaRoll; SurgMandiblePitch = SurgMaxillaPitch; SurgMandibleYaw = SurgMaxillaYaw;
+        }
+        else
+        {
+            SurgMaxillaAnt = SurgMandibleAnt; SurgMaxillaLat = SurgMandibleLat; SurgMaxillaVert = SurgMandibleVert;
+            SurgMaxillaRoll = SurgMandibleRoll; SurgMaxillaPitch = SurgMandiblePitch; SurgMaxillaYaw = SurgMandibleYaw;
+        }
+    }
+
+    [RelayCommand]
+    private void CloseSurgicalMovements()
+    {
+        IsSurgicalMovementsOpen = false;
+    }
+
+    [RelayCommand]
+    private void AdjustSurgery(string param)
+    {
+        double step = 0.5;
+        if (param.StartsWith("Maxilla"))
+        {
+            if (param.Contains("Lat")) SurgMaxillaLat += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Ant")) SurgMaxillaAnt += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Vert")) SurgMaxillaVert += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Roll")) SurgMaxillaRoll += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Pitch")) SurgMaxillaPitch += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Yaw")) SurgMaxillaYaw += param.EndsWith("+") ? step : -step;
+        }
+        else if (param.StartsWith("Mandible"))
+        {
+            if (param.Contains("Lat")) SurgMandibleLat += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Ant")) SurgMandibleAnt += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Vert")) SurgMandibleVert += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Roll")) SurgMandibleRoll += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Pitch")) SurgMandiblePitch += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Yaw")) SurgMandibleYaw += param.EndsWith("+") ? step : -step;
+        }
+        else if (param.StartsWith("RightRamus"))
+        {
+            if (param.Contains("Lat")) SurgRightRamusLat += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Ant")) SurgRightRamusAnt += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Vert")) SurgRightRamusVert += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Roll")) SurgRightRamusRoll += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Pitch")) SurgRightRamusPitch += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Yaw")) SurgRightRamusYaw += param.EndsWith("+") ? step : -step;
+        }
+        else if (param.StartsWith("LeftRamus"))
+        {
+            if (param.Contains("Lat")) SurgLeftRamusLat += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Ant")) SurgLeftRamusAnt += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Vert")) SurgLeftRamusVert += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Roll")) SurgLeftRamusRoll += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Pitch")) SurgLeftRamusPitch += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Yaw")) SurgLeftRamusYaw += param.EndsWith("+") ? step : -step;
+        }
+        else if (param.StartsWith("Chin"))
+        {
+            if (param.Contains("Lat")) SurgChinLat += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Ant")) SurgChinAnt += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Vert")) SurgChinVert += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Roll")) SurgChinRoll += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Pitch")) SurgChinPitch += param.EndsWith("+") ? step : -step;
+            else if (param.Contains("Yaw")) SurgChinYaw += param.EndsWith("+") ? step : -step;
+        }
+        UpdateSurgeryTransform();
+    }
+
+    private System.Windows.Media.Media3D.Transform3D BuildSurgeryTransform(double ant, double lat, double vert, double roll, double pitch, double yaw, System.Windows.Media.Media3D.Point3D center)
+    {
+        var group = new System.Windows.Media.Media3D.Transform3DGroup();
+        group.Children.Add(new System.Windows.Media.Media3D.TranslateTransform3D(-center.X, -center.Y, -center.Z));
+        group.Children.Add(new System.Windows.Media.Media3D.RotateTransform3D(new System.Windows.Media.Media3D.AxisAngleRotation3D(new System.Windows.Media.Media3D.Vector3D(1, 0, 0), pitch)));
+        group.Children.Add(new System.Windows.Media.Media3D.RotateTransform3D(new System.Windows.Media.Media3D.AxisAngleRotation3D(new System.Windows.Media.Media3D.Vector3D(0, 1, 0), roll)));
+        group.Children.Add(new System.Windows.Media.Media3D.RotateTransform3D(new System.Windows.Media.Media3D.AxisAngleRotation3D(new System.Windows.Media.Media3D.Vector3D(0, 0, 1), yaw)));
+        group.Children.Add(new System.Windows.Media.Media3D.TranslateTransform3D(center.X + lat, center.Y + ant, center.Z + vert));
+        return group;
+    }
+
+    private void UpdateSurgeryTransform()
+    {
+        var maxilla = Segments.FirstOrDefault(s => s.Name.Contains("Maxilla"));
+        var mandible = Segments.FirstOrDefault(s => s.Name.Contains("Mandible") && !s.Name.StartsWith("Ramus"));
+        var rightRamus = Segments.FirstOrDefault(s => s.Name.Contains("Ramus Right"));
+        var leftRamus = Segments.FirstOrDefault(s => s.Name.Contains("Ramus Left"));
+        var chin = Segments.FirstOrDefault(s => s.Name.Contains("Chin"));
+
+        var center = ModelCenter;
+
+        // 1. Complex (Maxilla + Mandible)
+        double cAnt = IsMaxillaBasedSurgery ? SurgMaxillaAnt : SurgMandibleAnt;
+        double cLat = IsMaxillaBasedSurgery ? SurgMaxillaLat : SurgMandibleLat;
+        double cVert = IsMaxillaBasedSurgery ? SurgMaxillaVert : SurgMandibleVert;
+        double cRoll = IsMaxillaBasedSurgery ? SurgMaxillaRoll : SurgMandibleRoll;
+        double cPitch = IsMaxillaBasedSurgery ? SurgMaxillaPitch : SurgMandiblePitch;
+        double cYaw = IsMaxillaBasedSurgery ? SurgMaxillaYaw : SurgMandibleYaw;
+
+        var complexTx = BuildSurgeryTransform(cAnt, cLat, cVert, cRoll, cPitch, cYaw, center);
+        if (maxilla != null) maxilla.Transform = complexTx;
+        if (mandible != null) mandible.Transform = complexTx;
+
+        // 2. Right Ramus
+        if (rightRamus != null) rightRamus.Transform = BuildSurgeryTransform(SurgRightRamusAnt, SurgRightRamusLat, SurgRightRamusVert, SurgRightRamusRoll, SurgRightRamusPitch, SurgRightRamusYaw, center);
+
+        // 3. Left Ramus
+        if (leftRamus != null) leftRamus.Transform = BuildSurgeryTransform(SurgLeftRamusAnt, SurgLeftRamusLat, SurgLeftRamusVert, SurgLeftRamusRoll, SurgLeftRamusPitch, SurgLeftRamusYaw, center);
+
+        // 4. Chin
+        // Chin sits on the Mandible, so its transform is (ComplexTx + local ChinTx)
+        if (chin != null)
+        {
+            var chinLocal = BuildSurgeryTransform(SurgChinAnt, SurgChinLat, SurgChinVert, SurgChinRoll, SurgChinPitch, SurgChinYaw, center);
+            var chinGroup = new System.Windows.Media.Media3D.Transform3DGroup();
+            chinGroup.Children.Add(chinLocal);
+            // It MUST follow the mandible too!
+            chinGroup.Children.Add(complexTx);
+            chin.Transform = chinGroup;
+        }
+    }
+
+    [RelayCommand]
+    private async Task LoadOcclusionAsync()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Import Occlusion STL",
+            Filter = "STL Files (*.stl)|*.stl|All Files (*.*)|*.*",
+            Multiselect = true
+        };
+        if (dialog.ShowDialog() != true || dialog.FileNames.Length == 0) return;
+
+        IsLoading = true;
+        StatusText = "Importing Occlusion STL...";
+
+        foreach (var file in dialog.FileNames)
+        {
+            var vertices = await Task.Run(() => StlIO.LoadStl(file));
+
+            var meshVm = new MeshViewModel
+            {
+                Name = Path.GetFileNameWithoutExtension(file) + " (Occlusion)",
+                Vertices = vertices,
+                ColorR = 150, ColorG = 255, ColorB = 150,
+                ScanType = DentalScanType.Other,
+                IsVisible = true
+            };
+            meshVm.OnVisibilityChanged = RefreshCombinedModel;
+            meshVm.BuildModel();
+            LoadedOcclusions.Add(meshVm);
+        }
+
+        RefreshCombinedModel();
+        StatusText = $"Imported {dialog.FileNames.Length} Occlusion STL(s).";
+        IsLoading = false;
+    }
+
+    [RelayCommand]
+    private void DeleteLoadedOcclusion(MeshViewModel mesh)
+    {
+        if (mesh == null) return;
+        if (System.Windows.MessageBox.Show($"Are you sure you want to delete occlusion '{mesh.Name}'?", "Confirm Delete", 
+            System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Question) != System.Windows.MessageBoxResult.Yes)
+            return;
+
+        LoadedOcclusions.Remove(mesh);
+        RefreshCombinedModel();
+    }
+
+    [RelayCommand]
+    private void AlignOcclusions()
+    {
+        var occlusion = LoadedOcclusions.FirstOrDefault(o => o.IsVisible);
+        if (occlusion == null || occlusion.Vertices == null)
+        {
+            System.Windows.MessageBox.Show("Please make exactly one Occlusion STL visible to align to.", "Select Occlusion", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            return;
+        }
+
+        var maxilla = Segments.FirstOrDefault(s => s.Name.Contains("Maxilla"));
+        var mandible = Segments.FirstOrDefault(s => s.Name.Contains("Mandible"));
+
+        if (maxilla == null || mandible == null || maxilla.Vertices == null || mandible.Vertices == null)
+        {
+            System.Windows.MessageBox.Show("Maxilla or Mandible bone segments not found or segmented. Please segment them first.", "Missing Bones", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            return;
+        }
+
+        var wizard = new OcclusionAlignmentWindow(maxilla.Vertices, mandible.Vertices, occlusion.Vertices)
+        {
+            Owner = Application.Current.MainWindow
+        };
+
+        if (wizard.ShowDialog() == true && wizard.Accepted)
+        {
+            SaveStateForUndo();
+
+            // apply transforms visually
+            if (wizard.MaxillaTransform != null)
+            {
+                OrthoPlanner.Core.Geometry.IcpAligner.TransformVertices(maxilla.Vertices, wizard.MaxillaTransform);
+                maxilla.BuildModel();
+                occlusion.MaxillaOcclusionTransform = ConvertToMatrix3D(wizard.MaxillaTransform);
+            }
+            if (wizard.MandibleTransform != null)
+            {
+                OrthoPlanner.Core.Geometry.IcpAligner.TransformVertices(mandible.Vertices, wizard.MandibleTransform);
+                mandible.BuildModel();
+                occlusion.MandibleOcclusionTransform = ConvertToMatrix3D(wizard.MandibleTransform);
+            }
+
+            RefreshCombinedModel();
+            StatusText = $"Successfully aligned Maxilla and Mandible to {occlusion.Name}.";
+        }
+    }
+
+    private System.Windows.Media.Media3D.Matrix3D ConvertToMatrix3D(double[,] m)
+    {
+        return new System.Windows.Media.Media3D.Matrix3D(
+            m[0,0], m[1,0], m[2,0], m[3,0],
+            m[0,1], m[1,1], m[2,1], m[3,1],
+            m[0,2], m[1,2], m[2,2], m[3,2],
+            m[0,3], m[1,3], m[2,3], m[3,3]);
+    }
+
     // ─── Volume State ───
     [ObservableProperty] private VolumeData? _volume;
     [ObservableProperty] private bool _isVolumeLoaded;
@@ -44,6 +336,9 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private double _loadProgress;
     [ObservableProperty] private bool _isLoading;
     private string? _lastDicomPath;
+    
+    // Original Volume to prevent additive NHP reslicing
+    [ObservableProperty] private VolumeData? _originalVolume;
 
     // ─── Patient Info ───
     [ObservableProperty] private string _patientName = "";
@@ -57,7 +352,10 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private int _axialIndex;
     [ObservableProperty] private int _coronalIndex;
     [ObservableProperty] private int _sagittalIndex;
-    
+
+    // ─── Headlamp direction (updated by MainWindow as camera moves) ───
+    [ObservableProperty] private System.Windows.Media.Media3D.Vector3D _headlampDirection = new System.Windows.Media.Media3D.Vector3D(0, 1, 0);
+
     // ─── 3D Viewport Anchors ───
     [ObservableProperty] private System.Windows.Media.Media3D.Point3D _modelCenter = new System.Windows.Media.Media3D.Point3D(0, 0, 0);
 
@@ -136,6 +434,150 @@ public partial class MainViewModel : ObservableObject
         public SegmentViewModel? DentalModel { get; init; }
     }
 
+    // ─── Direct Volume Rendering (Diffused View) ───
+    [ObservableProperty] private bool _isVolumeRenderingEnabled;
+    [ObservableProperty] private HelixToolkit.SharpDX.Model.Scene.GroupNode? _volumeNode;
+
+    partial void OnIsVolumeRenderingEnabledChanged(bool value)
+    {
+        if (value && VolumeNode == null && Volume != null)
+        {
+            SetupVolumeMaterial();
+        }
+    }
+
+    private void SetupVolumeMaterial()
+    {
+        if (Volume == null) return;
+
+        int w = Volume.Width;
+        int h = Volume.Height;
+        int d = Volume.Depth;
+
+        var pixels = new Half[Volume.Voxels.Length * 4];
+        
+        for (int i = 0; i < Volume.Voxels.Length; i++)
+        {
+            float hu = Volume.Voxels[i];
+            float val = (hu + 1024f) / 4000f; 
+            val = Math.Clamp(val, 0f, 1f);
+            
+            float alpha = (hu > 200) ? 0.3f : 0f;
+            
+            pixels[i*4 + 0] = (Half)val;
+            pixels[i*4 + 1] = (Half)val;
+            pixels[i*4 + 2] = (Half)val;
+            pixels[i*4 + 3] = (Half)alpha;
+        }
+
+        var texParams = new HelixToolkit.SharpDX.Model.VolumeTextureParams(
+            System.Runtime.InteropServices.MemoryMarshal.AsBytes(pixels.AsSpan()).ToArray(),
+            w, h, d, SharpDX.DXGI.Format.R16G16B16A16_Float
+        );
+
+        // Creates a 1D gradient texture for the lookup map
+        var mapPixels = new HelixToolkit.Maths.Color4[] { 
+            new HelixToolkit.Maths.Color4(0f, 0f, 0f, 0f),       // Black trans
+            new HelixToolkit.Maths.Color4(1f, 0.9f, 0.8f, 0.05f), // Pale bone
+            new HelixToolkit.Maths.Color4(1f, 1f, 1f, 0.5f)       // Solid bone
+        };
+
+        var volumeMaterial = new HelixToolkit.SharpDX.Model.VolumeTextureRawDataMaterialCore
+        {
+            VolumeTexture = texParams,
+            Color = new HelixToolkit.Maths.Color4(1f, 1f, 1f, 1f),
+            TransferMap = mapPixels,
+            SampleDistance = 0.0015,
+            MaxIterations = 1500,
+            IterationOffset = 1
+        };
+
+        // By default, the VolumeTextureNode renders from [-0.5, -0.5, -0.5] to [0.5, 0.5, 0.5].
+        // We scale it up by the CT volume physical dimensions, and translate it by half its size
+        // so it starts at (0,0,0) exactly like our CT meshes do.
+        float sizeX = (float)(w * Volume.Spacing[0]);
+        float sizeY = (float)(h * Volume.Spacing[1]);
+        float sizeZ = (float)(d * Volume.Spacing[2]);
+
+        var node = new HelixToolkit.SharpDX.Model.Scene.VolumeTextureNode
+        {
+            Material = volumeMaterial,
+            ModelMatrix = System.Numerics.Matrix4x4.CreateScale(sizeX, sizeY, sizeZ) * 
+                          System.Numerics.Matrix4x4.CreateTranslation(sizeX / 2f, sizeY / 2f, sizeZ / 2f)
+        };
+
+        var group = new HelixToolkit.SharpDX.Model.Scene.GroupNode();
+        group.AddChildNode(node);
+        VolumeNode = group;
+    }
+
+    // ─── Live 3D Preview ───
+    [ObservableProperty] private HelixToolkit.SharpDX.Geometry3D? _livePreviewGeometry;
+    [ObservableProperty] private HelixToolkit.Wpf.SharpDX.Material? _livePreviewMaterial;
+    private System.Threading.CancellationTokenSource? _previewDebounceCts;
+
+    private async void TriggerLivePreviewUpdate()
+    {
+        if (Volume == null || !ShowBoneOverlay) return;
+        
+        _previewDebounceCts?.Cancel();
+        _previewDebounceCts = new System.Threading.CancellationTokenSource();
+        var token = _previewDebounceCts.Token;
+
+        try
+        {
+            await Task.Delay(150, token); // Debounce trailing edge by 150ms
+            
+            if (token.IsCancellationRequested) return;
+
+            short min = (short)BoneMinHU;
+            short max = (short)BoneMaxHU;
+            
+            var verts = await Task.Run(() => 
+                SegmentationEngine.ExtractLivePreviewMesh(Volume, min, max, 1), token);
+
+            if (token.IsCancellationRequested) return;
+
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                var positions = new List<System.Numerics.Vector3>();
+                var indices = new List<int>();
+                var dict = new Dictionary<(float, float, float), int>();
+
+                foreach (var v in verts)
+                {
+                    var key = (v[0], v[1], v[2]);
+                    if (!dict.TryGetValue(key, out int idx))
+                    {
+                        idx = positions.Count;
+                        positions.Add(new System.Numerics.Vector3(v[0], v[1], v[2]));
+                        dict[key] = idx;
+                    }
+                    indices.Add(idx);
+                }
+
+                var builder = new HelixToolkit.Geometry.MeshBuilder(false, false);
+                foreach (var p in positions) builder.Positions.Add(p);
+                foreach (var i in indices) builder.TriangleIndices.Add(i);
+                
+                var mesh = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh());
+                mesh.UpdateNormals();
+
+                LivePreviewGeometry = mesh;
+                
+                if (LivePreviewMaterial == null)
+                {
+                    LivePreviewMaterial = new HelixToolkit.Wpf.SharpDX.PhongMaterial 
+                    { 
+                        DiffuseColor = new HelixToolkit.Maths.Color4(230/255f, 210/255f, 180/255f, 1.0f),
+                        RenderEnvironmentMap = true
+                    };
+                }
+            });
+        }
+        catch (TaskCanceledException) { }
+    }
+
     // ─── Region Growing ───
     [ObservableProperty] private bool _isRegionGrowMode;
     [ObservableProperty] private short _regionGrowTolerance = 500; // Generous guiding mask tolerance
@@ -180,6 +622,7 @@ public partial class MainViewModel : ObservableObject
     private double _cLat, _cAnt, _cVert, _cRoll, _cPitch, _cYaw;
     public Rect3D BoneOnlyBounds { get; private set; } = Rect3D.Empty; // Bone segment bounds only, excludes imported STL meshes
 
+
     public bool IsNhpDirty => Math.Abs(NhpLateral - _cLat) > 0.01 || 
                               Math.Abs(NhpAnteroposterior - _cAnt) > 0.01 ||
                               Math.Abs(NhpVertical - _cVert) > 0.01 ||
@@ -191,6 +634,9 @@ public partial class MainViewModel : ObservableObject
     
     public bool IsCompletelyLoaded =>
         HasModelLoaded && (Volume != null || !BoneOnlyBounds.IsEmpty) && !IsLoading;
+
+    // Prevent camera jumping during automated splits
+    public bool IsSplitting { get; set; }
 
     partial void OnNhpLateralChanged(double value) { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); }
     partial void OnNhpAnteroposteriorChanged(double value) { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); }
@@ -214,7 +660,8 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task CommitNhpAsync()
     {
-        // Baseline matches current
+        // We track committed transformations so the visual delta works,
+        // but the physical reslice will ALWAYS run against the OriginalVolume.
         _cLat = NhpLateral; _cAnt = NhpAnteroposterior; _cVert = NhpVertical;
         _cRoll = NhpRoll; _cPitch = NhpPitch; _cYaw = NhpYaw;
         OnPropertyChanged(nameof(IsNhpDirty));
@@ -294,8 +741,8 @@ public partial class MainViewModel : ObservableObject
         // Removed Base CT thresholding
     }
 
-    partial void OnBoneMinHUChanged(double value) { UpdateHistograms(); if (ShowBoneOverlay) UpdateAllSlices(); }
-    partial void OnBoneMaxHUChanged(double value) { UpdateHistograms(); if (ShowBoneOverlay) UpdateAllSlices(); }
+    partial void OnBoneMinHUChanged(double value) { UpdateHistograms(); TriggerLivePreviewUpdate(); if (ShowBoneOverlay) UpdateAllSlices(); }
+    partial void OnBoneMaxHUChanged(double value) { UpdateHistograms(); TriggerLivePreviewUpdate(); if (ShowBoneOverlay) UpdateAllSlices(); }
     partial void OnSoftMinHUChanged(double value) { UpdateHistograms(); if (ShowSoftOverlay) UpdateAllSlices(); }
     partial void OnSoftMaxHUChanged(double value) { UpdateHistograms(); if (ShowSoftOverlay) UpdateAllSlices(); }
     partial void OnDentalMinHUChanged(double value) { UpdateHistograms(); if (ShowDentalOverlay) UpdateAllSlices(); }
@@ -307,6 +754,7 @@ public partial class MainViewModel : ObservableObject
     {
         if (value) { ShowSoftOverlay = false; ShowDentalOverlay = false; ShowCustomOverlay = false; }
         UpdateAllSlices();
+        TriggerLivePreviewUpdate();
     }
 
     [ObservableProperty] private bool _enhanceSegmentation = true;
@@ -314,19 +762,19 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _cleanDentalSegmentation = true;
 
     // ─── Environment Lighting ───
-    [ObservableProperty] private byte _frontLightIntensity = 0;
+    [ObservableProperty] private byte _frontLightIntensity = 180;
     partial void OnFrontLightIntensityChanged(byte value) { OnPropertyChanged(nameof(FrontLightColor)); RefreshCombinedModel(); }
 
     [ObservableProperty] private double _frontLightZ = 0.0; // Straight frontal
     partial void OnFrontLightZChanged(double value) { OnPropertyChanged(nameof(FrontLightDirection)); RefreshCombinedModel(); }
 
-    [ObservableProperty] private byte _bottomLightIntensity = 0;
+    [ObservableProperty] private byte _bottomLightIntensity = 100;
     partial void OnBottomLightIntensityChanged(byte value) { OnPropertyChanged(nameof(BottomLightColor)); RefreshCombinedModel(); }
 
-    [ObservableProperty] private byte _leftRightLightIntensity = 0;
+    [ObservableProperty] private byte _leftRightLightIntensity = 80;
     partial void OnLeftRightLightIntensityChanged(byte value) { OnPropertyChanged(nameof(LeftRightLightColor)); RefreshCombinedModel(); }
 
-    [ObservableProperty] private byte _backLightIntensity = 0;
+    [ObservableProperty] private byte _backLightIntensity = 80;
     partial void OnBackLightIntensityChanged(byte value) { OnPropertyChanged(nameof(BackLightColor)); RefreshCombinedModel(); }
 
     // Color properties for XAML Binding
@@ -542,6 +990,7 @@ public partial class MainViewModel : ObservableObject
                     vol.ComputeMinMax();
 
                     Volume = vol;
+                    OriginalVolume = null; // Reset starting position for new project
                     IsVolumeLoaded = true;
                     IsoMin = Math.Max(-1000, (double)vol.MinValue);
                     IsoMax = vol.MaxValue;
@@ -709,6 +1158,8 @@ public partial class MainViewModel : ObservableObject
                 DicomLoader.LoadSeriesAsync(selectorVm.SelectedSeries.Info.FilePaths, p =>
                     Application.Current.Dispatcher.Invoke(() => LoadProgress = 40 + p * 60)));
 
+            OriginalVolume = null; // Reset starting position for new DICOM
+
             // Update UI state
             PatientName = Volume.PatientName;
             StudyDate = Volume.StudyDate;
@@ -740,6 +1191,7 @@ public partial class MainViewModel : ObservableObject
             IsVolumeLoaded = true;
             UpdateAllSlices();
             UpdateHistograms();
+            RefreshCombinedModel(); // Force UI Camera to center on the raw Volume bounds
 
             StatusText = $"Loaded: {Volume.PatientName} — {Volume.Depth} slices";
         }
@@ -1207,9 +1659,12 @@ public partial class MainViewModel : ObservableObject
         if (!HasModelLoaded) return;
 
         IsLoading = true;
+        IsSplitting = true;
         StatusText = "Analyzing connected components...";
         LoadProgress = 0;
 
+        if (_segVolume == null) return;
+        
         // Only split the primary bone label (1)
         var components = await Task.Run(() =>
             SegmentationEngine.SplitConnectedComponents(_segVolume, 1, 1));
@@ -1258,6 +1713,7 @@ public partial class MainViewModel : ObservableObject
         StatusText = $"Split: Maxilla ({_segVolume.CountVoxels(skullLabel):N0}) + Mandible ({_segVolume.CountVoxels(mandibleLabel):N0})";
         LoadProgress = 100;
         IsLoading = false;
+        IsSplitting = false;
     }
 
     private double ComputeZCentroid(byte label)
@@ -1445,28 +1901,36 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void PlanBsso()
     {
-        var mandible = Segments.FirstOrDefault(s => s.Name.Contains("Mandible"));
-        if (mandible == null || mandible.Vertices == null)
+        // For the second BSSO: operate on the remaining distal ("Mandible") from the first cut
+        bool anyRamus = Segments.Any(s => s.Name?.StartsWith("Ramus") == true);
+        var prevDistal   = anyRamus ? Segments.LastOrDefault(s => s.Name == "Mandible") : null;
+        var origMandible = Segments.FirstOrDefault(s => s.Name != null && s.Name.Contains("Mandible")
+                             && !s.Name.StartsWith("Ramus"));
+
+
+        var inputSeg   = (SegmentViewModel?)(prevDistal ?? origMandible);
+        var inputVerts = inputSeg?.Vertices;
+
+        if (inputSeg == null || inputVerts == null || inputVerts.Count == 0)
         {
-            System.Windows.MessageBox.Show("Please isolate the Mandible segment first.", "Missing Segment", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            System.Windows.MessageBox.Show("Please isolate the Mandible segment first.", "Missing Segment",
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
             return;
         }
 
-        var wizard = new BssoOsteotomyWindow(mandible.Vertices);
+        var wizard = new BssoOsteotomyWindow(inputVerts);
         wizard.Owner = System.Windows.Application.Current.MainWindow;
-        
+
         if (wizard.ShowDialog() == true && wizard.Accepted)
         {
             SaveStateForUndo();
-            
-            // Hide original mandible
-            mandible.IsVisible = false;
 
-            // Add proximal segment (Condyle + Ramus usually)
+            // Add new proximal (condyle) — accumulates for bilateral
+            string sideName = wizard.IsLeftSide ? "Left" : "Right";
             var proxVm = new SegmentViewModel
             {
-                Label = (byte)(Segments.Count + 1),
-                Name = "Mandible (Proximal/Condyle)",
+                Label    = (byte)(Segments.Count + 1),
+                Name     = $"Ramus {sideName}",
                 Vertices = wizard.ProximalResult,
                 ColorR = 200, ColorG = 200, ColorB = 255,
                 IsVisible = true
@@ -1475,23 +1939,37 @@ public partial class MainViewModel : ObservableObject
             proxVm.BuildModel();
             Segments.Add(proxVm);
 
-            // Add distal segment (Tooth-bearing usually)
-            var distVm = new SegmentViewModel
+            if (prevDistal != null)
             {
-                Label = (byte)(Segments.Count + 1),
-                Name = "Mandible (Distal/Symphysis)",
-                Vertices = wizard.DistalResult,
-                ColorR = 255, ColorG = 200, ColorB = 200,
-                IsVisible = true
-            };
-            distVm.OnVisibilityChanged = RefreshCombinedModel;
-            distVm.BuildModel();
-            Segments.Add(distVm);
+                // Update distal in-place: replace with the smaller remainder after second cut
+                prevDistal.Vertices = wizard.DistalResult;
+                prevDistal.Name = "Mandible";
+                prevDistal.BuildModel();
+                prevDistal.IsVisible = true;
+            }
+            else
+            {
+                // First BSSO: hide original mandible, add new distal
+                if (origMandible != null) origMandible.IsVisible = false;
+                var distVm = new SegmentViewModel
+                {
+                    Label    = (byte)(Segments.Count + 1),
+                    Name     = "Mandible",
+                    Vertices = wizard.DistalResult,
+                    ColorR = 255, ColorG = 200, ColorB = 200,
+                    IsVisible = true
+                };
+                distVm.OnVisibilityChanged = RefreshCombinedModel;
+                distVm.BuildModel();
+                Segments.Add(distVm);
+            }
+
 
             RefreshCombinedModel();
             StatusText = "BSSO Osteotomy applied successfully.";
         }
     }
+
 
     [RelayCommand]
     private async Task SplitCraniumMandibleAsync()
@@ -1755,21 +2233,27 @@ public partial class MainViewModel : ObservableObject
     {
         BoneOnlyBounds = Rect3D.Empty;
 
-        foreach (var seg in Segments.Where(s => s.IsVisible && s.Vertices != null && s.Vertices.Count > 0))
+        // Force the camera frame to ALWAYS lock onto the overall global DICOM volume
+        // rather than jumping or dynamically shrinking toward individual bone segments.
+        if (Volume != null)
         {
-            double minX = double.MaxValue, minY = double.MaxValue, minZ = double.MaxValue;
-            double maxX = double.MinValue, maxY = double.MinValue, maxZ = double.MinValue;
-            foreach (var v in seg.Vertices!)
-            {
-                if (v[0] < minX) minX = v[0]; if (v[0] > maxX) maxX = v[0];
-                if (v[1] < minY) minY = v[1]; if (v[1] > maxY) maxY = v[1];
-                if (v[2] < minZ) minZ = v[2]; if (v[2] > maxZ) maxZ = v[2];
-            }
-            var r = new Rect3D(minX, minY, minZ, maxX - minX, maxY - minY, maxZ - minZ);
-            if (BoneOnlyBounds.IsEmpty) BoneOnlyBounds = r;
-            else BoneOnlyBounds.Union(r);
+            BoneOnlyBounds = new Rect3D(0, 0, 0,
+                Volume.Width * Volume.Spacing[0],
+                Volume.Height * Volume.Spacing[1],
+                Volume.Depth * Volume.Spacing[2]);
         }
 
+        // Keep ModelCenter in sync with the bone bounds so camera can orbit around it
+        if (!BoneOnlyBounds.IsEmpty)
+        {
+            ModelCenter = new Point3D(
+                BoneOnlyBounds.X + BoneOnlyBounds.SizeX / 2,
+                BoneOnlyBounds.Y + BoneOnlyBounds.SizeY / 2,
+                BoneOnlyBounds.Z + BoneOnlyBounds.SizeZ / 2);
+            OnPropertyChanged(nameof(ModelCenter));
+        }
+
+        OnPropertyChanged(nameof(BoneOnlyBounds));
         UpdateNhpTransform();
     }
 
@@ -1868,68 +2352,115 @@ public partial class MainViewModel : ObservableObject
 
     private async Task PerformPhysicalResliceAsync()
     {
-        if (Volume == null || BoneOnlyBounds.IsEmpty) return;
+        if (OriginalVolume == null) OriginalVolume = Volume; // Initial capture
+        if (OriginalVolume == null || BoneOnlyBounds.IsEmpty) return;
 
         StatusText = "Calculating exact physical volume bounds...";
         IsLoading = true;
         
         // --- 1. Calculate Spatial Centroid Pivot ---
+        // Crucial: Use the bounds of the original bone to pivot from the original space
         var bounds = BoneOnlyBounds;
         Point3D center;
         if (!bounds.IsEmpty)
             center = new Point3D(bounds.X + bounds.SizeX / 2, bounds.Y + bounds.SizeY / 2, bounds.Z + bounds.SizeZ / 2);
         else
         {
-            var dims = Volume.GetPhysicalDimensions();
+            var dims = OriginalVolume.GetPhysicalDimensions();
             center = new Point3D(dims.Width / 2, dims.Height / 2, dims.Depth / 2);
         }
 
-        // --- 2. Build the STRICT INVERSE Transformation Matrix (Target -> Source) ---
-        var invGroup = new Transform3DGroup();
-        invGroup.Children.Add(new TranslateTransform3D(-center.X, -center.Y, -center.Z));
-        invGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), NhpPitch)));
-        invGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), NhpRoll)));
-        invGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), NhpYaw)));
-        invGroup.Children.Add(new TranslateTransform3D(center.X + NhpLateral, center.Y + NhpAnteroposterior, center.Z + NhpVertical));
-        var invMatrix = invGroup.Value;
-        if (invMatrix.HasInverse) invMatrix.Invert();
-
-        var inverseTransform = new OrthoPlanner.Core.Imaging.NhpTransform
-        {
-            M11 = invMatrix.M11, M12 = invMatrix.M12, M13 = invMatrix.M13, M14 = invMatrix.M14,
-            M21 = invMatrix.M21, M22 = invMatrix.M22, M23 = invMatrix.M23, M24 = invMatrix.M24,
-            M31 = invMatrix.M31, M32 = invMatrix.M32, M33 = invMatrix.M33, M34 = invMatrix.M34,
-            M41 = invMatrix.OffsetX, M42 = invMatrix.OffsetY, M43 = invMatrix.OffsetZ, M44 = invMatrix.M44
-        };
-            
-        // --- 3. Build the STRICT FORWARD Transformation Matrix (Source -> Target) ---
-        var fwdGroup = new Transform3DGroup();
-        fwdGroup.Children.Add(new TranslateTransform3D(-center.X, -center.Y, -center.Z));
-        fwdGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), -NhpPitch)));
-        fwdGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), -NhpRoll)));
-        fwdGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), -NhpYaw)));
-        fwdGroup.Children.Add(new TranslateTransform3D(center.X - NhpLateral, center.Y - NhpAnteroposterior, center.Z - NhpVertical));
-        var fwdMatrix = fwdGroup.Value;
-        if (fwdMatrix.HasInverse) fwdMatrix.Invert();
+        // --- 2. Build the STRICT SOURCE -> TARGET Matrix (exactly matching visual UpdateNhpTransform) ---
+        var visualGroup = new Transform3DGroup();
+        visualGroup.Children.Add(new TranslateTransform3D(-center.X, -center.Y, -center.Z));
+        visualGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), NhpPitch)));
+        visualGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), NhpRoll)));
+        visualGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), NhpYaw)));
+        visualGroup.Children.Add(new TranslateTransform3D(center.X + NhpLateral, center.Y + NhpAnteroposterior, center.Z + NhpVertical));
         
+        var sourceToTargetMatrix = visualGroup.Value;
+        
+        // Target -> Source is exactly the inverse of the above
+        var targetToSourceMatrix = sourceToTargetMatrix;
+        if (targetToSourceMatrix.HasInverse) targetToSourceMatrix.Invert();
+
+        // SegmentationEngine ResliceVolume parameter 2 is 'transform', mathematically mapping Target to Source!
         var transform = new OrthoPlanner.Core.Imaging.NhpTransform
         {
-            M11 = fwdMatrix.M11, M12 = fwdMatrix.M12, M13 = fwdMatrix.M13, M14 = fwdMatrix.M14,
-            M21 = fwdMatrix.M21, M22 = fwdMatrix.M22, M23 = fwdMatrix.M23, M24 = fwdMatrix.M24,
-            M31 = fwdMatrix.M31, M32 = fwdMatrix.M32, M33 = fwdMatrix.M33, M34 = fwdMatrix.M34,
-            M41 = fwdMatrix.OffsetX, M42 = fwdMatrix.OffsetY, M43 = fwdMatrix.OffsetZ, M44 = fwdMatrix.M44
+            M11 = targetToSourceMatrix.M11, M12 = targetToSourceMatrix.M12, M13 = targetToSourceMatrix.M13, M14 = targetToSourceMatrix.M14,
+            M21 = targetToSourceMatrix.M21, M22 = targetToSourceMatrix.M22, M23 = targetToSourceMatrix.M23, M24 = targetToSourceMatrix.M24,
+            M31 = targetToSourceMatrix.M31, M32 = targetToSourceMatrix.M32, M33 = targetToSourceMatrix.M33, M34 = targetToSourceMatrix.M34,
+            M41 = targetToSourceMatrix.OffsetX, M42 = targetToSourceMatrix.OffsetY, M43 = targetToSourceMatrix.OffsetZ, M44 = targetToSourceMatrix.M44
         };
+        
+        // SegmentationEngine ResliceVolume parameter 3 is 'inverseTransform', mapping Source to Target to find bounds!
+        var inverseTransform = new OrthoPlanner.Core.Imaging.NhpTransform
+        {
+            M11 = sourceToTargetMatrix.M11, M12 = sourceToTargetMatrix.M12, M13 = sourceToTargetMatrix.M13, M14 = sourceToTargetMatrix.M14,
+            M21 = sourceToTargetMatrix.M21, M22 = sourceToTargetMatrix.M22, M23 = sourceToTargetMatrix.M23, M24 = sourceToTargetMatrix.M24,
+            M31 = sourceToTargetMatrix.M31, M32 = sourceToTargetMatrix.M32, M33 = sourceToTargetMatrix.M33, M34 = sourceToTargetMatrix.M34,
+            M41 = sourceToTargetMatrix.OffsetX, M42 = sourceToTargetMatrix.OffsetY, M43 = sourceToTargetMatrix.OffsetZ, M44 = sourceToTargetMatrix.M44
+        };
+        
+
 
         StatusText = "Reslicing volume matrix...";
         
         // Pass both transforms so the Engine can determine exact physical boundaries and pad without waste!
-        var resliced = await Task.Run(() => SegmentationEngine.ResliceVolume(Volume, transform, inverseTransform));
+        // Reslice from the ORIGINAL volume so angles are absolute!
+        var resliced = await Task.Run(() => SegmentationEngine.ResliceVolume(OriginalVolume, transform, inverseTransform));
         
         IsLoading = false;
         
-        // NOTE: We DO NOT zero out NhpLateral, NhpPitch, etc. They must persist in the UI!
-        // We also DO NOT overwrite the baseline (_cLat, etc). Keeping the baseline at 0 
-        // ensures the 3D model visibly maintains its exact transformation relative to the MPR!
+        // Physically apply the DELTA transform to the vertices of all existing meshes so they align with the new volume!
+        // This ensures the 3D meshes don't lose step when we wipe the visual offset (dPitch = 0).
+        var dPitchFixed = NhpPitch - _cPitch;
+        var dRollFixed = NhpRoll - _cRoll;
+        var dYawFixed = NhpYaw - _cYaw;
+        var dLatFixed = NhpLateral - _cLat;
+        var dAntFixed = NhpAnteroposterior - _cAnt;
+        var dVertFixed = NhpVertical - _cVert;
+        
+        var deltaGroup = new Transform3DGroup();
+        deltaGroup.Children.Add(new TranslateTransform3D(-center.X, -center.Y, -center.Z));
+        deltaGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), dPitchFixed)));
+        deltaGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), dRollFixed)));
+        deltaGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), dYawFixed)));
+        deltaGroup.Children.Add(new TranslateTransform3D(center.X + dLatFixed, center.Y + dAntFixed, center.Z + dVertFixed));
+
+        var m = deltaGroup.Value;
+        
+        var allSegmentModels = Segments.ToList();
+        if (HardTissueModel != null && !allSegmentModels.Contains(HardTissueModel)) allSegmentModels.Add(HardTissueModel);
+        if (SoftTissueModel != null && !allSegmentModels.Contains(SoftTissueModel)) allSegmentModels.Add(SoftTissueModel);
+        if (DentalModel != null && !allSegmentModels.Contains(DentalModel)) allSegmentModels.Add(DentalModel);
+
+        foreach (var seg in allSegmentModels)
+        {
+            if (seg.Vertices != null)
+            {
+                var p = new Point3D();
+                for (int i = 0; i < seg.Vertices.Count; i++)
+                {
+                    p.X = seg.Vertices[i][0]; p.Y = seg.Vertices[i][1]; p.Z = seg.Vertices[i][2];
+                    var t = m.Transform(p);
+                    seg.Vertices[i][0] = (float)t.X; seg.Vertices[i][1] = (float)t.Y; seg.Vertices[i][2] = (float)t.Z;
+                }
+            }
+        }
+        foreach (var mesh in ImportedMeshes)
+        {
+            if (mesh.Vertices != null)
+            {
+                var p = new Point3D();
+                for (int i = 0; i < mesh.Vertices.Count; i++)
+                {
+                    p.X = mesh.Vertices[i][0]; p.Y = mesh.Vertices[i][1]; p.Z = mesh.Vertices[i][2];
+                    var t = m.Transform(p);
+                    mesh.Vertices[i][0] = (float)t.X; mesh.Vertices[i][1] = (float)t.Y; mesh.Vertices[i][2] = (float)t.Z;
+                }
+            }
+        }
 
         await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => {
             Volume = resliced;
@@ -1937,10 +2468,9 @@ public partial class MainViewModel : ObservableObject
             // Re-initialize segmentation volume for the new dimensions (Air Padded array)
             _segVolume = new SegmentationVolume(Volume);
 
-            // INTENTIONALLY NOT REBUILDING THE 3D MODEL
-            // The mesh remains strictly untouched so it doesn't snap, scale, or wipe colors.
-            // The Delta Transform applied in UpdateNhpTransform() perfectly holds its visual
-            // position relative to the new baked Array mathematically.
+            // Rebuild models since we mutated their vertices physically
+            foreach (var seg in allSegmentModels) seg.BuildModel();
+            foreach (var mesh in ImportedMeshes) mesh.BuildModel();
             
             // Refresh 2D Slices
             AxialMax = Volume.Depth - 1;
@@ -1973,7 +2503,7 @@ public partial class SegmentViewModel : ObservableObject
     public List<float[]>? Vertices { get; set; }
     public HelixToolkit.SharpDX.Geometry3D? Geometry { get; set; }
     public HelixToolkit.Wpf.SharpDX.Material? Material { get; set; }
-    public System.Windows.Media.Media3D.Transform3D Transform { get; set; } = System.Windows.Media.Media3D.Transform3D.Identity;
+    [ObservableProperty] private System.Windows.Media.Media3D.Transform3D _transform = System.Windows.Media.Media3D.Transform3D.Identity;
 
     /// <summary>Callback so the parent ViewModel can refresh 3D when visibility toggles.</summary>
     public Action? OnVisibilityChanged { get; set; }
@@ -1986,6 +2516,7 @@ public partial class SegmentViewModel : ObservableObject
         MeshHelper.BuildModel3D(Vertices, ColorR, ColorG, ColorB, out var geom, out var mat);
         Geometry = (HelixToolkit.SharpDX.Geometry3D)geom;
         Material = mat;
+        OnPropertyChanged(nameof(Geometry));
     }
 }
 
@@ -2000,7 +2531,11 @@ public partial class MeshViewModel : ObservableObject
     public List<float[]>? Vertices { get; set; }
     public object? Geometry { get; set; }
     public HelixToolkit.Wpf.SharpDX.Material? Material { get; set; }
-    public System.Windows.Media.Media3D.Transform3D Transform { get; set; } = System.Windows.Media.Media3D.Transform3D.Identity;
+    [ObservableProperty] private System.Windows.Media.Media3D.Transform3D _transform = System.Windows.Media.Media3D.Transform3D.Identity;
+
+    // Relative transforms based on occlusion
+    [ObservableProperty] private System.Windows.Media.Media3D.Matrix3D _maxillaOcclusionTransform = System.Windows.Media.Media3D.Matrix3D.Identity;
+    [ObservableProperty] private System.Windows.Media.Media3D.Matrix3D _mandibleOcclusionTransform = System.Windows.Media.Media3D.Matrix3D.Identity;
 
     public Action? OnVisibilityChanged { get; set; }
     partial void OnIsVisibleChanged(bool value) => OnVisibilityChanged?.Invoke();
@@ -2011,6 +2546,7 @@ public partial class MeshViewModel : ObservableObject
         MeshHelper.BuildModel3D(Vertices, ColorR, ColorG, ColorB, out var geom, out var mat);
         Geometry = geom;
         Material = mat;
+        OnPropertyChanged(nameof(Geometry));
     }
 }
 
@@ -2040,7 +2576,9 @@ public static class MeshHelper
         
         material = new HelixToolkit.Wpf.SharpDX.PhongMaterial()
         {
-            DiffuseColor = new HelixToolkit.Maths.Color4(r / 255f, g / 255f, b / 255f, a / 255f)
+            DiffuseColor = new HelixToolkit.Maths.Color4(r / 255f, g / 255f, b / 255f, a / 255f),
+            SpecularColor = new HelixToolkit.Maths.Color4(0.1f, 0.1f, 0.1f, 1f),
+            SpecularShininess = 1f
         };
     }
 }

@@ -9,6 +9,7 @@
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
         WindowStyle="None" AllowsTransparency="True"
         Background="Transparent" Foreground="#E0E0E0"
+        FocusManager.FocusedElement="{Binding ElementName=SeriesListBox}"
         d:DataContext="{d:DesignInstance Type=vms:DicomSelectorViewModel}">
     <Window.Resources>
         <Style x:Key="DialogButton" TargetType="Button">
@@ -31,9 +32,12 @@
 
             <TextBlock Text="Multiple Series Found:" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
 
-            <ListBox Grid.Row="1" ItemsSource="{Binding SeriesList}" SelectedItem="{Binding SelectedSeries}"
+            <ListBox x:Name="SeriesListBox" Grid.Row="1" ItemsSource="{Binding SeriesList}" SelectedItem="{Binding SelectedSeries}"
                      Background="Transparent" BorderThickness="0" Margin="0,0,0,15"
-                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     KeyboardNavigation.DirectionalNavigation="Contained"
+                     PreviewMouseWheel="ListBox_PreviewMouseWheel"
+                     PreviewKeyDown="ListBox_PreviewKeyDown">
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <Border Background="#1A1F2B" CornerRadius="4" Padding="10" Margin="0,0,0,5" Width="520">
@@ -72,8 +76,8 @@
         </ListBox>
 
             <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="Cancel" Command="{Binding CancelCommand}" Style="{StaticResource DialogButton}" />
-                <Button Content="Load Series" Command="{Binding AcceptCommand}" Style="{StaticResource DialogButton}" Background="#007ACC" />
+                <Button Content="Cancel" Command="{Binding CancelCommand}" Style="{StaticResource DialogButton}" IsCancel="True" />
+                <Button Content="Load Series" Command="{Binding AcceptCommand}" Style="{StaticResource DialogButton}" Background="#007ACC" IsDefault="True" />
             </StackPanel>
         </Grid>
     </Border>

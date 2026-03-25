@@ -16,33 +16,78 @@
 
         <!-- Title -->
         <StackPanel Grid.Row="0">
-            <TextBlock x:Name="StepTitle" Text="BSSO: Step 1 - Place Lingual Points" FontSize="16" FontWeight="SemiBold" Foreground="#EAECF0"/>
-            <TextBlock x:Name="StepInstructions" Text="Left-click on the lingual side of the mandible ramus to place 2 control points for the osteotomy." FontSize="11" Foreground="#88AABB" Margin="0,4,0,0" TextWrapping="Wrap"/>
+            <TextBlock x:Name="StepTitle" Text="BSSO: Select Side" FontSize="16" FontWeight="SemiBold" Foreground="#EAECF0"/>
+            <TextBlock x:Name="StepInstructions" Text="Hover over the left or right side of the mandible to highlight it, then click to select that side."
+                       FontSize="11" Foreground="#88AABB" Margin="0,4,0,0" TextWrapping="Wrap"/>
         </StackPanel>
 
-        <!-- 3D Viewport -->
-        <Border Grid.Row="1" Margin="0,8" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
-            <hx:Viewport3DX x:Name="MainViewport" BackgroundColor="#FF080C14"
-                            ShowCoordinateSystem="True" CoordinateSystemLabelForeground="White"
-                            ZoomExtentsWhenLoaded="True"
-                            CameraRotationMode="Turnball" ModelUpDirection="0,0,1"
-                            ShowViewCube="False"
-                            PreviewMouseLeftButtonDown="Viewport_PreviewMouseLeftButtonDown"
-                            PreviewMouseMove="Viewport_PreviewMouseMove"
-                            PreviewMouseLeftButtonUp="Viewport_PreviewMouseLeftButtonUp">
-                <hx:Viewport3DX.Camera>
-                    <hx:PerspectiveCamera Position="0,-300,100" LookDirection="0,1,-0.3"
-                                          UpDirection="0,0,1" FieldOfView="45"/>
-                </hx:Viewport3DX.Camera>
-                <hx:DirectionalLight3D Direction="0, 1, -1" Color="White" />
-                <hx:AmbientLight3D Color="#404040" />
-                <hx:GroupModel3D x:Name="MainGroup" />
-            </hx:Viewport3DX>
-        </Border>
+        <!-- 3D Viewport (inside a Grid so we can overlay the side-selection half-hints) -->
+        <Grid Grid.Row="1" Margin="0,8">
+            <Border BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
+                <hx:Viewport3DX x:Name="MainViewport" BackgroundColor="#FF080C14"
+                                ShowCoordinateSystem="True" CoordinateSystemLabelForeground="#00000000"
+                                ZoomExtentsWhenLoaded="False"
+                                IsRotationEnabled="True" IsPanEnabled="True" IsZoomEnabled="True"
+                                RotateAroundMouseDownPoint="False"
+                                CameraRotationMode="Turnball" ModelUpDirection="0,0,1"
+                                ShowViewCube="False"
+                                IsInertiaEnabled="False"
+                                PreviewMouseLeftButtonDown="Viewport_PreviewMouseLeftButtonDown"
+                                PreviewMouseMove="Viewport_PreviewMouseMove"
+                                PreviewMouseLeftButtonUp="Viewport_PreviewMouseLeftButtonUp">
+                    <hx:Viewport3DX.Camera>
+                        <hx:PerspectiveCamera x:Name="SubCamera" Position="0,-300,100" LookDirection="0,1,-0.3"
+                                              UpDirection="0,0,1" FieldOfView="45"
+                                              NearPlaneDistance="0.1" FarPlaneDistance="10000"/>
+                    </hx:Viewport3DX.Camera>
+                    <hx:AmbientLight3D Color="#505050" />
+                    <hx:DirectionalLight3D x:Name="Headlamp" Direction="0,-1,0" Color="#D0D0D0" />
+                    <hx:GroupModel3D x:Name="MainGroup" />
+                </hx:Viewport3DX>
+            </Border>
+
+            <!-- Side-selection hover overlay: two transparent halves on top of the viewport.
+                 Shown only during step 0. Pointer events pass through when Collapsed. -->
+            <Grid x:Name="SideOverlay" Visibility="Visible">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left half -->
+                <Border x:Name="LeftOverlay" Grid.Column="0"
+                        Background="Transparent"
+                        CornerRadius="4,0,0,4"
+                        MouseEnter="LeftOverlay_MouseEnter"
+                        MouseLeave="SideOverlay_MouseLeave"
+                        MouseLeftButtonDown="LeftOverlay_Click"
+                        Cursor="Hand">
+                    <TextBlock Text="← RIGHT" FontSize="20" FontWeight="Bold"
+                               Foreground="#00FFFF" Opacity="0"
+                               x:Name="LeftLabel"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+
+                <!-- Right half -->
+                <Border x:Name="RightOverlay" Grid.Column="1"
+                        Background="Transparent"
+                        CornerRadius="0,4,4,0"
+                        MouseEnter="RightOverlay_MouseEnter"
+                        MouseLeave="SideOverlay_MouseLeave"
+                        MouseLeftButtonDown="RightOverlay_Click"
+                        Cursor="Hand">
+                    <TextBlock Text="LEFT →" FontSize="20" FontWeight="Bold"
+                               Foreground="#00FFFF" Opacity="0"
+                               x:Name="RightLabel"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+            </Grid>
+        </Grid>
 
         <!-- Status bar -->
         <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,4" VerticalAlignment="Center">
-            <TextBlock x:Name="StatusText" Text="Waiting for 2 points..." FontSize="10" Foreground="#AAB" VerticalAlignment="Center"/>
+            <TextBlock x:Name="StatusText" Text="Hover over a side to highlight, then click to select."
+                       FontSize="10" Foreground="#AAB" VerticalAlignment="Center"/>
         </StackPanel>
 
         <!-- Footer buttons -->
@@ -58,13 +103,17 @@
 
             <StackPanel Grid.Column="2" Orientation="Horizontal">
                 <Button x:Name="ClearBtn" Content="Clear Points" Click="Clear_Click" Width="100" Height="28"
-                        Background="#305040" Foreground="White" BorderBrush="#407050" Cursor="Hand" Margin="0,0,8,0"/>
+                        Background="#305040" Foreground="White" BorderBrush="#407050" Cursor="Hand"
+                        Margin="0,0,8,0" Visibility="Collapsed"/>
                 <Button x:Name="NextBtn" Content="Next Step" Click="Next_Click" Width="120" Height="28"
-                        Background="#3060A0" Foreground="White" BorderBrush="#4080C0" Cursor="Hand" Margin="0,0,8,0" IsEnabled="False"/>
+                        Background="#3060A0" Foreground="White" BorderBrush="#4080C0" Cursor="Hand"
+                        Margin="0,0,8,0" IsEnabled="False" Visibility="Collapsed"/>
                 <Button x:Name="CutBtn" Content="Perform Cut" Click="Cut_Click" Width="120" Height="28"
-                        Background="#A03030" Foreground="White" BorderBrush="#C04040" Cursor="Hand" Margin="0,0,8,0" Visibility="Collapsed"/>
+                        Background="#A03030" Foreground="White" BorderBrush="#C04040" Cursor="Hand"
+                        Margin="0,0,8,0" Visibility="Collapsed"/>
                 <Button x:Name="AcceptBtn" Content="Accept &amp; Close" Click="Accept_Click" Width="120" Height="28"
-                        Background="#308040" Foreground="White" BorderBrush="#40A060" Cursor="Hand" Visibility="Collapsed"/>
+                        Background="#308040" Foreground="White" BorderBrush="#40A060" Cursor="Hand"
+                        Visibility="Collapsed"/>
             </StackPanel>
         </Grid>
     </Grid>

@@ -23,19 +23,23 @@
         <!-- 3D Viewport -->
         <Border Grid.Row="1" Margin="0,8" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
             <hx:Viewport3DX x:Name="MainViewport" BackgroundColor="#FF080C14"
-                            ShowCoordinateSystem="True" CoordinateSystemLabelForeground="White"
-                            ZoomExtentsWhenLoaded="True"
+                            ShowCoordinateSystem="True" CoordinateSystemLabelForeground="#00000000"
+                            ZoomExtentsWhenLoaded="False"
+                            IsRotationEnabled="True" IsPanEnabled="True" IsZoomEnabled="True"
+                            RotateAroundMouseDownPoint="False"
                             CameraRotationMode="Turnball" ModelUpDirection="0,0,1"
                             ShowViewCube="False"
+                            IsInertiaEnabled="False"
                             PreviewMouseLeftButtonDown="Viewport_PreviewMouseLeftButtonDown"
                             PreviewMouseMove="Viewport_PreviewMouseMove"
                             PreviewMouseLeftButtonUp="Viewport_PreviewMouseLeftButtonUp">
                 <hx:Viewport3DX.Camera>
-                    <hx:PerspectiveCamera Position="0,-300,100" LookDirection="0,1,-0.3"
-                                          UpDirection="0,0,1" FieldOfView="45"/>
+                    <hx:PerspectiveCamera x:Name="SubCamera" Position="0,-300,100" LookDirection="0,1,-0.3"
+                                          UpDirection="0,0,1" FieldOfView="45"
+                                          NearPlaneDistance="0.1" FarPlaneDistance="10000"/>
                 </hx:Viewport3DX.Camera>
-                <hx:DirectionalLight3D Direction="0, 1, -1" Color="White" />
-                <hx:AmbientLight3D Color="#404040" />
+                <hx:AmbientLight3D Color="#505050" />
+                <hx:DirectionalLight3D x:Name="Headlamp" Direction="0,-1,0" Color="#D0D0D0" />
                 <hx:GroupModel3D x:Name="MainGroup" />
             </hx:Viewport3DX>
         </Border>

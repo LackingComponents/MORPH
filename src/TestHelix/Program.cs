@@ -1,27 +1,14 @@
 ﻿using System;
 using System.Linq;
-using System.Reflection;
+using HelixToolkit.Wpf.SharpDX;
 
-class Program
-{
-    static void Main()
-    {
-        // Force load HelixToolkit by referencing a known type
-        var dummy = new HelixToolkit.Wpf.SharpDX.PerspectiveCamera();
-        
-        var builder = new HelixToolkit.Geometry.MeshBuilder();
-        var asm1 = Assembly.Load("HelixToolkit.Wpf.SharpDX");
-        var asm2 = Assembly.Load("HelixToolkit.SharpDX");
-        foreach(var asm in new[] { asm1, asm2 })
-        {
-            foreach(var t in asm.GetTypes().Where(x => x.Name.Contains("EffectsManager")))
-            {
-                Console.WriteLine("  " + t.FullName);
+class Program {
+    static void Main() {
+        var t = typeof(ViewportExtensions);
+        foreach(var m in t.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)) {
+            if(m.Name.Contains("Zoom")) {
+                Console.WriteLine($"{m.Name}({string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name))})");
             }
         }
-        builder.AddSphere(new System.Numerics.Vector3(0,0,0), 2f);
-        var geom = builder.ToMesh();
-        var dxGeom = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(geom);
-        Console.WriteLine(dxGeom.GetType().FullName);
     }
 }

@@ -66,6 +66,38 @@ public partial class CondyleSplitWindow : Window
     public (double X, double Y, double Z)? LeftCondyleCenter { get; private set; }
     public (double X, double Y, double Z)? RightCondyleCenter { get; private set; }
 
+    private void CenterViewportOnBone()
+    {
+        if (_boneVerts == null || _boneVerts.Count == 0 || MainViewport.Camera == null) return;
+
+        double minX = double.MaxValue, minY = double.MaxValue, minZ = double.MaxValue;
+        double maxX = double.MinValue, maxY = double.MinValue, maxZ = double.MinValue;
+        foreach (var v in _boneVerts)
+        {
+            if (v[0] < minX) minX = v[0]; if (v[0] > maxX) maxX = v[0];
+            if (v[1] < minY) minY = v[1]; if (v[1] > maxY) maxY = v[1];
+            if (v[2] < minZ) minZ = v[2]; if (v[2] > maxZ) maxZ = v[2];
+        }
+
+        var pivot = new System.Windows.Media.Media3D.Point3D(
+            (minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
+        double diagonal = Math.Sqrt(
+            (maxX - minX) * (maxX - minX) +
+            (maxY - minY) * (maxY - minY) +
+            (maxZ - minZ) * (maxZ - minZ));
+        double distance = Math.Max(diagonal * 1.2, 10);
+
+        // Look from anterior (negative Y in RAS)
+        var dir = new System.Windows.Media.Media3D.Vector3D(0, 1, 0);
+        MainViewport.Camera.Position = new System.Windows.Media.Media3D.Point3D(
+            pivot.X - dir.X * distance, pivot.Y - dir.Y * distance, pivot.Z - dir.Z * distance);
+        MainViewport.Camera.LookDirection = dir * distance;
+        MainViewport.Camera.UpDirection = new System.Windows.Media.Media3D.Vector3D(0, 0, 1);
+
+        MainViewport.FixedRotationPointEnabled = true;
+        MainViewport.FixedRotationPoint = pivot;
+    }
+
     public CondyleSplitWindow(
         List<float[]> boneVerts,
         VolumeData? ctVolume = null, SegmentationVolume? segVolume = null, byte boneLabel = 1, double boneMinHu = 400.0)
@@ -73,6 +105,13 @@ public partial class CondyleSplitWindow : Window
         InitializeComponent();
         
         MainViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
+
+        // Track camera for coaxial headlamp — CompositionTarget.Rendering fires every frame
+        System.Windows.Media.CompositionTarget.Rendering += (s, _) =>
+        {
+            var dir = SubCamera.LookDirection;
+            if (dir.Length > 0.001) { dir.Normalize(); Headlamp.Direction = new System.Windows.Media.Media3D.Vector3D(-dir.X, -dir.Y, -dir.Z); }
+        };
 
         _boneVerts = boneVerts.Select(v => new float[] { v[0], v[1], v[2] }).ToList();
         _ctVolume = ctVolume;
@@ -102,7 +141,7 @@ public partial class CondyleSplitWindow : Window
         var boneModel = MeshHelper.BuildModel3D(_boneVerts, 200, 190, 180, 220);
         MainGroup.Children.Add(boneModel);
 
-        MainViewport.ZoomExtents(500);
+        CenterViewportOnBone();
 
         StepTitle.Text = "Step 1: Define Separation Plane";
         StepInstructions.Text =
@@ -294,7 +333,6 @@ public partial class CondyleSplitWindow : Window
                 AddSphereMarker(leftC, System.Windows.Media.Colors.LimeGreen, 2);
                 AddSphereMarker(rightC, System.Windows.Media.Colors.OrangeRed, 2);
                 RebuildBoxVisuals();
-                MainViewport.ZoomExtents(500);
 
                 CraniumResult = _craniumVerts;
                 MandibleResult = _mandibleVerts;

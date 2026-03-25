@@ -40,17 +40,22 @@
                     <Grid>
                         <hx:Viewport3DX x:Name="CtViewport" BackgroundColor="#FF0E1420"
                                                ShowCoordinateSystem="True" CoordinateSystemLabelForeground="White"
-                                               ZoomExtentsWhenLoaded="True"
+                                               ZoomExtentsWhenLoaded="False"
+                                               IsRotationEnabled="True" IsPanEnabled="True" IsZoomEnabled="True"
+                                               RotateAroundMouseDownPoint="False"
                                                CameraRotationMode="Turnball" ModelUpDirection="0,0,1"
                                                ShowViewCube="False"
+                                               IsInertiaEnabled="False"
                                                PreviewMouseLeftButtonDown="CtViewport_PreviewMouseLeftButtonDown"
                                                PreviewMouseRightButtonDown="CtViewport_PreviewMouseRightButtonDown">
                             <hx:Viewport3DX.Camera>
-                                <hx:PerspectiveCamera Position="0,-300,0" LookDirection="0,1,0"
-                                                   UpDirection="0,0,1" FieldOfView="45"/>
+                                <hx:PerspectiveCamera x:Name="CtCamera" Position="0,-300,100" LookDirection="0,1,-0.3"
+                                                   UpDirection="0,0,1" FieldOfView="45"
+                                                   NearPlaneDistance="0.1" FarPlaneDistance="10000"/>
                             </hx:Viewport3DX.Camera>
-                            <hx:AmbientLight3D Color="#303035"/>
-                            <hx:DirectionalLight3D Direction="0, 1, 0" Color="White" />
+                            <hx:AmbientLight3D Color="#505050"/>
+                            <hx:DirectionalLight3D x:Name="CtHeadlamp" Direction="0,-1,0" Color="#D0D0D0" />
+                            <hx:DirectionalLight3D x:Name="CtBacklamp" Direction="0,1,0" Color="#A0A0A0" />
                             <hx:GroupModel3D x:Name="CtGroup" />
                         </hx:Viewport3DX>
                         <TextBlock Text="🦴 CT Dental Surface" FontSize="11" Foreground="#88FFFFFF"
@@ -69,19 +74,22 @@
                     <Grid>
                         <hx:Viewport3DX x:Name="StlViewport" BackgroundColor="#FF0E1420"
                                                ShowCoordinateSystem="True" CoordinateSystemLabelForeground="White"
-                                               ZoomExtentsWhenLoaded="True"
+                                               ZoomExtentsWhenLoaded="False"
+                                               IsRotationEnabled="True" IsPanEnabled="True" IsZoomEnabled="True"
+                                               RotateAroundMouseDownPoint="False"
                                                CameraRotationMode="Turnball" ModelUpDirection="0,0,1"
                                                ShowViewCube="False"
+                                               IsInertiaEnabled="False"
                                                PreviewMouseLeftButtonDown="StlViewport_PreviewMouseLeftButtonDown"
                                                PreviewMouseRightButtonDown="StlViewport_PreviewMouseRightButtonDown">
                             <hx:Viewport3DX.Camera>
-                                <hx:PerspectiveCamera Position="0,-300,0" LookDirection="0,1,0"
-                                                   UpDirection="0,0,1" FieldOfView="45"/>
+                                <hx:PerspectiveCamera x:Name="StlCamera" Position="0,-300,0" LookDirection="0,1,0"
+                                                   UpDirection="0,0,1" FieldOfView="45"
+                                                   NearPlaneDistance="0.1" FarPlaneDistance="10000"/>
                             </hx:Viewport3DX.Camera>
-                            <hx:AmbientLight3D Color="#969696"/>
-                            <hx:DirectionalLight3D Direction="-1, -1, -0.5" Color="#646464" />
-                            <hx:DirectionalLight3D Direction="1, 1, 0.5" Color="#3C3C3C" />
-                            <hx:DirectionalLight3D Direction="0, 1, 0.5" Color="#505050" />
+                            <hx:AmbientLight3D Color="#505050"/>
+                            <hx:DirectionalLight3D x:Name="StlHeadlamp" Direction="0,-1,0" Color="#D0D0D0" />
+                            <hx:DirectionalLight3D x:Name="StlBacklamp" Direction="0,1,0" Color="#A0A0A0" />
                             <hx:GroupModel3D x:Name="StlGroup" />
                         </hx:Viewport3DX>
                         <TextBlock Text="🦷 Dental STL Scan" FontSize="11" Foreground="#88FFFFFF"
@@ -106,7 +114,7 @@
 
         <!-- Landmark pairs list -->
         <Border Grid.Row="2" Margin="0,6,0,0" Background="#10FFFFFF" CornerRadius="4" Padding="6"
-                MaxHeight="110">
+                Height="110">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <ItemsControl x:Name="PairsList">
                     <ItemsControl.ItemTemplate>

@@ -357,6 +357,10 @@ public static class MeshOps
 
             if (loop.Count >= 3)
             {
+                // Prevent massive ray-burst artifacts on large structural boundaries (like the entire mandible base)
+                // Centroid-fan is only geometrically sound for relatively small, convex topological holes.
+                if (loop.Count > 300) continue;
+
                 // Compute centroid
                 float cx = 0, cy = 0, cz = 0;
                 foreach (var v in loop)
@@ -473,11 +477,27 @@ public static class MeshOps
             float cz = (verts[i][2] + verts[i + 1][2] + verts[i + 2][2]) / 3f;
 
             double[] centroid = new double[] { cx, cy, cz };
-            var target = polyplane.IsAbove(centroid) ? above : below;
-            
-            target.Add(new float[] { verts[i][0], verts[i][1], verts[i][2] });
-            target.Add(new float[] { verts[i + 1][0], verts[i + 1][1], verts[i + 1][2] });
-            target.Add(new float[] { verts[i + 2][0], verts[i + 2][1], verts[i + 2][2] });
+            int? aboveResult = polyplane.IsAbove(centroid);
+
+            // null = centroid is outside the finite plane's influence zone.
+            // In a finite-plane cut, such triangles are NOT split — they belong to BOTH halves
+            // (the cut doesn't reach them). We add them to both so neither segment is missing geometry.
+            if (aboveResult == null)
+            {
+                above.Add(new float[] { verts[i][0], verts[i][1], verts[i][2] });
+                above.Add(new float[] { verts[i + 1][0], verts[i + 1][1], verts[i + 1][2] });
+                above.Add(new float[] { verts[i + 2][0], verts[i + 2][1], verts[i + 2][2] });
+                below.Add(new float[] { verts[i][0], verts[i][1], verts[i][2] });
+                below.Add(new float[] { verts[i + 1][0], verts[i + 1][1], verts[i + 1][2] });
+                below.Add(new float[] { verts[i + 2][0], verts[i + 2][1], verts[i + 2][2] });
+            }
+            else
+            {
+                var target = (aboveResult.Value >= 0) ? above : below;
+                target.Add(new float[] { verts[i][0], verts[i][1], verts[i][2] });
+                target.Add(new float[] { verts[i + 1][0], verts[i + 1][1], verts[i + 1][2] });
+                target.Add(new float[] { verts[i + 2][0], verts[i + 2][1], verts[i + 2][2] });
+            }
         }
 
         return (above, below);

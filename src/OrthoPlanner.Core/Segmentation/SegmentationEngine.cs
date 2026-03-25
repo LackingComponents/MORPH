@@ -870,6 +870,102 @@ public static class SegmentationEngine
     }
 
     /// <summary>
+    /// Generates a highly subsampled, raw Marching Cubes mesh directly from the VolumeData
+    /// based on min/max HU values for real-time slider proxy rendering.
+    /// </summary>
+    public static List<float[]> ExtractLivePreviewMesh(
+        VolumeData volume, short minHU, short maxHU, int stepSize = 4)
+    {
+        var vertices = new List<float[]>();
+        int w = volume.Width, h = volume.Height, d = volume.Depth;
+        double sx = volume.Spacing[0], sy = volume.Spacing[1], sz = volume.Spacing[2];
+
+        // Use zero as the isosurface threshold.
+        // Positive distance values are inside the bounds, negative are outside.
+        double isoLevel = 0.0;
+
+        int maxX = w - stepSize, maxY = h - stepSize, maxZ = d - stepSize;
+        
+        for (int z = 0; z < maxZ; z += stepSize)
+        for (int y = 0; y < maxY; y += stepSize)
+        for (int x = 0; x < maxX; x += stepSize)
+        {
+            int[] ox = [0, stepSize, stepSize, 0, 0, stepSize, stepSize, 0];
+            int[] oy = [0, 0, stepSize, stepSize, 0, 0, stepSize, stepSize];
+            int[] oz = [0, 0, 0, 0, stepSize, stepSize, stepSize, stepSize];
+
+            double[] val = new double[8];
+            for (int i = 0; i < 8; i++)
+            {
+                int px = x + ox[i], py = y + oy[i], pz = z + oz[i];
+                short hu = volume.Voxels[px + py * w + pz * w * h];
+                if (hu >= minHU && hu <= maxHU)
+                {
+                    val[i] = Math.Min(hu - minHU, maxHU - hu);
+                    if (val[i] == 0) val[i] = 0.001; // ensure strict inclusion for boundaries
+                }
+                else if (hu < minHU)
+                {
+                    val[i] = hu - minHU;
+                }
+                else
+                {
+                    val[i] = maxHU - hu;
+                }
+            }
+
+            int cubeIndex = 0;
+            for (int i = 0; i < 8; i++)
+                if (val[i] >= isoLevel) cubeIndex |= (1 << i);
+            
+            if (cubeIndex == 0 || cubeIndex == 255) continue;
+
+            double[][] pos =
+            [
+                [x*sx, y*sy, z*sz],
+                [(x+stepSize)*sx, y*sy, z*sz],
+                [(x+stepSize)*sx, (y+stepSize)*sy, z*sz],
+                [x*sx, (y+stepSize)*sy, z*sz],
+                [x*sx, y*sy, (z+stepSize)*sz],
+                [(x+stepSize)*sx, y*sy, (z+stepSize)*sz],
+                [(x+stepSize)*sx, (y+stepSize)*sy, (z+stepSize)*sz],
+                [x*sx, (y+stepSize)*sy, (z+stepSize)*sz]
+            ];
+
+            float[][] edgeVerts = new float[12][];
+            int[] edgePairs = [0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7];
+            int edgeFlags = MarchingCubes.GetEdgeFlags(cubeIndex);
+
+            for (int i = 0; i < 12; i++)
+            {
+                if ((edgeFlags & (1 << i)) == 0) continue;
+                int a = edgePairs[i * 2], b = edgePairs[i * 2 + 1];
+
+                double diff = val[b] - val[a];
+                double t = Math.Abs(diff) > 0.001 ? (isoLevel - val[a]) / diff : 0.5;
+                t = Math.Clamp(t, 0, 1);
+
+                edgeVerts[i] =
+                [
+                    (float)(pos[a][0] + t * (pos[b][0] - pos[a][0])),
+                    (float)(pos[a][1] + t * (pos[b][1] - pos[a][1])),
+                    (float)(pos[a][2] + t * (pos[b][2] - pos[a][2]))
+                ];
+            }
+
+            var triIndices = MarchingCubes.GetTriangles(cubeIndex);
+            for (int i = 0; i < triIndices.Length && triIndices[i] != -1; i += 3)
+            {
+                vertices.Add(edgeVerts[triIndices[i]]);
+                vertices.Add(edgeVerts[triIndices[i + 1]]);
+                vertices.Add(edgeVerts[triIndices[i + 2]]);
+            }
+        }
+        
+        return vertices;
+    }
+
+    /// <summary>
     /// Performs a physical reslice of the volume using trilinear interpolation.
     /// </summary>
     public static VolumeData ResliceVolume(VolumeData source, NhpTransform transform, NhpTransform inverseTransform)

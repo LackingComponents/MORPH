@@ -49,9 +49,10 @@ public partial class DentalAlignmentWindow : Window
     {
         InitializeComponent();
 
-        var effManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
-        CtViewport.EffectsManager = effManager;
-        StlViewport.EffectsManager = effManager;
+        var ctEffManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
+        CtViewport.EffectsManager = ctEffManager;
+        var stlEffManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
+        StlViewport.EffectsManager = stlEffManager;
 
         _ctVolume = ctVolume;
         _ctVertices = ctVertices;
@@ -59,6 +60,45 @@ public partial class DentalAlignmentWindow : Window
         _stlOriginalVertices = stlVertices.Select(v => new float[] { v[0], v[1], v[2] }).ToList();
 
         PairsList.ItemsSource = _pairs;
+
+        System.Windows.Media.CompositionTarget.Rendering += (s, _) =>
+        {
+            if (CtCamera != null && CtHeadlamp != null && CtBacklamp != null)
+            {
+                var dir = CtCamera.LookDirection;
+                if (dir.Length > 0.001) 
+                { 
+                    dir.Normalize(); 
+                    var tdFront = new Vector3D(-dir.X, -dir.Y, -dir.Z);
+                    var tdBack = new Vector3D(dir.X, dir.Y, dir.Z);
+                    if (Math.Abs(CtHeadlamp.Direction.X - tdFront.X) > 1e-4 || 
+                        Math.Abs(CtHeadlamp.Direction.Y - tdFront.Y) > 1e-4 || 
+                        Math.Abs(CtHeadlamp.Direction.Z - tdFront.Z) > 1e-4)
+                    {
+                        CtHeadlamp.Direction = tdFront; 
+                        CtBacklamp.Direction = tdBack;
+                    }
+                }
+            }
+            if (StlCamera != null && StlHeadlamp != null && StlBacklamp != null)
+            {
+                var dir = StlCamera.LookDirection;
+                if (dir.Length > 0.001) 
+                { 
+                    dir.Normalize(); 
+                    var tdFront = new Vector3D(-dir.X, -dir.Y, -dir.Z);
+                    var tdBack = new Vector3D(dir.X, dir.Y, dir.Z);
+                    if (Math.Abs(StlHeadlamp.Direction.X - tdFront.X) > 1e-4 || 
+                        Math.Abs(StlHeadlamp.Direction.Y - tdFront.Y) > 1e-4 || 
+                        Math.Abs(StlHeadlamp.Direction.Z - tdFront.Z) > 1e-4)
+                    {
+                        StlHeadlamp.Direction = tdFront; 
+                        StlBacklamp.Direction = tdBack;
+                    }
+                }
+            }
+        };
+
         Loaded += (_, _) => SetupViewports();
     }
 
@@ -72,8 +112,40 @@ public partial class DentalAlignmentWindow : Window
         var stlModel = MeshHelper.BuildModel3D(_stlVertices, 245, 245, 230);
         StlGroup.Children.Add(stlModel);
 
-        CtViewport.ZoomExtents(500);
-        StlViewport.ZoomExtents(500);
+        CenterViewportOnMesh(CtViewport, _ctVertices, 1.2);
+        CenterViewportOnMesh(StlViewport, _stlVertices, 1.5);
+    }
+
+    private void CenterViewportOnMesh(HelixToolkit.Wpf.SharpDX.Viewport3DX viewport, List<float[]> vertices, double zoomMultiplier)
+    {
+        if (vertices == null || vertices.Count == 0 || viewport.Camera == null) return;
+
+        double minX = double.MaxValue, minY = double.MaxValue, minZ = double.MaxValue;
+        double maxX = double.MinValue, maxY = double.MinValue, maxZ = double.MinValue;
+        foreach (var v in vertices)
+        {
+            if (v[0] < minX) minX = v[0]; if (v[0] > maxX) maxX = v[0];
+            if (v[1] < minY) minY = v[1]; if (v[1] > maxY) maxY = v[1];
+            if (v[2] < minZ) minZ = v[2]; if (v[2] > maxZ) maxZ = v[2];
+        }
+
+        var pivot = new Point3D((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
+        double diagonal = Math.Sqrt((maxX - minX) * (maxX - minX) + (maxY - minY) * (maxY - minY) + (maxZ - minZ) * (maxZ - minZ));
+        double distance = Math.Max(diagonal * zoomMultiplier, 10);
+
+        var dir = new Vector3D(0, 1, -0.3); // Model is viewed from anterior/superior
+        dir.Normalize();
+        
+        var cam = viewport.Camera as HelixToolkit.Wpf.SharpDX.PerspectiveCamera;
+        if (cam != null)
+        {
+            cam.Position = new Point3D(pivot.X - dir.X * distance, pivot.Y - dir.Y * distance, pivot.Z - dir.Z * distance);
+            cam.LookDirection = dir * distance;
+            cam.UpDirection = new Vector3D(0, 0, 1);
+        }
+
+        viewport.FixedRotationPointEnabled = true;
+        viewport.FixedRotationPoint = pivot;
     }
 
     // ═══ Left-Click Add ═══
@@ -231,7 +303,13 @@ public partial class DentalAlignmentWindow : Window
     {
         var builder = new HelixToolkit.Geometry.MeshBuilder();
         builder.AddSphere(new System.Numerics.Vector3(0,0,0), 1.5f);
-        var sphere = new MeshGeometryModel3D { Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh()), Material = new PhongMaterial { DiffuseColor = new HelixToolkit.Maths.Color4(color.R/255f, color.G/255f, color.B/255f, color.A/255f) }, Transform = new TranslateTransform3D(position.X, position.Y, position.Z) };
+        var matColor = new HelixToolkit.Maths.Color4(color.R/255f, color.G/255f, color.B/255f, color.A/255f);
+        
+        var sphere = new MeshGeometryModel3D { 
+            Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh()), 
+            Material = new PhongMaterial { DiffuseColor = matColor, SpecularColor = new HelixToolkit.Maths.Color4(0.8f, 0.8f, 0.8f, 1f), SpecularShininess = 32f }, 
+            Transform = new TranslateTransform3D(position.X, position.Y, position.Z) 
+        };
 
         var text3D = new HelixToolkit.SharpDX.BillboardText3D();
         text3D.TextInfo.Add(new HelixToolkit.SharpDX.TextInfo(number.ToString(), new System.Numerics.Vector3((float)position.X, (float)position.Y, (float)position.Z + 3f)));

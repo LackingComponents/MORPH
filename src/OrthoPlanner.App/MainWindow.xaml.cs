@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -23,14 +23,13 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-
         if (Viewport3D != null)
         {
             Viewport3D.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
         }
 
-
         SourceInitialized += MainWindow_SourceInitialized;
+        Loaded += OnLoaded;
     }
 
     private void MainWindow_SourceInitialized(object? sender, EventArgs e)
@@ -46,45 +45,80 @@ public partial class MainWindow : Window
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        if (DataContext is INotifyPropertyChanged vm)
+        // ── Center camera on model when bone bounds change ──
+        if (VM != null)
         {
-            vm.PropertyChanged += (s, args) =>
+            VM.PropertyChanged += (s, args) =>
             {
-                if (args.PropertyName == nameof(ViewModels.MainViewModel.BoneOnlyBounds))
+                switch (args.PropertyName)
                 {
-                    Dispatcher.InvokeAsync(() => {
-                        var mainVm = VM;
-                        if (mainVm != null && !mainVm.BoneOnlyBounds.IsEmpty)
+                    case nameof(ViewModels.MainViewModel.BoneOnlyBounds):
+                        if (VM != null && !VM.BoneOnlyBounds.IsEmpty)
                         {
-                            var b = mainVm.BoneOnlyBounds;
+                            // Do not hijack the camera if the bounds simply changed due to a bone split
+                            if (VM.IsSplitting) return;
+
+                            var b = VM.BoneOnlyBounds;
                             var centroid = new Point3D(
                                 b.X + b.SizeX / 2,
                                 b.Y + b.SizeY / 2,
                                 b.Z + b.SizeZ / 2);
-                            
-                            // Align camera target to centroid
-                            if (Viewport3D.Camera is HelixToolkit.Wpf.SharpDX.ProjectionCamera cam) {
-                                var dist = cam.LookDirection.Length;
-                                var dir = cam.LookDirection;
-                                dir.Normalize();
-                                cam.Position = new Point3D(centroid.X - dir.X * dist, centroid.Y - dir.Y * dist, centroid.Z - dir.Z * dist);
-                                cam.LookDirection = new Vector3D(dir.X * dist, dir.Y * dist, dir.Z * dist);
-                            }
-                            
                             Viewport3D.FixedRotationPointEnabled = true;
                             Viewport3D.FixedRotationPoint = centroid;
+
+                            // Robust centering: wait briefly for HelixScene mapping, then snap to Anterior View
+                            Dispatcher.InvokeAsync(async () =>
+                            {
+                                await System.Threading.Tasks.Task.Delay(250);
+                                CenterCamera(new System.Windows.Media.Media3D.Vector3D(0, 1, 0));
+                            }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
                         }
-                        Viewport3D.ZoomExtents();
-                    });
+                        break;
+
+                    case nameof(ViewModels.MainViewModel.ShowGrid):
+                        Dispatcher.InvokeAsync(() =>
+                        {
+                            var show = VM?.ShowGrid == true;
+                            GridOverlay.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+                            if (show) DrawGrid();
+                            else GridDragButton.IsChecked = false;
+                        });
+                        break;
+
+                    case nameof(ViewModels.MainViewModel.ShowCrosshairs):
+                    case nameof(ViewModels.MainViewModel.IsVolumeLoaded):
+                        // Use ApplicationIdle so MPR canvas has time to layout
+                        Dispatcher.InvokeAsync(UpdateCrosshairs, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                        break;
                 }
             };
         }
 
-        // Redraw grid on resize
+        // ── Initialize grid state ──
+        GridOverlay.Visibility = (VM?.ShowGrid == true) ? Visibility.Visible : Visibility.Collapsed;
+        if (VM?.ShowGrid == true) DrawGrid();
+
+        // ── Redraw grid on resize ──
         GridOverlay.SizeChanged += (_, __) => { if (GridOverlay.Visibility == Visibility.Visible) DrawGrid(); };
 
-        // Wire crosshair updates to slice index changes
+        // ── Crosshair updates on slice index changes ──
         SetupCrosshairUpdates();
+
+        // ── Headlamp setup: poll on render frame for bullet-proof tracking ──
+        System.Windows.Media.CompositionTarget.Rendering += OnHeadlampRendering;
+    }
+
+    private void OnHeadlampRendering(object? sender, EventArgs e)
+    {
+        var cam = Viewport3D.Camera;
+        if (cam == null) return;
+        var dir = cam.LookDirection;
+        if (dir.Length > 0.001)
+        {
+            dir.Normalize();
+            // SharpDX Direction = where light comes FROM, so negate look direction.
+            MainHeadlamp.Direction = new Vector3D(-dir.X, -dir.Y, -dir.Z);
+        }
     }
 
     // ═══ Logo context menu ═══
@@ -134,6 +168,9 @@ public partial class MainWindow : Window
             };
             Viewport3D.Camera = newPersp;
         }
+
+        // Force viewport to refresh with the new camera
+        Viewport3D.InvalidateRender();
     }
 
     // ═══ Grid overlay ═══
@@ -147,7 +184,10 @@ public partial class MainWindow : Window
     {
         var show = (sender as CheckBox)?.IsChecked == true;
         GridOverlay.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        if (show) DrawGrid();
+        if (show) 
+        {
+            Dispatcher.InvokeAsync(DrawGrid, System.Windows.Threading.DispatcherPriority.ContextIdle);
+        }
     }
 
     private void OnGridDragToggled(object sender, RoutedEventArgs e)
@@ -473,7 +513,7 @@ public partial class MainWindow : Window
 
     private void OnCrosshairsToggled(object sender, RoutedEventArgs e)
     {
-        UpdateCrosshairs();
+        Dispatcher.InvokeAsync(UpdateCrosshairs, System.Windows.Threading.DispatcherPriority.ContextIdle);
     }
 
     private void SetupCrosshairUpdates()
@@ -488,7 +528,8 @@ public partial class MainWindow : Window
         {
             if (args.PropertyName is nameof(ViewModels.MainViewModel.AxialIndex) or
                 nameof(ViewModels.MainViewModel.CoronalIndex) or
-                nameof(ViewModels.MainViewModel.SagittalIndex))
+                nameof(ViewModels.MainViewModel.SagittalIndex) or
+                nameof(ViewModels.MainViewModel.IsVolumeLoaded))
             {
                 if (!_crosshairThrottle.IsEnabled)
                     _crosshairThrottle.Start();
@@ -500,6 +541,16 @@ public partial class MainWindow : Window
         CoronalCrosshairCanvas.SizeChanged += (_, _) => UpdateCrosshairs();
         SagittalCrosshairCanvas.SizeChanged += (_, _) => UpdateCrosshairs();
         EnlargedCrosshairCanvas.SizeChanged += (_, _) => UpdateCrosshairs();
+
+        // Extreme fail-safe for the "crosshairs don't draw on load" bug. 
+        // Whenever layout updates, if crosshairs should be on but canvas is fully empty, redraw.
+        AxialCrosshairCanvas.LayoutUpdated += (_, _) =>
+        {
+            if (VM != null && VM.ShowCrosshairs && VM.IsVolumeLoaded && AxialCrosshairCanvas.Children.Count == 0)
+            {
+                UpdateCrosshairs();
+            }
+        };
     }
 
     private void UpdateCrosshairs()
@@ -634,29 +685,61 @@ public partial class MainWindow : Window
 
 
 
+    private void CenterCamera(System.Windows.Media.Media3D.Vector3D? lookDirection = null)
+    {
+        if (Viewport3D.Camera == null) return;
+
+        // Determine camera look direction
+        var dir = lookDirection ?? Viewport3D.Camera.LookDirection;
+        if (dir.Length < 0.001) dir = new System.Windows.Media.Media3D.Vector3D(0, 1, 0);
+        dir.Normalize();
+
+        // Compute orbit pivot: prefer ModelCenter from loaded bone, else use scene centre
+        System.Windows.Media.Media3D.Point3D pivot;
+        if (VM != null && !VM.BoneOnlyBounds.IsEmpty)
+        {
+            var mc = VM.ModelCenter;
+            pivot = new System.Windows.Media.Media3D.Point3D(mc.X, mc.Y, mc.Z);
+        }
+        else
+        {
+            // Nothing loaded — fallback to viewport extent centre
+            HelixToolkit.Wpf.SharpDX.ViewportExtensions.ZoomExtents(Viewport3D, 500);
+            return;
+        }
+
+        // Estimate a sensible distance: diagonal of bounding box, scaled so model fills more of view
+        var b = VM!.BoneOnlyBounds;
+        double diagonal = Math.Sqrt(b.SizeX * b.SizeX + b.SizeY * b.SizeY + b.SizeZ * b.SizeZ);
+        double distance = diagonal * 0.75;
+        if (distance < 10) distance = 300;
+
+        // Position camera so it points FROM pivot outward
+        var camPos = new System.Windows.Media.Media3D.Point3D(
+            pivot.X - dir.X * distance,
+            pivot.Y - dir.Y * distance,
+            pivot.Z - dir.Z * distance);
+
+        Viewport3D.Camera.Position      = camPos;
+        // IMPORTANT: LookDirection length = distance to pivot. SharpDX rotates around
+        // Position + LookDirection, so this must be dir * distance, NOT a unit vector.
+        Viewport3D.Camera.LookDirection = dir * distance;
+        Viewport3D.Camera.UpDirection   = new System.Windows.Media.Media3D.Vector3D(0, 0, 1);
+    }
+
     private void CenterCamera_Click(object sender, RoutedEventArgs e)
     {
-        Viewport3D.ZoomExtents(500);
+        CenterCamera();
     }
 
     private void AnteriorView_Click(object sender, RoutedEventArgs e)
     {
-        var anteriorLookDirection = new Vector3D(0, 1, 0);
-        if (Viewport3D.Camera != null) {
-            Viewport3D.Camera.LookDirection = anteriorLookDirection;
-            Viewport3D.Camera.UpDirection = new Vector3D(0, 0, 1);
-        }
-        Viewport3D.ZoomExtents(500);
+        CenterCamera(new System.Windows.Media.Media3D.Vector3D(0, 1, 0));
     }
 
     private void RightProfile_Click(object sender, RoutedEventArgs e)
     {
-        var rightProfileLookDirection = new Vector3D(1, 0, 0);
-        if (Viewport3D.Camera != null) {
-            Viewport3D.Camera.LookDirection = rightProfileLookDirection;
-            Viewport3D.Camera.UpDirection = new Vector3D(0, 0, 1);
-        }
-        Viewport3D.ZoomExtents(500);
+        CenterCamera(new System.Windows.Media.Media3D.Vector3D(1, 0, 0));
     }
 
     private void NhpTextBox_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)

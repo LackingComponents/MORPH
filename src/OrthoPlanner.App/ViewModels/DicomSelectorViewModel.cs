@@ -44,6 +44,7 @@ public partial class DicomSelectorViewModel : ObservableObject
 
     public DicomSelectorViewModel(List<DicomSeriesInfo> series)
     {
+        series.Sort((a, b) => b.ImageCount.CompareTo(a.ImageCount));
         foreach (var s in series) SeriesList.Add(new SeriesItemViewModel(s));
         if (SeriesList.Count > 0) SelectedSeries = SeriesList[0];
     }
