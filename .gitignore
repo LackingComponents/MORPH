@@ -49,3 +49,12 @@ Desktop.ini
 *.orthoplan
 temp/
 dcm_temp/
+
+# WPF designer temp projects
+*_wpftmp.csproj
+
+# Root-level probe/scratch scripts
+/dump_*.cs
+/probe*.cs
+/volume_types.txt
+/wpf_types.txt
