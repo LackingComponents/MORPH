@@ -45,10 +45,9 @@ public partial class LeFortOsteotomyWindow : Window
         
         MainViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
 
-        // Track camera for coaxial headlamp — matches BSSO lighting pattern
         CompositionTarget.Rendering += (_, _) => {
             var d = SubCamera.LookDirection;
-            if (d.Length > 0.001) { d.Normalize(); Headlamp.Direction = new System.Windows.Media.Media3D.Vector3D(-d.X, -d.Y, -d.Z); }
+            if (d.Length > 0.001) { d.Normalize(); Headlamp.Direction = new System.Windows.Media.Media3D.Vector3D(-d.X, -d.Y, -d.Z); Backlamp.Direction = new System.Windows.Media.Media3D.Vector3D(d.X, d.Y, d.Z); }
         };
 
         _craniumVerts = craniumVerts;
@@ -584,26 +583,44 @@ public partial class LeFortOsteotomyWindow : Window
                 }
             }
 
-            // ─── Step 2: Seeded Connected Component Cleanup for the Maxilla ───
+
+            // ─── Step 2: Seed Maxilla from CUT BOUNDARY, not user click proximity ───
+            // Find a below-plane triangle that is edge-adjacent to a cranium (visited=true) triangle.
+            // This guarantees we seed the actual maxilla tissue at the cut, not dental cast geometry.
             int mSeed = -1;
-            double minDist = double.MaxValue;
-            Point3D pt = _controlPoints[0]; // Seed the Maxilla exactly at a place where the user drew the curve.
-            for (int i = 0; i < nTri; i++) {
-                if (!visited[i]) {
-                    float cx = (_craniumVerts[i*3][0]+_craniumVerts[i*3+1][0]+_craniumVerts[i*3+2][0]) / 3f;
-                    float cy = (_craniumVerts[i*3][1]+_craniumVerts[i*3+1][1]+_craniumVerts[i*3+2][1]) / 3f;
-                    float cz = (_craniumVerts[i*3][2]+_craniumVerts[i*3+1][2]+_craniumVerts[i*3+2][2]) / 3f;
-                    double dist = (cx-pt.X)*(cx-pt.X) + (cy-pt.Y)*(cy-pt.Y) + (cz-pt.Z)*(cz-pt.Z);
-                    if (dist < minDist) { minDist = dist; mSeed = i; }
+            foreach (var kvp in edgeMap)
+            {
+                var nbrs = kvp.Value;
+                if (nbrs.Count >= 2)
+                {
+                    int a = nbrs[0], b = nbrs[1];
+                    if (visited[a] && !visited[b]) { mSeed = b; break; }
+                    if (visited[b] && !visited[a]) { mSeed = a; break; }
+                }
+            }
+            // Fallback: if no boundary edge found (degenerate mesh), use proximity to first control point
+            if (mSeed == -1)
+            {
+                double minDist = double.MaxValue;
+                Point3D pt = _controlPoints[0];
+                for (int i = 0; i < nTri; i++) {
+                    if (!visited[i]) {
+                        float cx = (_craniumVerts[i*3][0]+_craniumVerts[i*3+1][0]+_craniumVerts[i*3+2][0]) / 3f;
+                        float cy = (_craniumVerts[i*3][1]+_craniumVerts[i*3+1][1]+_craniumVerts[i*3+2][1]) / 3f;
+                        float cz = (_craniumVerts[i*3][2]+_craniumVerts[i*3+1][2]+_craniumVerts[i*3+2][2]) / 3f;
+                        double dist = (cx-pt.X)*(cx-pt.X) + (cy-pt.Y)*(cy-pt.Y) + (cz-pt.Z)*(cz-pt.Z);
+                        if (dist < minDist) { minDist = dist; mSeed = i; }
+                    }
                 }
             }
 
             var mainMaxilla = mSeed >= 0 ? ExtractComponentFromSeed(visited, nTri, edgeMap, false, mSeed) : new HashSet<int>();
             for (int i = 0; i < nTri; i++) {
                 if (!visited[i] && !mainMaxilla.Contains(i)) {
-                    visited[i] = true; // Clean floaters back to Cranium
+                    visited[i] = true; // Floaters (incl. dental cast) go back to Cranium
                 }
             }
+
 
             // ─── Step 3: Split meshes ───
             var above = new List<float[]>();

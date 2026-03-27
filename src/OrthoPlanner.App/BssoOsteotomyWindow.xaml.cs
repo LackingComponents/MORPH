@@ -69,7 +69,7 @@ public partial class BssoOsteotomyWindow : Window
         MainViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
         CompositionTarget.Rendering += (_, _) => {
             var d = SubCamera.LookDirection;
-            if (d.Length > 0.001) { d.Normalize(); Headlamp.Direction = new Vector3D(-d.X,-d.Y,-d.Z); }
+            if (d.Length > 0.001) { d.Normalize(); Headlamp.Direction = new Vector3D(-d.X,-d.Y,-d.Z); Backlamp.Direction = new Vector3D(d.X,d.Y,d.Z); }
         };
         _mandibleVerts = mandibleVerts;
         _boneMesh = MkBone(_mandibleVerts, new HelixToolkit.Maths.Color4(245/255f,230/255f,200/255f,1f));

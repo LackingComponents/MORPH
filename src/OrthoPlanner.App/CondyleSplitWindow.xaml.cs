@@ -110,7 +110,7 @@ public partial class CondyleSplitWindow : Window
         System.Windows.Media.CompositionTarget.Rendering += (s, _) =>
         {
             var dir = SubCamera.LookDirection;
-            if (dir.Length > 0.001) { dir.Normalize(); Headlamp.Direction = new System.Windows.Media.Media3D.Vector3D(-dir.X, -dir.Y, -dir.Z); }
+            if (dir.Length > 0.001) { dir.Normalize(); Headlamp.Direction = new System.Windows.Media.Media3D.Vector3D(-dir.X, -dir.Y, -dir.Z); Backlamp.Direction = new System.Windows.Media.Media3D.Vector3D(dir.X, dir.Y, dir.Z); }
         };
 
         _boneVerts = boneVerts.Select(v => new float[] { v[0], v[1], v[2] }).ToList();

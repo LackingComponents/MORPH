@@ -38,8 +38,9 @@
                                           UpDirection="0,0,1" FieldOfView="45"
                                           NearPlaneDistance="0.1" FarPlaneDistance="10000"/>
                 </hx:Viewport3DX.Camera>
-                <hx:AmbientLight3D Color="#505050" />
-                <hx:DirectionalLight3D x:Name="Headlamp" Direction="0,-1,0" Color="#D0D0D0" />
+                <hx:AmbientLight3D Color="#606060" />
+                <hx:DirectionalLight3D x:Name="Headlamp" Direction="0,-1,0" Color="#E0E0E0" />
+                <hx:DirectionalLight3D x:Name="Backlamp" Direction="0,1,0" Color="#C8C8C8" />
                 <hx:GroupModel3D x:Name="MainGroup" />
             </hx:Viewport3DX>
         </Border>
