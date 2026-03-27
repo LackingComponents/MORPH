@@ -620,7 +620,7 @@ public partial class LeFortOsteotomyWindow : Window
             MainGroup.Children.Remove(_boneMesh);
             
             var upperMesh = CreateMeshVisual(UpperMaxillaResult, Color.FromRgb(245, 245, 230), 1.0); // cranium bone colour
-            var lowerMesh = CreateMeshVisual(LowerMaxillaResult, Color.FromRgb(80, 200, 190), 1.0);  // teal = LeFort maxilla
+            var lowerMesh = CreateMeshVisual(LowerMaxillaResult, Color.FromRgb(120, 220, 210), 1.0);  // teal = LeFort maxilla
             
             MainGroup.Children.Add(upperMesh);
             MainGroup.Children.Add(lowerMesh);

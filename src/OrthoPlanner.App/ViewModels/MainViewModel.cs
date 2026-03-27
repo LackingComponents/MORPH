@@ -1886,7 +1886,7 @@ public partial class MainViewModel : ObservableObject
                 Label = (byte)(Segments.Count + 1),
                 Name = "Maxilla (LeFort 1 Separated)",
                 Vertices = wizard.LowerMaxillaResult,
-                ColorR = 80, ColorG = 200, ColorB = 190,
+                ColorR = 120, ColorG = 220, ColorB = 210,
                 IsVisible = true
             };
             lowerVm.OnVisibilityChanged = RefreshCombinedModel;
@@ -1932,7 +1932,7 @@ public partial class MainViewModel : ObservableObject
                 Label    = (byte)(Segments.Count + 1),
                 Name     = $"Ramus {sideName}",
                 Vertices = wizard.ProximalResult,
-                ColorR = 200, ColorG = 200, ColorB = 255,
+                ColorR = 120, ColorG = 160, ColorB = 240,
                 IsVisible = true
             };
             proxVm.OnVisibilityChanged = RefreshCombinedModel;
