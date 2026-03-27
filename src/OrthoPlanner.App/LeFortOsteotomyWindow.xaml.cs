@@ -584,9 +584,32 @@ public partial class LeFortOsteotomyWindow : Window
             }
 
 
-            // ─── Step 2: All below-plane geometry = maxilla ───
-            // No floater cleanup: all triangles not reached by the cranium BFS (visited=false)
-            // belong to the maxilla, including any dental cast fragments below the osteotomy line.
+            // ─── Step 2: Reclassify floaters by polyplane side ───
+            // Any triangle not reached by the cranium BFS is tested: if a segment from the
+            // cranium seed to that triangle does NOT cross the polyplane, it is on the cranium
+            // side (above/behind the cut) and is assigned to cranium. Otherwise → maxilla.
+            if (seed >= 0)
+            {
+                var seedCtr = new double[]
+                {
+                    (_craniumVerts[seed*3][0]+_craniumVerts[seed*3+1][0]+_craniumVerts[seed*3+2][0])/3.0,
+                    (_craniumVerts[seed*3][1]+_craniumVerts[seed*3+1][1]+_craniumVerts[seed*3+2][1])/3.0,
+                    (_craniumVerts[seed*3][2]+_craniumVerts[seed*3+1][2]+_craniumVerts[seed*3+2][2])/3.0
+                };
+                for (int i = 0; i < nTri; i++)
+                {
+                    if (visited[i]) continue;
+                    var triCtr = new double[]
+                    {
+                        (_craniumVerts[i*3][0]+_craniumVerts[i*3+1][0]+_craniumVerts[i*3+2][0])/3.0,
+                        (_craniumVerts[i*3][1]+_craniumVerts[i*3+1][1]+_craniumVerts[i*3+2][1])/3.0,
+                        (_craniumVerts[i*3][2]+_craniumVerts[i*3+1][2]+_craniumVerts[i*3+2][2])/3.0
+                    };
+                    if (!polyplane.SegmentIntersects(seedCtr, triCtr))
+                        visited[i] = true; // Same side as cranium seed → cranium
+                    // else stays false → maxilla
+                }
+            }
 
 
             // ─── Step 3: Split meshes ───

@@ -446,6 +446,16 @@ public partial class BssoOsteotomyWindow : Window
                 }
             }
 
+            // Reclassify floaters: if a segment from the ramus seed to the floater
+            // doesn't cross the kerf polyplane, it's geometrically on the ramus side.
+            if (seed >= 0) {
+                for (int i = 0; i < nTri; i++) {
+                    if (visited[i]) continue;
+                    if (!poly.SegmentIntersects(ctrs[seed], ctrs[i]))
+                        visited[i] = true; // Ramus side
+                }
+            }
+
             var proximal = new List<float[]>(); var distal = new List<float[]>();
             for(int i = 0; i < nTri; i++) {
                 (visited[i] ? proximal : distal).Add(operated[i*3]);
