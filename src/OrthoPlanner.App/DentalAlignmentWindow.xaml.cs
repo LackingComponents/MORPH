@@ -458,7 +458,7 @@ public partial class DentalAlignmentWindow : Window
             var alignedModel = MeshHelper.BuildModel3D(previewVerts, 255, 230, 90);
             StlGroup.Children.Add(alignedModel);
 
-            StlViewport.ZoomExtents(500);
+            CenterViewportOnMesh(StlViewport, _ctVertices, 1.0);
 
             RmsText.Text = $"RMS: {result.RmsError:F3} mm | {result.Iterations} iters";
             StepTitle.Text = "Step 3: Review Alignment";
@@ -468,45 +468,7 @@ public partial class DentalAlignmentWindow : Window
             CloseHolesCheckBox.Visibility = Visibility.Visible;
             SkipIcpCheckBox.Visibility = Visibility.Collapsed;
 
-            // ─── Generate 2D Panoramic MPR Overlay ───
-            if (_ctVolume != null && tgtLandmarks.Count >= 3)
-            {
-                try
-                {
-                    // 1. Extract X,Y from landmarks 
-                    var curvePoints = tgtLandmarks.Select(p => (p.Item1, p.Item2)).ToList();
-                    
-                    // 2. Generate smooth Catmull-Rom spline
-                    var denseSpline = OrthoPlanner.Core.Geometry.SplineHelper.ComputeCatmullRom2D(curvePoints, stepsPerSegment: 40);
-                    
-                    // 3. Find average Z height of landmarks as the center of our 50mm MPR band
-                    double zCenter = tgtLandmarks.Average(p => p.Item3);
 
-                    // 4. Build a KdTree of the Aligned STL vertices to check for mesh intersections perfectly
-                    var stlTree = new OrthoPlanner.Core.Geometry.KdTree();
-                    stlTree.Build(previewVerts);
-
-                    // 5. Generate the 2D MPR Image (MIP with Gold STL overlay)
-                    var bgra = _ctVolume.GetPanoramicMIPBgra(denseSpline, zCenter, 400, 2000, stlTree);
-                    
-                    int w = (int)(denseSpline.Count * 0.5);
-                    int h = (int)(50.0 / 0.5); // 50mm height / 0.5mm sample rate
-                    
-                    if (w > 0 && h > 0)
-                    {
-                        var bitmap = new System.Windows.Media.Imaging.WriteableBitmap(w, h, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null);
-                        bitmap.WritePixels(new Int32Rect(0, 0, w, h), bgra, w * 4, 0);
-                        PanoramicImage.Source = bitmap;
-                        
-                        // Expand the panoramic row!
-                        PanoramicRow.Height = new GridLength(200, GridUnitType.Pixel);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Panoramic MPR failed: {ex.Message}");
-                }
-            }
         }
         catch (Exception ex)
         {
@@ -569,7 +531,6 @@ public partial class DentalAlignmentWindow : Window
             CleanMergeBtn.Visibility = Visibility.Collapsed;
             CloseHolesCheckBox.Visibility = Visibility.Collapsed;
             SkipIcpCheckBox.Visibility = Visibility.Visible;
-            PanoramicRow.Height = new GridLength(0); // Hide MPR
             StlGroup.Children.Clear(); // Clear alignment preview
             StlGroup.Children.Add(MeshHelper.BuildModel3D(_stlOriginalVertices, 255, 230, 90)); // Restore original gold STL
             for (int i = 0; i < _stlMarkerVisuals.Count; i++)

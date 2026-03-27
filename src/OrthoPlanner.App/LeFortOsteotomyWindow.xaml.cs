@@ -300,7 +300,8 @@ public partial class LeFortOsteotomyWindow : Window
         var sphereGeom = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh());
         var mat = new PhongMaterial { 
             DiffuseColor = color, 
-            EmissiveColor = new HelixToolkit.Maths.Color4(color.Red * 0.15f, color.Green * 0.15f, color.Blue * 0.15f, 1f) 
+            SpecularColor = new HelixToolkit.Maths.Color4(0.8f, 0.8f, 0.8f, 1f),
+            SpecularShininess = 32f
         };
         return new MeshGeometryModel3D { Geometry = sphereGeom, Material = mat, Transform = new TranslateTransform3D(pt.X, pt.Y, pt.Z) };
     }
@@ -618,8 +619,8 @@ public partial class LeFortOsteotomyWindow : Window
 
             MainGroup.Children.Remove(_boneMesh);
             
-            var upperMesh = CreateMeshVisual(UpperMaxillaResult, Color.FromRgb(245, 245, 230), 1.0); // cream = original bone color
-            var lowerMesh = CreateMeshVisual(LowerMaxillaResult, Color.FromRgb(255, 200, 200), 1.0);
+            var upperMesh = CreateMeshVisual(UpperMaxillaResult, Color.FromRgb(245, 245, 230), 1.0); // cranium bone colour
+            var lowerMesh = CreateMeshVisual(LowerMaxillaResult, Color.FromRgb(80, 200, 190), 1.0);  // teal = LeFort maxilla
             
             MainGroup.Children.Add(upperMesh);
             MainGroup.Children.Add(lowerMesh);

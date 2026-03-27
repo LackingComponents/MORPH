@@ -1873,7 +1873,7 @@ public partial class MainViewModel : ObservableObject
                 Label = (byte)(Segments.Count + 1),
                 Name = "Cranium (Upper Maxilla)",
                 Vertices = wizard.UpperMaxillaResult,
-                ColorR = 200, ColorG = 200, ColorB = 255,
+                ColorR = 220, ColorG = 200, ColorB = 170,
                 IsVisible = true
             };
             upperVm.OnVisibilityChanged = RefreshCombinedModel;
@@ -1886,7 +1886,7 @@ public partial class MainViewModel : ObservableObject
                 Label = (byte)(Segments.Count + 1),
                 Name = "Maxilla (LeFort 1 Separated)",
                 Vertices = wizard.LowerMaxillaResult,
-                ColorR = 255, ColorG = 200, ColorB = 200,
+                ColorR = 80, ColorG = 200, ColorB = 190,
                 IsVisible = true
             };
             lowerVm.OnVisibilityChanged = RefreshCombinedModel;
@@ -1956,7 +1956,7 @@ public partial class MainViewModel : ObservableObject
                     Label    = (byte)(Segments.Count + 1),
                     Name     = "Mandible",
                     Vertices = wizard.DistalResult,
-                    ColorR = 255, ColorG = 200, ColorB = 200,
+                    ColorR = 220, ColorG = 140, ColorB = 120,
                     IsVisible = true
                 };
                 distVm.OnVisibilityChanged = RefreshCombinedModel;
@@ -2029,7 +2029,7 @@ public partial class MainViewModel : ObservableObject
                     {
                         Label = (byte)(Segments.Count + 1),
                         Name = "Mandible (Split)",
-                        ColorR = 180, ColorG = 200, ColorB = 220,
+                        ColorR = 220, ColorG = 140, ColorB = 120,
                         Vertices = wizard.MandibleResult,
                         IsVisible = true
                     };

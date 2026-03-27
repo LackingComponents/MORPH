@@ -320,7 +320,7 @@ public partial class CondyleSplitWindow : Window
                 }
                 if (_mandibleVerts != null && _mandibleVerts.Count > 0)
                 {
-                    var mandModel = MeshHelper.BuildModel3D(_mandibleVerts, 180, 200, 220);
+                    var mandModel = MeshHelper.BuildModel3D(_mandibleVerts, 220, 140, 120);
                     MainGroup.Children.Add(mandModel);
                 }
 
@@ -839,7 +839,11 @@ public partial class CondyleSplitWindow : Window
         var cornerSphere = new MeshGeometryModel3D
         { 
             Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(sbuild.ToMesh()),
-            Material = new PhongMaterial { DiffuseColor = new HelixToolkit.Maths.Color4(1f, 1f, 0f, 1f) },
+            Material = new PhongMaterial { 
+                DiffuseColor = new HelixToolkit.Maths.Color4(1f, 1f, 0f, 1f),
+                SpecularColor = new HelixToolkit.Maths.Color4(0.8f, 0.8f, 0.8f, 1f),
+                SpecularShininess = 32f
+            },
             Transform = new TranslateTransform3D(cx + hx * signX, cy + hy, cz + hz)
         };
         parent.Children.Add(cornerSphere);
@@ -854,7 +858,11 @@ public partial class CondyleSplitWindow : Window
         var sphere = new MeshGeometryModel3D
         {
             Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh()),
-            Material = new PhongMaterial { DiffuseColor = new HelixToolkit.Maths.Color4(color.R / 255f, color.G / 255f, color.B / 255f, color.A / 255f) },
+            Material = new PhongMaterial { 
+                DiffuseColor = new HelixToolkit.Maths.Color4(color.R / 255f, color.G / 255f, color.B / 255f, color.A / 255f),
+                SpecularColor = new HelixToolkit.Maths.Color4(0.8f, 0.8f, 0.8f, 1f),
+                SpecularShininess = 32f
+            },
             Transform = new TranslateTransform3D(c[0], c[1], c[2])
         };
         MainGroup.Children.Add(sphere);

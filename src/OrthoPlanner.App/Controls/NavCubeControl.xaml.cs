@@ -21,8 +21,8 @@ public sealed partial class NavCubeControl : UserControl
     [
         (N( 0,-1, 0), N( 0, 1, 0), N(0, 0, 1), "FRONT"),
         (N( 0, 1, 0), N( 0,-1, 0), N(0, 0, 1), "BACK"),
-        (N( 1, 0, 0), N(-1, 0, 0), N(0, 0, 1), "RIGHT"),
-        (N(-1, 0, 0), N( 1, 0, 0), N(0, 0, 1), "LEFT"),
+        (N( 1, 0, 0), N(-1, 0, 0), N(0, 0, 1), "LEFT"),    // Swapped label per user request
+        (N(-1, 0, 0), N( 1, 0, 0), N(0, 0, 1), "RIGHT"),   // Swapped label per user request
         (N( 0, 0, 1), N( 0, 0,-1), N(0, 1, 0), "TOP"),     // Up points Back (+Y)
         (N( 0, 0,-1), N( 0, 0, 1), N(0,-1, 0), "BOTTOM"),  // Up points Front (-Y)
         // edges 6–17
@@ -35,18 +35,15 @@ public sealed partial class NavCubeControl : UserControl
     ];
     static Vector3D N(double x,double y,double z){var v=new Vector3D(x,y,z);v.Normalize();return v;}
 
-    private static readonly Color[] _fc = [
-        Color.FromRgb(0x5A,0x6A,0x84), Color.FromRgb(0x47,0x55,0x6B),
-        Color.FromRgb(0x52,0x63,0x7C), Color.FromRgb(0x4B,0x5B,0x73),
-        Color.FromRgb(0x6A,0x7C,0x97), Color.FromRgb(0x3E,0x4C,0x60),
-    ];
-    private static readonly Color _stripNorm = Color.FromRgb(0x3F,0x4E,0x65);
+    private static readonly Color _baseCol = Color.FromRgb(0x6A,0x7C,0x97); // 'TOP' color for all faces
+    private static readonly Color _stripNorm = Color.FromRgb(0x4A,0x5A,0x72); // Slightly darker for edges
     private static readonly Color _hoverFace = Color.FromRgb(0x1B,0x98,0xE0);
     private static readonly Color _hoverStrip= Color.FromRgb(0x15,0x7F,0xBA);
     private static readonly Color _arrowCol  = Color.FromArgb(190,0xBB,0xCC,0xE4);
     private static readonly Color _arrowHov  = Color.FromArgb(255,0x1B,0x98,0xE0);
 
     private PerspectiveCamera          _navCam = null!;
+    private DirectionalLight           _headlamp = null!;
     private readonly GeometryModel3D[] _faces  = new GeometryModel3D[6];
     private readonly DiffuseMaterial[] _faceN  = new DiffuseMaterial[6];
     private readonly DiffuseMaterial[] _faceH  = new DiffuseMaterial[6];
@@ -79,8 +76,11 @@ public sealed partial class NavCubeControl : UserControl
         _viewport.Camera = _navCam;
 
         var world = new Model3DGroup();
-        world.Children.Add(new AmbientLight(Color.FromRgb(155,162,172)));
-        world.Children.Add(new DirectionalLight(Color.FromRgb(150,160,175),new Vector3D(-1,-2,-3)));
+        world.Children.Add(new AmbientLight(Color.FromRgb(120, 130, 145)));
+        _headlamp = new DirectionalLight(Color.FromRgb(160, 160, 160), new Vector3D(0, 4, 0));
+        world.Children.Add(_headlamp);
+        // Slightly offset side-light to fill shadows
+        world.Children.Add(new DirectionalLight(Color.FromRgb(60, 65, 75), new Vector3D(-1, -1, -2)));
 
         const double s=0.54, c=0.38; // s = cube radius, c = inner face radius
         // 0.38 leaves 0.16 thickness for edge strips
@@ -96,7 +96,7 @@ public sealed partial class NavCubeControl : UserControl
             Point3D obl = P(-s,-s), obr = P(s,-s), otr = P(s,s), otl = P(-s,s);
 
             // Center square
-            _faceN[fi] = FaceMat(_fc[fi], FaceDefs[fi].Label);
+            _faceN[fi] = FaceMat(_baseCol, FaceDefs[fi].Label);
             _faceH[fi] = FaceMat(_hoverFace, FaceDefs[fi].Label);
             var fg = QuadMesh(cbl, cbr, ctr, ctl);
             // Unified standard UV works for all faces provided 'up' and 'right' accurately map to screen axes.
@@ -166,10 +166,10 @@ public sealed partial class NavCubeControl : UserControl
         Arrow([new(0,ah),new(aw,ah),new(aw/2,0)],    (cw-aw)/2, cw-ah-gap, 0,+90);
         // ↓ at TOP     → orbit -90° elevation
         Arrow([new(0,0), new(aw,0), new(aw/2,ah)],   (cw-aw)/2, gap,       0,-90);
-        // ← at RIGHT   → orbit -90° azimuth
-        Arrow([new(ah,0),new(ah,aw),new(0,aw/2)],    cw-ah-gap, (cw-aw)/2,-90, 0);
-        // → at LEFT    → orbit +90° azimuth
-        Arrow([new(0,0), new(0,aw), new(ah,aw/2)],   gap,       (cw-aw)/2,+90, 0);
+        // ← at RIGHT   → orbit +90° azimuth (swapped per user request)
+        Arrow([new(ah,0),new(ah,aw),new(0,aw/2)],    cw-ah-gap, (cw-aw)/2,+90, 0);
+        // → at LEFT    → orbit -90° azimuth (swapped per user request)
+        Arrow([new(0,0), new(0,aw), new(ah,aw/2)],   gap,       (cw-aw)/2,-90, 0);
     }
     private void Arrow(System.Windows.Point[] pts,double l,double t,double az,double el)
     {
@@ -199,6 +199,7 @@ public sealed partial class NavCubeControl : UserControl
         _navCam.Position=new Point3D(-ld.X/len*d,-ld.Y/len*d,-ld.Z/len*d);
         _navCam.LookDirection=new Vector3D(ld.X/len*d,ld.Y/len*d,ld.Z/len*d);
         _navCam.UpDirection=MainCamera.UpDirection;
+        _headlamp.Direction=_navCam.LookDirection; // Frontal dynamic light!
     }
 
     protected override void OnMouseMove(MouseEventArgs e)

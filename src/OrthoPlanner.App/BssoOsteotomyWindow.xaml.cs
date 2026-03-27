@@ -456,8 +456,8 @@ public partial class BssoOsteotomyWindow : Window
             ProximalResult = proximal; DistalResult = distal;
 
             MainGroup.Children.Remove(_boneMesh);
-            MainGroup.Children.Add(MkBone(ProximalResult, new HelixToolkit.Maths.Color4(200/255f,200/255f,255/255f,1f)));
-            MainGroup.Children.Add(MkBone(DistalResult,   new HelixToolkit.Maths.Color4(255/255f,200/255f,200/255f,1f)));
+            MainGroup.Children.Add(MkBone(ProximalResult, new HelixToolkit.Maths.Color4(120/255f,160/255f,240/255f,1f)));
+            MainGroup.Children.Add(MkBone(DistalResult,   new HelixToolkit.Maths.Color4(220/255f,140/255f,120/255f,1f)));
             _lingualVis.Children.Clear(); _sagittalVis.Children.Clear(); _postArmVis.Children.Clear(); _buccalVis.Children.Clear();
             AcceptBtn.Visibility=Visibility.Visible; CutBtn.Visibility=Visibility.Collapsed;
             StatusText.Text="Done. Ramus=blue, Mandible=red.";
@@ -476,7 +476,7 @@ public partial class BssoOsteotomyWindow : Window
     }
     private MeshGeometryModel3D Sph(Point3D c, float r=2.2f) {
         var b = new HelixToolkit.Geometry.MeshBuilder(); b.AddSphere(new System.Numerics.Vector3(0,0,0),r);
-        return new MeshGeometryModel3D{ Geometry=HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(b.ToMesh()), Material=new PhongMaterial{DiffuseColor=new HelixToolkit.Maths.Color4(0f,1f,1f,1f),EmissiveColor=new HelixToolkit.Maths.Color4(0f,0.15f,0.15f,1f)}, Transform=Tt(c) };
+        return new MeshGeometryModel3D{ Geometry=HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(b.ToMesh()), Material=new PhongMaterial{DiffuseColor=new HelixToolkit.Maths.Color4(0f,1f,1f,1f), SpecularColor=new HelixToolkit.Maths.Color4(0.8f,0.8f,0.8f,1f), SpecularShininess=32f}, Transform=Tt(c) };
     }
     private static TranslateTransform3D Tt(Point3D p) => new(p.X,p.Y,p.Z);
     private static System.Numerics.Vector3 Nv(float[] v) => new(v[0],v[1],v[2]);
