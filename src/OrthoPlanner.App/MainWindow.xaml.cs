@@ -156,8 +156,12 @@ public partial class MainWindow : Window
         if (dir.Length > 0.001)
         {
             dir.Normalize();
-            // SharpDX Direction = where light comes FROM, so negate look direction.
+            // SharpDX Direction = where light comes FROM, so negate look direction for front, direct for back.
             MainHeadlamp.Direction = new Vector3D(-dir.X, -dir.Y, -dir.Z);
+            if (MainBacklamp != null) 
+            {
+                MainBacklamp.Direction = new Vector3D(dir.X, dir.Y, dir.Z);
+            }
         }
     }
 

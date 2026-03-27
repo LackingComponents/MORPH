@@ -697,6 +697,7 @@
                         <!-- Headlamp: direction set from code-behind, tracks camera -->
                         <hx:AmbientLight3D Color="#505050" />
                         <hx:DirectionalLight3D x:Name="MainHeadlamp" Direction="0,-1,0" Color="#D0D0D0" />
+                        <hx:DirectionalLight3D x:Name="MainBacklamp" Direction="0,1,0" Color="#A0A0A0" />
 
                         <!-- Live 3D Threshold Preview Proxy -->
                         <hx:MeshGeometryModel3D Geometry="{Binding LivePreviewGeometry}" 
