@@ -106,6 +106,46 @@ public partial class MainWindow : Window
 
         // ── Headlamp setup: poll on render frame for bullet-proof tracking ──
         System.Windows.Media.CompositionTarget.Rendering += OnHeadlampRendering;
+
+        // ── NavCube: wire to the named XAML camera (always current reference) ──
+        NavCube.MainCamera = MainCamera;
+
+        NavCube.FaceClicked += faceIdx =>
+        {
+            var (_, camDir, camUp, _) = Controls.NavCubeControl.FaceDefs[faceIdx];
+            NavCubeFaceSnap(
+                new System.Windows.Media.Media3D.Vector3D(camDir.X, camDir.Y, camDir.Z),
+                new System.Windows.Media.Media3D.Vector3D(camUp.X, camUp.Y, camUp.Z));
+        };
+
+        NavCube.RotateRequested += (dAz, dEl) => OrbitCamera(dAz, dEl);
+    }
+
+    /// <summary>
+    /// Snaps the main viewport camera to look along <paramref name="lookDir"/>
+    /// while preserving the current look-at point and distance.
+    /// Works even if no model is loaded.
+    /// </summary>
+    private void NavCubeFaceSnap(
+        System.Windows.Media.Media3D.Vector3D lookDir,
+        System.Windows.Media.Media3D.Vector3D upDir)
+    {
+        var cam = Viewport3D.Camera;
+        if (cam == null) return;
+
+        double dist = cam.LookDirection.Length;
+        if (dist < 0.001) dist = 300;
+
+        lookDir.Normalize();
+
+        // Preserve the current look-at point (pivot)
+        var lookAt = cam.Position + cam.LookDirection;
+        cam.Position      = lookAt - lookDir * dist;
+        cam.LookDirection = lookDir * dist;
+        cam.UpDirection   = upDir;
+
+        Viewport3D.FixedRotationPointEnabled = true;
+        Viewport3D.FixedRotationPoint = lookAt;
     }
 
     private void OnHeadlampRendering(object? sender, EventArgs e)
@@ -154,6 +194,7 @@ public partial class MainWindow : Window
                 FarPlaneDistance = pc.FarPlaneDistance
             };
             Viewport3D.Camera = newOrtho;
+            NavCube.MainCamera = null; // NavCube only supports PerspectiveCamera
         }
         else if (!isOrtho && currentCam is HelixToolkit.Wpf.SharpDX.OrthographicCamera oc)
         {
@@ -167,6 +208,7 @@ public partial class MainWindow : Window
                 FarPlaneDistance = oc.FarPlaneDistance
             };
             Viewport3D.Camera = newPersp;
+            NavCube.MainCamera = newPersp;
         }
 
         // Force viewport to refresh with the new camera
@@ -758,6 +800,38 @@ public partial class MainWindow : Window
                 }
             }
         }
+    }
+
+    // ═══ NavCube: Orbital arrow rotation ═══
+
+    private void OrbitCamera(double dAzimuthDeg, double dElevationDeg)
+    {
+        if (Viewport3D.Camera == null) return;
+
+        var cam = Viewport3D.Camera;
+        var lookDir = cam.LookDirection;
+        var upDir   = cam.UpDirection;
+        double dist = lookDir.Length;
+        if (dist < 0.001) return;
+        lookDir.Normalize(); upDir.Normalize();
+
+        var right = System.Windows.Media.Media3D.Vector3D.CrossProduct(lookDir, upDir);
+        right.Normalize();
+
+        // Rotate look direction around up axis (azimuth) then right axis (elevation)
+        var qAz = new System.Windows.Media.Media3D.Quaternion(upDir,   dAzimuthDeg);
+        var qEl = new System.Windows.Media.Media3D.Quaternion(right, dElevationDeg);
+        var q = qAz * qEl;
+
+        var mat = new System.Windows.Media.Media3D.Matrix3D();
+        mat.Rotate(q);
+        var newLook = mat.Transform(lookDir);
+        var newUp   = mat.Transform(upDir);
+
+        var lookAt = cam.Position + cam.LookDirection;
+        cam.Position      = lookAt - newLook * dist;
+        cam.LookDirection = newLook * dist;
+        cam.UpDirection   = newUp;
     }
 
     // ═══ Accordion Expander Logic ═══

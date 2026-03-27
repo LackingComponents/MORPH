@@ -668,7 +668,8 @@
                         </CheckBox>
                     </StackPanel>
 
-                    <!-- 3D Viewport -->
+                    <!-- 3D Viewport. ShowViewCube="False" = custom NavCube active.
+                         To revert to built-in: change ShowViewCube to True and set NavCube Visibility=Collapsed below. -->
                     <hx:Viewport3DX x:Name="Viewport3D" Grid.Row="1"
                                     BackgroundColor="#FF0C1018"
                                     ShowCoordinateSystem="True"
@@ -680,7 +681,7 @@
                                     RotateAroundMouseDownPoint="False"
                                     CameraRotationMode="Turnball"
                                     ModelUpDirection="0,0,1"
-                                    ShowViewCube="True"
+                                    ShowViewCube="False"
                                     IsViewCubeEdgeClicksEnabled="True"
                                     IsInertiaEnabled="False"
                                     CoordinateSystemLabelX=""
@@ -739,6 +740,12 @@
                         </Button>
                     </StackPanel>
                     
+                    <!-- Custom NavCube (Autodesk-style). Set Visibility=Collapsed to revert to built-in. -->
+                    <ctrl:NavCubeControl x:Name="NavCube" Grid.Row="1"
+                                         HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                         Margin="0,0,8,8" Opacity="0.92"
+                                         Visibility="Visible" />
+
                     <!-- Grid overlay (drawn in code-behind) -->
                     <Canvas x:Name="GridOverlay" Grid.Row="1"
                             IsHitTestVisible="False" Visibility="Collapsed"

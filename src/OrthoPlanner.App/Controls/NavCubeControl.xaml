@@ -1,0 +1,9 @@
+<UserControl x:Class="OrthoPlanner.App.Controls.NavCubeControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Width="110" Height="110" Cursor="Hand">
+    <Grid>
+        <Viewport3D x:Name="_viewport" IsHitTestVisible="True"/>
+        <Canvas x:Name="_arrowCanvas"/>
+    </Grid>
+</UserControl>
