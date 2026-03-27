@@ -446,14 +446,56 @@ public partial class BssoOsteotomyWindow : Window
                 }
             }
 
-            // Reclassify floaters: if a segment from the ramus seed to the floater
-            // doesn't cross the kerf polyplane, it's geometrically on the ramus side.
-            if (seed >= 0) {
-                for (int i = 0; i < nTri; i++) {
-                    if (visited[i]) continue;
-                    if (!poly.SegmentIntersects(ctrs[seed], ctrs[i]))
-                        visited[i] = true; // Ramus side
-                }
+            // ─── Floater reclassification: 3-step sequential plane test ───
+            // A floater qualifies as RAMUS if:
+            //   Step 1: its centroid is posterior (behind) the buccal cortex plane, AND
+            //   Step 2: its centroid is lateral to the sagittal cutting plane, OR
+            //   Step 3: its centroid is superior (above) the lingual cut plane.
+            //
+            // Helper: signed distance from a point to a plane defined by 3 reference points.
+            // Positive = same side as the normal (p0→p1 × p0→p2).
+            static double PlaneSide(double[] pt, double[] p0, double[] p1, double[] p2)
+            {
+                double ax = p1[0]-p0[0], ay = p1[1]-p0[1], az = p1[2]-p0[2];
+                double bx = p2[0]-p0[0], by = p2[1]-p0[1], bz = p2[2]-p0[2];
+                double nx = ay*bz-az*by, ny = az*bx-ax*bz, nz = ax*by-ay*bx;
+                return nx*(pt[0]-p0[0]) + ny*(pt[1]-p0[1]) + nz*(pt[2]-p0[2]);
+            }
+
+            // Extract plane reference points from the cut geometry:
+            // Lingual: lingual control points define the separation height
+            var lingP0 = new double[]{_lc[0].X,_lc[0].Y,_lc[0].Z};
+            var lingP1 = new double[]{_lc[1].X,_lc[1].Y,_lc[1].Z};
+            var lingP2 = new double[]{_lc[2].X,_lc[2].Y,_lc[2].Z};
+            // Sign on the cranial (ramus) side of the lingual plane: the condyle seed is above it
+            double lingualSeedSign = PlaneSide(ctrs[seed], lingP0, lingP1, lingP2);
+
+            // Buccal: buccal control points define the lateral cortex plane
+            var buccP0 = new double[]{_bc[0].X,_bc[0].Y,_bc[0].Z};
+            var buccP1 = new double[]{_bc[1].X,_bc[1].Y,_bc[1].Z};
+            var buccP2 = new double[]{_bc[2].X,_bc[2].Y,_bc[2].Z};
+            // Sign on the posterior side of buccal: the seed (condyle) is behind the buccal cut
+            double buccalSeedSign = PlaneSide(ctrs[seed], buccP0, buccP1, buccP2);
+
+            // Sagittal: sagittal top points define the medial/lateral divider
+            var sagP0 = new double[]{_sagTop[0].X,_sagTop[0].Y,_sagTop[0].Z};
+            var sagP1 = new double[]{_sagTop[1].X,_sagTop[1].Y,_sagTop[1].Z};
+            var sagP2 = new double[]{_sagBot[0].X,_sagBot[0].Y,_sagBot[0].Z};
+            // Sign on the lateral (ramus) side of sagittal: the seed (condyle) is lateral
+            double sagittalSeedSign = PlaneSide(ctrs[seed], sagP0, sagP1, sagP2);
+
+            for (int i = 0; i < nTri; i++)
+            {
+                if (visited[i]) continue;
+                var c = ctrs[i];
+
+                bool aboveLingual  = Math.Sign(PlaneSide(c, lingP0, lingP1, lingP2)) == Math.Sign(lingualSeedSign);
+                bool behindBuccal  = Math.Sign(PlaneSide(c, buccP0, buccP1, buccP2)) == Math.Sign(buccalSeedSign);
+                bool lateralSagittal = Math.Sign(PlaneSide(c, sagP0, sagP1, sagP2)) == Math.Sign(sagittalSeedSign);
+
+                // Ramus if: (behind buccal AND lateral to sagittal) OR above lingual
+                if ((behindBuccal && lateralSagittal) || aboveLingual)
+                    visited[i] = true;
             }
 
             var proximal = new List<float[]>(); var distal = new List<float[]>();
