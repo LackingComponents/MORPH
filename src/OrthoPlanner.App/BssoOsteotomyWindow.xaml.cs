@@ -493,6 +493,16 @@ public partial class BssoOsteotomyWindow : Window
             for (int ci = 1; ci < components.Count; ci++)
                 if (components[ci].Count > components[largestIdx].Count) largestIdx = ci;
 
+            // Compute ramus centroid (all BFS-visited triangles)
+            double ramusCx = 0, ramusCy = 0, ramusCz = 0; int ramusN = 0;
+            for (int i = 0; i < nTri; i++) { if (!visited[i]) continue; ramusCx += ctrs[i][0]; ramusCy += ctrs[i][1]; ramusCz += ctrs[i][2]; ramusN++; }
+            if (ramusN > 0) { ramusCx /= ramusN; ramusCy /= ramusN; ramusCz /= ramusN; }
+
+            // Compute mandible body centroid (largest unvisited component)
+            double mandCx = 0, mandCy = 0, mandCz = 0;
+            foreach (int tri in components[largestIdx]) { mandCx += ctrs[tri][0]; mandCy += ctrs[tri][1]; mandCz += ctrs[tri][2]; }
+            mandCx /= components[largestIdx].Count; mandCy /= components[largestIdx].Count; mandCz /= components[largestIdx].Count;
+
             // Plane reference points (using condyle seed sign to determine correct sides)
             var lingP0 = new double[]{_lc[0].X,_lc[0].Y,_lc[0].Z};
             var lingP1 = new double[]{_lc[1].X,_lc[1].Y,_lc[1].Z};
@@ -509,13 +519,14 @@ public partial class BssoOsteotomyWindow : Window
             var sagP2 = new double[]{_sagBot[0].X,_sagBot[0].Y,_sagBot[0].Z};
             double sagittalSeedSign = PlaneSide(ctrs[seed], sagP0, sagP1, sagP2);
 
-            // Classify each orphan component using its centroid
+            // Classify each orphan component:
+            // Primary: 3-plane anatomical test
+            // Fallback: nearest centroid (ramus vs mandible body)
             for (int ci = 0; ci < components.Count; ci++)
             {
                 if (ci == largestIdx) continue; // Main mandible body — leave as distal
                 var comp = components[ci];
 
-                // Compute component centroid
                 double cx = 0, cy = 0, cz = 0;
                 foreach (int tri in comp) { cx += ctrs[tri][0]; cy += ctrs[tri][1]; cz += ctrs[tri][2]; }
                 cx /= comp.Count; cy /= comp.Count; cz /= comp.Count;
@@ -524,10 +535,16 @@ public partial class BssoOsteotomyWindow : Window
                 bool aboveLingual    = Math.Sign(PlaneSide(cc, lingP0, lingP1, lingP2)) == Math.Sign(lingualSeedSign);
                 bool behindBuccal    = Math.Sign(PlaneSide(cc, buccP0, buccP1, buccP2)) == Math.Sign(buccalSeedSign);
                 bool lateralSagittal = Math.Sign(PlaneSide(cc, sagP0, sagP1, sagP2)) == Math.Sign(sagittalSeedSign);
+                bool planesRamus     = (behindBuccal && lateralSagittal) || aboveLingual;
 
-                if ((behindBuccal && lateralSagittal) || aboveLingual)
+                // Nearest-centroid fallback: closer to ramus than to mandible body?
+                double dxR = cx-ramusCx, dyR = cy-ramusCy, dzR = cz-ramusCz;
+                double dxM = cx-mandCx,  dyM = cy-mandCy,  dzM = cz-mandCz;
+                bool nearerRamus = (dxR*dxR+dyR*dyR+dzR*dzR) < (dxM*dxM+dyM*dyM+dzM*dzM);
+
+                if (planesRamus || nearerRamus)
                     foreach (int tri in comp) visited[tri] = true; // → Ramus
-                // else stays distal (mandible)
+                // else stays distal
             }
 
 
