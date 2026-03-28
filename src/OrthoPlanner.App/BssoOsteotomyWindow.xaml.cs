@@ -88,8 +88,8 @@ public partial class BssoOsteotomyWindow : Window
     private void LeftOverlay_MouseEnter(object s, MouseEventArgs e)  { if(_step!=0)return; HiHalf(true);  OvH(true,true);  }
     private void RightOverlay_MouseEnter(object s, MouseEventArgs e) { if(_step!=0)return; HiHalf(false); OvH(false,true); }
     private void SideOverlay_MouseLeave(object s, MouseEventArgs e)  { if(_step!=0)return; _hoveredHalf.Geometry=null; OvH(true,false); OvH(false,false); }
-    private void LeftOverlay_Click(object s, MouseButtonEventArgs e)  { if(_step!=0)return; DoSelectSide(false); }
-    private void RightOverlay_Click(object s, MouseButtonEventArgs e) { if(_step!=0)return; DoSelectSide(true);  }
+    private void LeftOverlay_Click(object s, MouseButtonEventArgs e)  { if(_step!=0)return; DoSelectSide(true);  }
+    private void RightOverlay_Click(object s, MouseButtonEventArgs e) { if(_step!=0)return; DoSelectSide(false); }
 
     private void HiHalf(bool left) {
         float mx = _mandibleVerts.Count>0 ? _mandibleVerts.Average(v=>v[0]) : 0f;

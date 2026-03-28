@@ -1926,7 +1926,7 @@ public partial class MainViewModel : ObservableObject
             SaveStateForUndo();
 
             // Add new proximal (condyle) — accumulates for bilateral
-            string sideName = wizard.IsLeftSide ? "Left" : "Right";
+            string sideName = wizard.IsLeftSide ? "Right" : "Left";
             var proxVm = new SegmentViewModel
             {
                 Label    = (byte)(Segments.Count + 1),
