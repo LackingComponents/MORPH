@@ -330,8 +330,8 @@ public partial class CondyleSplitWindow : Window
                 var axis = new LineGeometryModel3D { Geometry = lineBuilder.ToLineGeometry3D(), Color = System.Windows.Media.Colors.Red, Thickness = 3 };
                 MainGroup.Children.Add(axis);
                 
-                AddSphereMarker(leftC, System.Windows.Media.Colors.LimeGreen, 2);
-                AddSphereMarker(rightC, System.Windows.Media.Colors.OrangeRed, 2);
+                AddSphereMarker(leftC,  System.Windows.Media.Colors.Cyan, 2);
+                AddSphereMarker(rightC, System.Windows.Media.Colors.Cyan, 2);
                 RebuildBoxVisuals();
 
                 CraniumResult = _craniumVerts;
@@ -578,7 +578,7 @@ public partial class CondyleSplitWindow : Window
             if (_planePoints.Count < 3)
             {
                 _planePoints.Add(hit.Value);
-                var colors = new[] { System.Windows.Media.Colors.Cyan, System.Windows.Media.Colors.Yellow, System.Windows.Media.Colors.Magenta };
+                var colors = new[] { System.Windows.Media.Colors.Cyan, System.Windows.Media.Colors.Cyan, System.Windows.Media.Colors.Cyan };
                 var builder = new HelixToolkit.Geometry.MeshBuilder();
                 builder.AddSphere(new System.Numerics.Vector3(0, 0, 0), 2f);
                 var marker = new MeshGeometryModel3D
@@ -798,9 +798,9 @@ public partial class CondyleSplitWindow : Window
         if (_leftBoxVisual != null) MainGroup.Children.Remove(_leftBoxVisual);
         if (_rightBoxVisual != null) MainGroup.Children.Remove(_rightBoxVisual);
         if (_leftCondyleCenter != null)
-        { _leftBoxVisual = CreateBoxVisual(_leftCondyleCenter, _leftHalfExtents, System.Windows.Media.Colors.LimeGreen); MainGroup.Children.Add(_leftBoxVisual); }
+        { _leftBoxVisual  = CreateBoxVisual(_leftCondyleCenter,  _leftHalfExtents,  System.Windows.Media.Colors.Cyan); MainGroup.Children.Add(_leftBoxVisual); }
         if (_rightCondyleCenter != null)
-        { _rightBoxVisual = CreateBoxVisual(_rightCondyleCenter, _rightHalfExtents, System.Windows.Media.Colors.OrangeRed); MainGroup.Children.Add(_rightBoxVisual); }
+        { _rightBoxVisual = CreateBoxVisual(_rightCondyleCenter, _rightHalfExtents, System.Windows.Media.Colors.Cyan); MainGroup.Children.Add(_rightBoxVisual); }
     }
 
     private GroupModel3D CreateBoxVisual(float[] c, float[] he, System.Windows.Media.Color color)
@@ -840,7 +840,7 @@ public partial class CondyleSplitWindow : Window
         { 
             Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(sbuild.ToMesh()),
             Material = new PhongMaterial { 
-                DiffuseColor = new HelixToolkit.Maths.Color4(1f, 1f, 0f, 1f),
+                DiffuseColor = new HelixToolkit.Maths.Color4(0f, 1f, 1f, 1f),
                 SpecularColor = new HelixToolkit.Maths.Color4(0.8f, 0.8f, 0.8f, 1f),
                 SpecularShininess = 32f
             },
