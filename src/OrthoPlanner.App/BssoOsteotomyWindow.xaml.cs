@@ -43,7 +43,9 @@ public partial class BssoOsteotomyWindow : Window
     private MeshGeometryModel3D[] _bHandles = new MeshGeometryModel3D[4];
     private MeshGeometryModel3D?  _sagMidH;
     private MeshGeometryModel3D[] _sagBotH  = new MeshGeometryModel3D[2];
-    private MeshGeometryModel3D?  _postH;
+    private MeshGeometryModel3D?  _postH;     // kept for Clear() cleanup compat, not created
+    private MeshGeometryModel3D?  _armBotH;  // new: inferior-medial corner of posterior arm
+    private Point3D               _armBot;   // stored position of that corner
 
     private MeshGeometryModel3D _boneMesh;
     private MeshGeometryModel3D _hoveredHalf;
@@ -58,7 +60,7 @@ public partial class BssoOsteotomyWindow : Window
     private Vector3D _dragPlaneNormal;
 
     private const float ExtLat = 20f;
-    private const float ExtInf = 60f;
+    private const float ExtInf = 10f;  // 10 mm inferior extension on sagittal
     private const float ArmExt = 25f;
 
     private static readonly HelixToolkit.Maths.Color4 CyanFill = new(0f, 1f, 1f, 0.35f);
@@ -156,6 +158,12 @@ public partial class BssoOsteotomyWindow : Window
                 _lc[_dragIdx] = np; _lHandles[_dragIdx].Transform = Tt(np);
                 if(_dragIdx==0) _sagTop[1]=np;
                 else if(_dragIdx==1) _sagTop[0]=np;
+                else if(_dragIdx==2) {
+                    // _lc[2] is hinged to _postArmTip — keep in sync, drag armBot X/Y with it
+                    _postArmTip = np;
+                    _armBot = new Point3D(np.X, np.Y, _armBot.Z);
+                    if(_armBotH!=null) _armBotH.Transform = Tt(_armBot);
+                }
                 break;
             case 1: // buccal
                 _bc[_dragIdx] = np; _bHandles[_dragIdx].Transform = Tt(np);
@@ -166,8 +174,8 @@ public partial class BssoOsteotomyWindow : Window
             case 3: // sagBot[i]
                 _sagBot[_dragIdx] = np; _sagBotH[_dragIdx].Transform = Tt(np);
                 break;
-            case 4: // posterior arm
-                _postArmTip = np; _postH!.Transform = Tt(np);
+            case 5: // armBot (inferior-medial corner of posterior arm)
+                _armBot = np; _armBotH!.Transform = Tt(np);
                 break;
         }
         RebuildPlanes();
@@ -184,7 +192,7 @@ public partial class BssoOsteotomyWindow : Window
         for(int i=0;i<4;i++) if(_bHandles[i]==vis||Dist(hit,_bc[i])<5) return SD(_bHandles[i],1,i,_bc[i],pn);
         if(_sagMidH!=null&&(_sagMidH==vis||Dist(hit,_sagTop[2])<5)) return SD(_sagMidH,2,0,_sagTop[2],pn);
         for(int i=0;i<2;i++) if(_sagBotH[i]!=null&&(_sagBotH[i]==vis||Dist(hit,_sagBot[i])<5)) return SD(_sagBotH[i],3,i,_sagBot[i],pn);
-        if(_postH!=null&&(_postH==vis||Dist(hit,_postArmTip)<5)) return SD(_postH,4,0,_postArmTip,pn);
+        if(_armBotH!=null&&(_armBotH==vis||Dist(hit,_armBot)<5)) return SD(_armBotH,5,0,_armBot,pn);
         return false;
     }
     private bool SD(MeshGeometryModel3D h, int g, int i, Point3D pos, Vector3D pn)
@@ -237,9 +245,14 @@ public partial class BssoOsteotomyWindow : Window
             _sagBotH[i] = Sph(_sagBot[i]); MainGroup.Children.Add(_sagBotH[i]);
         }
 
-        _postArmTip = new Point3D(_sagTop[0].X + _medDirX*ArmExt, _sagTop[0].Y, _sagTop[0].Z);
-        if(_postH!=null) MainGroup.Children.Remove(_postH);
-        _postH = Sph(_postArmTip); MainGroup.Children.Add(_postH);
+        // Hinge: _postArmTip coincides with _lc[2] (shared handle, no separate _postH)
+        _postArmTip = _lc[2];
+        _postH = null; // _lHandles[2] is the shared visual handle
+
+        // New: inferior-medial corner handle
+        _armBot = new Point3D(_postArmTip.X, _postArmTip.Y, _sagBot[0].Z);
+        if(_armBotH!=null) MainGroup.Children.Remove(_armBotH);
+        _armBotH = Sph(_armBot); MainGroup.Children.Add(_armBotH);
         RebuildPlanes();
     }
 
@@ -280,8 +293,7 @@ public partial class BssoOsteotomyWindow : Window
         });
         _sagittalVis.Children.Add(new LineGeometryModel3D{Geometry=lb.ToLineGeometry3D(),Color=Colors.Cyan,Thickness=2});
 
-        var armBot = new Point3D(_postArmTip.X, _postArmTip.Y, _sagBot[0].Z);
-        BuildGP(_postArmVis, new[]{ _sagTop[0], _postArmTip, armBot, _sagBot[0] });
+        BuildGP(_postArmVis, new[]{ _sagTop[0], _postArmTip, _armBot, _sagBot[0] });
     }
 
     private static void AddQuad(HelixToolkit.Geometry.MeshBuilder mb, Point3D a, Point3D b, Point3D c, Point3D d)
@@ -332,6 +344,7 @@ public partial class BssoOsteotomyWindow : Window
         for(int i=0;i<2;i++){if(_sagBotH[i]!=null){MainGroup.Children.Remove(_sagBotH[i]);_sagBotH[i]=null!;}}
         if(_sagMidH!=null){MainGroup.Children.Remove(_sagMidH);_sagMidH=null;}
         if(_postH!=null){MainGroup.Children.Remove(_postH);_postH=null;}
+        if(_armBotH!=null){MainGroup.Children.Remove(_armBotH);_armBotH=null;}
         _lc=new Point3D[4]; _bc=new Point3D[4]; _sagTop=new Point3D[3]; _sagBot=new Point3D[2];
         _lingualVis.Children.Clear(); _sagittalVis.Children.Clear(); _postArmVis.Children.Clear(); _buccalVis.Children.Clear();
         _step=1; NextBtn.Visibility=Visibility.Visible; NextBtn.IsEnabled=false;
@@ -362,7 +375,7 @@ public partial class BssoOsteotomyWindow : Window
 
             // Build polyplane with 2.0mm precise influence — extruding cuts into marrow
             var bSup = _bc[0]; var bInf = _bc[1];
-            var armBot = new Point3D(_postArmTip.X, _postArmTip.Y, _sagBot[0].Z);
+            // armBot is now a stored draggable field (initialized in InitSagittal)
             
             float medX = -cutSide * 20f; // medial extrusion
             float latX =  cutSide * 20f; // lateral extrusion
@@ -390,7 +403,7 @@ public partial class BssoOsteotomyWindow : Window
             // Anterior border of sagittal split
             quads.Add((Fv(_sagTop[2]),Fv(bSup),Fv(bInf),Fv(_sagTop[2])));
             // Posterior arm
-            quads.Add((Fv(_sagTop[0]),Fv(_postArmTip),Fv(armBot),Fv(_sagBot[0])));
+            quads.Add((Fv(_sagTop[0]),Fv(_postArmTip),Fv(_armBot),Fv(_sagBot[0])));
             
             var poly = new Polyplane(0.0); // No distance barrier needed anymore, using exact intersection
             poly.SetMeshFromQuads(quads);
