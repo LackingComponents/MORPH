@@ -446,14 +446,13 @@ public partial class BssoOsteotomyWindow : Window
                 }
             }
 
-            // ─── Floater reclassification: 3-step sequential plane test ───
-            // A floater qualifies as RAMUS if:
-            //   Step 1: its centroid is posterior (behind) the buccal cortex plane, AND
-            //   Step 2: its centroid is lateral to the sagittal cutting plane, OR
-            //   Step 3: its centroid is superior (above) the lingual cut plane.
-            //
+
+            // ─── Floater reclassification: connected-component approach ───
+            // Find all connected components of unvisited (distal) triangles.
+            // The LARGEST component = the main mandible body → leave it alone.
+            // All smaller orphan components get classified by their centroid against the 3 planes.
+
             // Helper: signed distance from a point to a plane defined by 3 reference points.
-            // Positive = same side as the normal (p0→p1 × p0→p2).
             static double PlaneSide(double[] pt, double[] p0, double[] p1, double[] p2)
             {
                 double ax = p1[0]-p0[0], ay = p1[1]-p0[1], az = p1[2]-p0[2];
@@ -462,41 +461,75 @@ public partial class BssoOsteotomyWindow : Window
                 return nx*(pt[0]-p0[0]) + ny*(pt[1]-p0[1]) + nz*(pt[2]-p0[2]);
             }
 
-            // Extract plane reference points from the cut geometry:
-            // Lingual: lingual control points define the separation height
+            // Build connected components of unvisited triangles
+            var compMark = new int[nTri]; // 0 = unprocessed
+            var components = new List<List<int>>();
+            for (int i = 0; i < nTri; i++)
+            {
+                if (visited[i] || compMark[i] != 0) continue;
+                var comp = new List<int>();
+                var compQ = new Queue<int>();
+                compQ.Enqueue(i); compMark[i] = components.Count + 1;
+                while (compQ.Count > 0)
+                {
+                    int ti = compQ.Dequeue();
+                    comp.Add(ti);
+                    for (int edge = 0; edge < 3; edge++)
+                    {
+                        var kA = VKey(operated[ti*3+edge]);
+                        var kB = VKey(operated[ti*3+(edge+1)%3]);
+                        var ek = string.Compare(kA,kB)<0 ? kA+"|"+kB : kB+"|"+kA;
+                        if (edgeMap.TryGetValue(ek, out var nbrs))
+                            foreach (int ni in nbrs)
+                                if (!visited[ni] && compMark[ni] == 0)
+                                    { compMark[ni] = components.Count + 1; compQ.Enqueue(ni); }
+                    }
+                }
+                components.Add(comp);
+            }
+
+            // Find largest component (main mandible body)
+            int largestIdx = 0;
+            for (int ci = 1; ci < components.Count; ci++)
+                if (components[ci].Count > components[largestIdx].Count) largestIdx = ci;
+
+            // Plane reference points (using condyle seed sign to determine correct sides)
             var lingP0 = new double[]{_lc[0].X,_lc[0].Y,_lc[0].Z};
             var lingP1 = new double[]{_lc[1].X,_lc[1].Y,_lc[1].Z};
             var lingP2 = new double[]{_lc[2].X,_lc[2].Y,_lc[2].Z};
-            // Sign on the cranial (ramus) side of the lingual plane: the condyle seed is above it
             double lingualSeedSign = PlaneSide(ctrs[seed], lingP0, lingP1, lingP2);
 
-            // Buccal: buccal control points define the lateral cortex plane
             var buccP0 = new double[]{_bc[0].X,_bc[0].Y,_bc[0].Z};
             var buccP1 = new double[]{_bc[1].X,_bc[1].Y,_bc[1].Z};
             var buccP2 = new double[]{_bc[2].X,_bc[2].Y,_bc[2].Z};
-            // Sign on the posterior side of buccal: the seed (condyle) is behind the buccal cut
             double buccalSeedSign = PlaneSide(ctrs[seed], buccP0, buccP1, buccP2);
 
-            // Sagittal: sagittal top points define the medial/lateral divider
             var sagP0 = new double[]{_sagTop[0].X,_sagTop[0].Y,_sagTop[0].Z};
             var sagP1 = new double[]{_sagTop[1].X,_sagTop[1].Y,_sagTop[1].Z};
             var sagP2 = new double[]{_sagBot[0].X,_sagBot[0].Y,_sagBot[0].Z};
-            // Sign on the lateral (ramus) side of sagittal: the seed (condyle) is lateral
             double sagittalSeedSign = PlaneSide(ctrs[seed], sagP0, sagP1, sagP2);
 
-            for (int i = 0; i < nTri; i++)
+            // Classify each orphan component using its centroid
+            for (int ci = 0; ci < components.Count; ci++)
             {
-                if (visited[i]) continue;
-                var c = ctrs[i];
+                if (ci == largestIdx) continue; // Main mandible body — leave as distal
+                var comp = components[ci];
 
-                bool aboveLingual  = Math.Sign(PlaneSide(c, lingP0, lingP1, lingP2)) == Math.Sign(lingualSeedSign);
-                bool behindBuccal  = Math.Sign(PlaneSide(c, buccP0, buccP1, buccP2)) == Math.Sign(buccalSeedSign);
-                bool lateralSagittal = Math.Sign(PlaneSide(c, sagP0, sagP1, sagP2)) == Math.Sign(sagittalSeedSign);
+                // Compute component centroid
+                double cx = 0, cy = 0, cz = 0;
+                foreach (int tri in comp) { cx += ctrs[tri][0]; cy += ctrs[tri][1]; cz += ctrs[tri][2]; }
+                cx /= comp.Count; cy /= comp.Count; cz /= comp.Count;
+                var cc = new double[] { cx, cy, cz };
 
-                // Ramus if: (behind buccal AND lateral to sagittal) OR above lingual
+                bool aboveLingual    = Math.Sign(PlaneSide(cc, lingP0, lingP1, lingP2)) == Math.Sign(lingualSeedSign);
+                bool behindBuccal    = Math.Sign(PlaneSide(cc, buccP0, buccP1, buccP2)) == Math.Sign(buccalSeedSign);
+                bool lateralSagittal = Math.Sign(PlaneSide(cc, sagP0, sagP1, sagP2)) == Math.Sign(sagittalSeedSign);
+
                 if ((behindBuccal && lateralSagittal) || aboveLingual)
-                    visited[i] = true;
+                    foreach (int tri in comp) visited[tri] = true; // → Ramus
+                // else stays distal (mandible)
             }
+
 
             var proximal = new List<float[]>(); var distal = new List<float[]>();
             for(int i = 0; i < nTri; i++) {
