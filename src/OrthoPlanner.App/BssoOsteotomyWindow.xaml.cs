@@ -59,8 +59,8 @@ public partial class BssoOsteotomyWindow : Window
     private Point3D  _dragPlanePos;
     private Vector3D _dragPlaneNormal;
 
-    private const float ExtLat = 20f;
-    private const float ExtInf = 10f;  // 10 mm inferior extension on sagittal
+    private const float ExtLat = 15f;
+    private const float ExtInf = 10f;  // kept as fallback; sagBot Z is now driven by bInf.Z
     private const float ArmExt = 25f;
 
     private static readonly HelixToolkit.Maths.Color4 CyanFill = new(0f, 1f, 1f, 0.35f);
@@ -108,6 +108,9 @@ public partial class BssoOsteotomyWindow : Window
     }
     private void DoSelectSide(bool left) {
         _isLeftSide = left;
+        // Hardcode medial/lateral X direction from side — immune to unusual anatomy
+        _latDirX = left ? -1f : 1f;   // lateral  (buccal) direction
+        _medDirX = -_latDirX;          // medial (lingual) direction
         float mx = _mandibleVerts.Count>0 ? _mandibleVerts.Average(v=>v[0]) : 0f;
         _halfDisplayVerts = HalfV(left, mx);
         MainGroup.Children.Remove(_boneMesh);
@@ -120,6 +123,11 @@ public partial class BssoOsteotomyWindow : Window
         StepInstructions.Text = "Click 2 points on the LINGUAL (medial) cortex of the ramus.";
         StatusText.Text = "Place 2 lingual points…";
         NextBtn.Visibility=Visibility.Visible; NextBtn.IsEnabled=false; ClearBtn.Visibility=Visibility.Visible;
+        // Auto-orient to lingual (medial) surface
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => {
+            CenterOn(_halfDisplayVerts);
+            LookFromSide(false);
+        });
     }
 
     // ── Mouse ───────────────────────────────────────────────────────────────
@@ -206,15 +214,10 @@ public partial class BssoOsteotomyWindow : Window
         var bSup  = _rawBuccal.OrderByDescending(p => p.Z).First();
         var bInf  = _rawBuccal.OrderBy(p => p.Z).First();
 
-        float lAvgX = (float)((lAnt.X + lPost.X) / 2.0);
-        float bAvgX = (float)((bSup.X + bInf.X) / 2.0);
-        _latDirX = Math.Sign(lAvgX - bAvgX);
-        if(_latDirX == 0) _latDirX = 1f;
-        _medDirX = -_latDirX;
-
+        // Direction already hardcoded in DoSelectSide; bInf.Z drives sagittal inferior extent
         _sagTop[0] = lPost; _sagTop[1] = lAnt;
-        _sagBot[0] = new Point3D(lPost.X, lPost.Y, lPost.Z - ExtInf);
-        _sagBot[1] = new Point3D(lAnt.X,  lAnt.Y,  lAnt.Z  - ExtInf);
+        _sagBot[0] = new Point3D(lPost.X, lPost.Y, bInf.Z);
+        _sagBot[1] = new Point3D(lAnt.X,  lAnt.Y,  bInf.Z);
 
         _lc[0] = lAnt;  _lc[1] = lPost;
         _lc[2] = new Point3D(lPost.X + _medDirX*ExtLat, lPost.Y, lPost.Z);
@@ -326,6 +329,7 @@ public partial class BssoOsteotomyWindow : Window
             _step=2; StepTitle.Text=$"BSSO ({sd}): Step 2 – Buccal Points";
             StepInstructions.Text="Click 2 points on the BUCCAL (lateral) cortex (one superior, one inferior).";
             StatusText.Text="Place 2 buccal points…"; NextBtn.IsEnabled=false;
+            LookFromSide(true); // rotate to buccal (lateral) view
         } else if(_step==2) {
             _step=3; StepTitle.Text=$"BSSO ({sd}): Step 3 – Adjust";
             StepInstructions.Text="Drag handles to adjust. Click Perform Cut when ready.";
@@ -629,5 +633,22 @@ public partial class BssoOsteotomyWindow : Window
     private Point3D? RayPl(Point3D o,Vector3D d,Point3D pp,Vector3D pn){
         double nd=Vector3D.DotProduct(d,pn); if(Math.Abs(nd)<0.0001) return null;
         double t=Vector3D.DotProduct(pp-o,pn)/nd; return t<0?null:o+d*t;
+    }
+    private void LookFromSide(bool buccal) {
+        if (MainViewport.Camera is not HelixToolkit.Wpf.SharpDX.PerspectiveCamera cam) return;
+        var v = _halfDisplayVerts.Count > 0 ? _halfDisplayVerts : _mandibleVerts;
+        if (v == null || v.Count == 0) return;
+        double mnX=v[0][0], mxX=v[0][0], mnY=v[0][1], mxY=v[0][1], mnZ=v[0][2], mxZ=v[0][2];
+        foreach(var u in v){if(u[0]<mnX)mnX=u[0];if(u[0]>mxX)mxX=u[0];if(u[1]<mnY)mnY=u[1];if(u[1]>mxY)mxY=u[1];if(u[2]<mnZ)mnZ=u[2];if(u[2]>mxZ)mxZ=u[2];}
+        var center = new Point3D((mnX+mxX)/2,(mnY+mxY)/2,(mnZ+mxZ)/2);
+        double span = Math.Sqrt(Math.Pow(mxX-mnX,2)+Math.Pow(mxY-mnY,2)+Math.Pow(mxZ-mnZ,2));
+        double dist = span * 0.95;
+        // Camera position: medial side for lingual, lateral side for buccal
+        float viewDirX = buccal ? _latDirX : _medDirX;
+        cam.Position = new Point3D(center.X + viewDirX * dist, center.Y, center.Z);
+        cam.LookDirection = new Vector3D(-viewDirX * dist, 0, 0);
+        cam.UpDirection = new Vector3D(0, 0, 1);
+        MainViewport.FixedRotationPointEnabled = true;
+        MainViewport.FixedRotationPoint = center;
     }
 }
