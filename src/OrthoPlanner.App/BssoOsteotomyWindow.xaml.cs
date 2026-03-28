@@ -59,7 +59,7 @@ public partial class BssoOsteotomyWindow : Window
     private Point3D  _dragPlanePos;
     private Vector3D _dragPlaneNormal;
 
-    private const float ExtLat = 15f;
+    private const float ExtLat = 10f;
     private const float ExtInf = 10f;  // kept as fallback; sagBot Z is now driven by bInf.Z
     private const float ArmExt = 25f;
 
@@ -237,8 +237,19 @@ public partial class BssoOsteotomyWindow : Window
         foreach(var d in _rawDots) MainGroup.Children.Remove(d);
         _rawDots.Clear();
 
-        var bSup = _bc[0];
+        var bSup = _bc[0]; var bInf = _bc[1];
         _sagTop[2] = Lerp(_sagTop[1], bSup, 0.5);
+
+        // Project sagTop[2] down along the buccal inclination vector to reach bInf.Z
+        // so that the sagTop[2]→sagBot[1] edge is parallel to the buccal cut plane.
+        double bZspan = bInf.Z - bSup.Z;
+        if (Math.Abs(bZspan) > 0.001) {
+            double scale = (bInf.Z - _sagTop[2].Z) / bZspan;
+            _sagBot[1] = new Point3D(
+                _sagTop[2].X + scale * (bInf.X - bSup.X),
+                _sagTop[2].Y + scale * (bInf.Y - bSup.Y),
+                bInf.Z);
+        }
 
         if(_sagMidH!=null) MainGroup.Children.Remove(_sagMidH);
         _sagMidH = Sph(_sagTop[2]); MainGroup.Children.Add(_sagMidH);
