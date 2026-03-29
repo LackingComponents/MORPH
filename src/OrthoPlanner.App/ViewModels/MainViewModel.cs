@@ -192,9 +192,11 @@ public partial class MainViewModel : ObservableObject
         var leftRamus = Segments.FirstOrDefault(s => s.Name.Contains("Ramus Left"));
         var chin = Segments.FirstOrDefault(s => s.Name.Contains("Chin"));
 
-        var center = ModelCenter;
+        var center = ModelCenter; // Fallback
 
-        // 1. Complex (Maxilla + Mandible)
+        // 1. Complex (Maxilla + Mandible) uses DentalMidlinePoint
+        var complexCenter = DentalMidlinePoint ?? (center.X, center.Y, center.Z);
+        var ptComplex = new System.Windows.Media.Media3D.Point3D(complexCenter.X, complexCenter.Y, complexCenter.Z);
         double cAnt = IsMaxillaBasedSurgery ? SurgMaxillaAnt : SurgMandibleAnt;
         double cLat = IsMaxillaBasedSurgery ? SurgMaxillaLat : SurgMandibleLat;
         double cVert = IsMaxillaBasedSurgery ? SurgMaxillaVert : SurgMandibleVert;
@@ -202,21 +204,34 @@ public partial class MainViewModel : ObservableObject
         double cPitch = IsMaxillaBasedSurgery ? SurgMaxillaPitch : SurgMandiblePitch;
         double cYaw = IsMaxillaBasedSurgery ? SurgMaxillaYaw : SurgMandibleYaw;
 
-        var complexTx = BuildSurgeryTransform(cAnt, cLat, cVert, cRoll, cPitch, cYaw, center);
+        var complexTx = BuildSurgeryTransform(cAnt, cLat, cVert, cRoll, cPitch, cYaw, ptComplex);
+        
+        // Ensure Cranium NEVER moves
         if (maxilla != null) maxilla.Transform = complexTx;
         if (mandible != null) mandible.Transform = complexTx;
 
-        // 2. Right Ramus
-        if (rightRamus != null) rightRamus.Transform = BuildSurgeryTransform(SurgRightRamusAnt, SurgRightRamusLat, SurgRightRamusVert, SurgRightRamusRoll, SurgRightRamusPitch, SurgRightRamusYaw, center);
+        // 2. Right Ramus uses RightCondyleCenter
+        var rcCenter = RightCondyleCenter ?? (center.X, center.Y, center.Z);
+        if (rightRamus != null) 
+            rightRamus.Transform = BuildSurgeryTransform(SurgRightRamusAnt, SurgRightRamusLat, SurgRightRamusVert, SurgRightRamusRoll, SurgRightRamusPitch, SurgRightRamusYaw, new System.Windows.Media.Media3D.Point3D(rcCenter.X, rcCenter.Y, rcCenter.Z));
 
-        // 3. Left Ramus
-        if (leftRamus != null) leftRamus.Transform = BuildSurgeryTransform(SurgLeftRamusAnt, SurgLeftRamusLat, SurgLeftRamusVert, SurgLeftRamusRoll, SurgLeftRamusPitch, SurgLeftRamusYaw, center);
+        // 3. Left Ramus uses LeftCondyleCenter
+        var lcCenter = LeftCondyleCenter ?? (center.X, center.Y, center.Z);
+        if (leftRamus != null) 
+            leftRamus.Transform = BuildSurgeryTransform(SurgLeftRamusAnt, SurgLeftRamusLat, SurgLeftRamusVert, SurgLeftRamusRoll, SurgLeftRamusPitch, SurgLeftRamusYaw, new System.Windows.Media.Media3D.Point3D(lcCenter.X, lcCenter.Y, lcCenter.Z));
 
-        // 4. Chin
-        // Chin sits on the Mandible, so its transform is (ComplexTx + local ChinTx)
+        // 4. Chin uses its local centroid
         if (chin != null)
         {
-            var chinLocal = BuildSurgeryTransform(SurgChinAnt, SurgChinLat, SurgChinVert, SurgChinRoll, SurgChinPitch, SurgChinYaw, center);
+            var chinPivot = new System.Windows.Media.Media3D.Point3D(center.X, center.Y, center.Z);
+            if (chin.Vertices != null && chin.Vertices.Count > 0)
+            {
+                double cx = 0, cy = 0, cz = 0;
+                foreach (var v in chin.Vertices) { cx += v[0]; cy += v[1]; cz += v[2]; }
+                chinPivot = new System.Windows.Media.Media3D.Point3D(cx / chin.Vertices.Count, cy / chin.Vertices.Count, cz / chin.Vertices.Count);
+            }
+            
+            var chinLocal = BuildSurgeryTransform(SurgChinAnt, SurgChinLat, SurgChinVert, SurgChinRoll, SurgChinPitch, SurgChinYaw, chinPivot);
             var chinGroup = new System.Windows.Media.Media3D.Transform3DGroup();
             chinGroup.Children.Add(chinLocal);
             // It MUST follow the mandible too!
@@ -393,6 +408,7 @@ public partial class MainViewModel : ObservableObject
     // ─── Condylar Axis (set by Split Cranium/Mandible wizard) ───
     public (double X, double Y, double Z)? LeftCondyleCenter { get; set; }
     public (double X, double Y, double Z)? RightCondyleCenter { get; set; }
+    public (double X, double Y, double Z)? DentalMidlinePoint { get; set; }
 
     // ─── HU Histograms (Independent) ───
     [ObservableProperty] private WriteableBitmap? _boneHistogramImage;
@@ -725,6 +741,7 @@ public partial class MainViewModel : ObservableObject
     // ─── MPR toggles ───
     [ObservableProperty] private bool _showCrosshairs = true;
     [ObservableProperty] private int _enlargedView; // 0=none, 1=axial, 2=coronal, 3=sagittal
+    [ObservableProperty] private int _rightPanelTabIndex = 0; // 0=CT, 1=Measurements, 2=Surgery
     public ObservableCollection<SegmentViewModel> Segments { get; } = new();
 
     // ─── Imported Meshes ───
@@ -2002,9 +2019,10 @@ public partial class MainViewModel : ObservableObject
             {
                 SaveStateForUndo();
 
-                // Store condylar axis data
+                // Store condylar axis data & midline
                 LeftCondyleCenter = wizard.LeftCondyleCenter;
                 RightCondyleCenter = wizard.RightCondyleCenter;
+                DentalMidlinePoint = wizard.DentalMidlinePoint;
 
                 // Create Cranium segment
                 if (wizard.CraniumResult != null && wizard.CraniumResult.Count > 0)
@@ -2044,7 +2062,7 @@ public partial class MainViewModel : ObservableObject
                 }
 
                 RefreshCombinedModel();
-                StatusText = $"Split complete. Condylar axis saved. L=({LeftCondyleCenter?.X:F1},{LeftCondyleCenter?.Y:F1},{LeftCondyleCenter?.Z:F1}) R=({RightCondyleCenter?.X:F1},{RightCondyleCenter?.Y:F1},{RightCondyleCenter?.Z:F1})";
+                StatusText = $"Split complete. Points saved: L=({LeftCondyleCenter?.X:F1},{LeftCondyleCenter?.Y:F1}), R=({RightCondyleCenter?.X:F1},{RightCondyleCenter?.Y:F1}), Mid=({DentalMidlinePoint?.X:F1},{DentalMidlinePoint?.Y:F1})";
             }
             else
             {
@@ -2514,6 +2532,37 @@ public partial class SegmentViewModel : ObservableObject
     [ObservableProperty] private bool _isVisible = true;
     [ObservableProperty] private bool _isSelectedForExport = true;
     [ObservableProperty] private byte _colorR = 200, _colorG = 180, _colorB = 140;
+
+    private double _opacity = 1.0;
+    public double Opacity
+    {
+        get => _opacity;
+        set
+        {
+            if (SetProperty(ref _opacity, value))
+            {
+                OnPropertyChanged(nameof(OpacityPercent));
+                OnPropertyChanged(nameof(IsTransparent));
+                if (Material is HelixToolkit.Wpf.SharpDX.PhongMaterial phong)
+                {
+                    phong.DiffuseColor = new HelixToolkit.Maths.Color4(ColorR / 255f, ColorG / 255f, ColorB / 255f, (float)_opacity);
+                }
+            }
+        }
+    }
+
+    public double OpacityPercent
+    {
+        get => _opacity * 100.0;
+        set
+        {
+            double clamped = Math.Max(0, Math.Min(100, value));
+            Opacity = clamped / 100.0;
+        }
+    }
+
+    public bool IsTransparent => _opacity < 1.0;
+
     public List<float[]>? Vertices { get; set; }
     public HelixToolkit.SharpDX.Geometry3D? Geometry { get; set; }
     public HelixToolkit.Wpf.SharpDX.Material? Material { get; set; }
@@ -2527,10 +2576,11 @@ public partial class SegmentViewModel : ObservableObject
     public void BuildModel()
     {
         if (Vertices == null || Vertices.Count < 3) return;
-        MeshHelper.BuildModel3D(Vertices, ColorR, ColorG, ColorB, out var geom, out var mat);
+        MeshHelper.BuildModel3D(Vertices, ColorR, ColorG, ColorB, out var geom, out var mat, (byte)(Opacity * 255.0));
         Geometry = (HelixToolkit.SharpDX.Geometry3D)geom;
         Material = mat;
         OnPropertyChanged(nameof(Geometry));
+        OnPropertyChanged(nameof(Material));
     }
 }
 
