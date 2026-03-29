@@ -447,8 +447,8 @@
                                 </StackPanel>
                             </Expander>
 
-                        <!-- 2. DENTAL SCAN ALIGNMENT -->
-                        <Expander Header="🦷  Dental Scan Alignment" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                        <!-- 2. PREPARE SURGICAL MODELS -->
+                        <Expander Header="🦷  Prepare Surgical Models" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
                                   Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
                             <StackPanel Margin="4,6,4,4">
                                 <TextBlock Text="Import dental cast STL files and align them to the CT volume."
@@ -687,6 +687,9 @@
                                     CoordinateSystemLabelX=""
                                     CoordinateSystemLabelY=""
                                     CoordinateSystemLabelZ="">
+                        <hx:Viewport3DX.InputBindings>
+                            <MouseBinding Gesture="MiddleClick" Command="hx:ViewportCommands.Pan" />
+                        </hx:Viewport3DX.InputBindings>
                         <hx:Viewport3DX.Camera>
                             <hx:PerspectiveCamera x:Name="MainCamera"
                                                   Position="0,-300,0" LookDirection="0,1,0"

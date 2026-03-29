@@ -735,6 +735,9 @@ public partial class MainWindow : Window
     {
         if (Viewport3D.Camera == null) return;
 
+        // Remember current UpDirection
+        var currentUp = Viewport3D.Camera.UpDirection;
+
         // Determine camera look direction
         var dir = lookDirection ?? Viewport3D.Camera.LookDirection;
         if (dir.Length < 0.001) dir = new System.Windows.Media.Media3D.Vector3D(0, 1, 0);
@@ -770,7 +773,10 @@ public partial class MainWindow : Window
         // IMPORTANT: LookDirection length = distance to pivot. SharpDX rotates around
         // Position + LookDirection, so this must be dir * distance, NOT a unit vector.
         Viewport3D.Camera.LookDirection = dir * distance;
-        Viewport3D.Camera.UpDirection   = new System.Windows.Media.Media3D.Vector3D(0, 0, 1);
+        
+        // Only force UpDirection true-to-world if we are doing an explicit new view snap.
+        // Otherwise, maintain our current camera roll orientation.
+        Viewport3D.Camera.UpDirection = lookDirection.HasValue ? new System.Windows.Media.Media3D.Vector3D(0, 0, 1) : currentUp;
     }
 
     private void CenterCamera_Click(object sender, RoutedEventArgs e)

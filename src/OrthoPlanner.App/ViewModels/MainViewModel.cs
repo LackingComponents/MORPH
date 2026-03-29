@@ -2038,6 +2038,11 @@ public partial class MainViewModel : ObservableObject
                     Segments.Add(mandVm);
                 }
 
+                if (boneSegment != null)
+                {
+                    boneSegment.IsVisible = false;
+                }
+
                 RefreshCombinedModel();
                 StatusText = $"Split complete. Condylar axis saved. L=({LeftCondyleCenter?.X:F1},{LeftCondyleCenter?.Y:F1},{LeftCondyleCenter?.Z:F1}) R=({RightCondyleCenter?.X:F1},{RightCondyleCenter?.Y:F1},{RightCondyleCenter?.Z:F1})";
             }
@@ -2231,17 +2236,26 @@ public partial class MainViewModel : ObservableObject
 
     private void RefreshCombinedModel()
     {
-        BoneOnlyBounds = Rect3D.Empty;
+        Rect3D newBounds = Rect3D.Empty;
 
         // Force the camera frame to ALWAYS lock onto the overall global DICOM volume
         // rather than jumping or dynamically shrinking toward individual bone segments.
         if (Volume != null)
         {
-            BoneOnlyBounds = new Rect3D(0, 0, 0,
+            newBounds = new Rect3D(0, 0, 0,
                 Volume.Width * Volume.Spacing[0],
                 Volume.Height * Volume.Spacing[1],
                 Volume.Depth * Volume.Spacing[2]);
         }
+
+        if (newBounds == BoneOnlyBounds) 
+        {
+            // Bounds haven't changed, prevent unnecessary camera snap, just push transforms
+            UpdateNhpTransform();
+            return;
+        }
+
+        BoneOnlyBounds = newBounds;
 
         // Keep ModelCenter in sync with the bone bounds so camera can orbit around it
         if (!BoneOnlyBounds.IsEmpty)

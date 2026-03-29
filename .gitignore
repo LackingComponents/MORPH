@@ -58,3 +58,7 @@ dcm_temp/
 /probe*.cs
 /volume_types.txt
 /wpf_types.txt
+
+# Temporary test/scratch projects
+/src/TestHelix/
+/src/TestLocal/
