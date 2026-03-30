@@ -41,10 +41,12 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _isSurgicalMovementsOpen;
     [ObservableProperty] private bool _isMaxillaBasedSurgery = true;
     [ObservableProperty] private bool _isMandibleBasedSurgery;
+    [ObservableProperty] private bool _isManualOcclusionSurgery;
+    [ObservableProperty] private bool _isKeepOcclusionSurgery;
 
-
-    public bool IsMaxillaMoveable => IsMaxillaBasedSurgery;
-    public bool IsMandibleMoveable => IsMandibleBasedSurgery;
+    public bool IsBaseSwitchEnabled => !IsManualOcclusionSurgery;
+    public bool IsMaxillaMoveable => IsMaxillaBasedSurgery || IsManualOcclusionSurgery;
+    public bool IsMandibleMoveable => IsMandibleBasedSurgery || IsManualOcclusionSurgery;
 
     public ObservableCollection<MeshViewModel> LoadedOcclusions { get; } = new();
 
@@ -90,29 +92,35 @@ public partial class MainViewModel : ObservableObject
 
     partial void OnIsMaxillaBasedSurgeryChanged(bool value)
     {
-        OnPropertyChanged(nameof(IsMaxillaMoveable));
-        OnPropertyChanged(nameof(IsMandibleMoveable));
-        if (value) SyncSurgeryInputs(false);
+        if (value) { IsMandibleBasedSurgery = false; }
+        UpdateMoveableStates();
     }
     partial void OnIsMandibleBasedSurgeryChanged(bool value)
     {
-        OnPropertyChanged(nameof(IsMaxillaMoveable));
-        OnPropertyChanged(nameof(IsMandibleMoveable));
-        if (value) SyncSurgeryInputs(true);
+        if (value) { IsMaxillaBasedSurgery = false; }
+        UpdateMoveableStates();
+    }
+    partial void OnIsManualOcclusionSurgeryChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsBaseSwitchEnabled));
+        if (value) 
+        { 
+            IsMaxillaBasedSurgery = false; 
+            IsMandibleBasedSurgery = false; 
+            IsKeepOcclusionSurgery = false; 
+        }
+        UpdateMoveableStates();
+    }
+    partial void OnIsKeepOcclusionSurgeryChanged(bool value)
+    {
+        UpdateMoveableStates();
     }
 
-    private void SyncSurgeryInputs(bool toMandible)
+    private void UpdateMoveableStates()
     {
-        if (toMandible)
-        {
-            SurgMandibleAnt = SurgMaxillaAnt; SurgMandibleLat = SurgMaxillaLat; SurgMandibleVert = SurgMaxillaVert;
-            SurgMandibleRoll = SurgMaxillaRoll; SurgMandiblePitch = SurgMaxillaPitch; SurgMandibleYaw = SurgMaxillaYaw;
-        }
-        else
-        {
-            SurgMaxillaAnt = SurgMandibleAnt; SurgMaxillaLat = SurgMandibleLat; SurgMaxillaVert = SurgMandibleVert;
-            SurgMaxillaRoll = SurgMandibleRoll; SurgMaxillaPitch = SurgMandiblePitch; SurgMaxillaYaw = SurgMandibleYaw;
-        }
+        OnPropertyChanged(nameof(IsMaxillaMoveable));
+        OnPropertyChanged(nameof(IsMandibleMoveable));
+        UpdateSurgeryTransform();
     }
 
     [RelayCommand]
@@ -180,35 +188,47 @@ public partial class MainViewModel : ObservableObject
         group.Children.Add(new System.Windows.Media.Media3D.RotateTransform3D(new System.Windows.Media.Media3D.AxisAngleRotation3D(new System.Windows.Media.Media3D.Vector3D(1, 0, 0), pitch)));
         group.Children.Add(new System.Windows.Media.Media3D.RotateTransform3D(new System.Windows.Media.Media3D.AxisAngleRotation3D(new System.Windows.Media.Media3D.Vector3D(0, 1, 0), roll)));
         group.Children.Add(new System.Windows.Media.Media3D.RotateTransform3D(new System.Windows.Media.Media3D.AxisAngleRotation3D(new System.Windows.Media.Media3D.Vector3D(0, 0, 1), yaw)));
-        group.Children.Add(new System.Windows.Media.Media3D.TranslateTransform3D(center.X + lat, center.Y + ant, center.Z + vert));
+        // Invert ant so positive values push forward (-ant)
+        group.Children.Add(new System.Windows.Media.Media3D.TranslateTransform3D(center.X + lat, center.Y - ant, center.Z + vert));
         return group;
     }
 
     private void UpdateSurgeryTransform()
     {
-        var maxilla = Segments.FirstOrDefault(s => s.Name.Contains("Maxilla"));
-        var mandible = Segments.FirstOrDefault(s => s.Name.Contains("Mandible") && !s.Name.StartsWith("Ramus"));
-        var rightRamus = Segments.FirstOrDefault(s => s.Name.Contains("Ramus Right"));
-        var leftRamus = Segments.FirstOrDefault(s => s.Name.Contains("Ramus Left"));
-        var chin = Segments.FirstOrDefault(s => s.Name.Contains("Chin"));
+        // Only move the explicitly separated segments — cranium pieces are fixed reference frame
+        var maxilla  = Segments.LastOrDefault(s => s.Name != null && s.Name.Contains("Maxilla") && s.IsVisible);
+        var mandible = Segments.LastOrDefault(s => s.Name != null && s.Name.Contains("Mandible") && !s.Name.Contains("Cranium") && !s.Name.StartsWith("Ramus") && s.IsVisible);
+        var rightRamus = Segments.LastOrDefault(s => s.Name != null && s.Name.Contains("Ramus Right") && s.IsVisible);
+        var leftRamus  = Segments.LastOrDefault(s => s.Name != null && s.Name.Contains("Ramus Left") && s.IsVisible);
+        var chin       = Segments.LastOrDefault(s => s.Name != null && s.Name.Contains("Chin") && s.IsVisible);
 
         var center = ModelCenter; // Fallback
 
-        // 1. Complex (Maxilla + Mandible) uses DentalMidlinePoint
         var complexCenter = DentalMidlinePoint ?? (center.X, center.Y, center.Z);
         var ptComplex = new System.Windows.Media.Media3D.Point3D(complexCenter.X, complexCenter.Y, complexCenter.Z);
-        double cAnt = IsMaxillaBasedSurgery ? SurgMaxillaAnt : SurgMandibleAnt;
-        double cLat = IsMaxillaBasedSurgery ? SurgMaxillaLat : SurgMandibleLat;
-        double cVert = IsMaxillaBasedSurgery ? SurgMaxillaVert : SurgMandibleVert;
-        double cRoll = IsMaxillaBasedSurgery ? SurgMaxillaRoll : SurgMandibleRoll;
-        double cPitch = IsMaxillaBasedSurgery ? SurgMaxillaPitch : SurgMandiblePitch;
-        double cYaw = IsMaxillaBasedSurgery ? SurgMaxillaYaw : SurgMandibleYaw;
-
-        var complexTx = BuildSurgeryTransform(cAnt, cLat, cVert, cRoll, cPitch, cYaw, ptComplex);
         
-        // Ensure Cranium NEVER moves
-        if (maxilla != null) maxilla.Transform = complexTx;
-        if (mandible != null) mandible.Transform = complexTx;
+        var maxillaTx = BuildSurgeryTransform(SurgMaxillaAnt, SurgMaxillaLat, SurgMaxillaVert, SurgMaxillaRoll, SurgMaxillaPitch, SurgMaxillaYaw, ptComplex);
+        var mandibleTx = BuildSurgeryTransform(SurgMandibleAnt, SurgMandibleLat, SurgMandibleVert, SurgMandibleRoll, SurgMandiblePitch, SurgMandibleYaw, ptComplex);
+        var identityTx = new System.Windows.Media.Media3D.Transform3DGroup(); // Empty for disabled parts
+
+        if (IsManualOcclusionSurgery)
+        {
+            if (maxilla != null) maxilla.Transform = maxillaTx;
+            if (mandible != null) mandible.Transform = mandibleTx;
+        }
+        else
+        {
+            if (IsMaxillaBasedSurgery)
+            {
+                if (maxilla != null) maxilla.Transform = maxillaTx;
+                if (mandible != null) mandible.Transform = IsKeepOcclusionSurgery ? maxillaTx : identityTx;
+            }
+            else if (IsMandibleBasedSurgery)
+            {
+                if (maxilla != null) maxilla.Transform = IsKeepOcclusionSurgery ? mandibleTx : identityTx;
+                if (mandible != null) mandible.Transform = mandibleTx;
+            }
+        }
 
         // 2. Right Ramus uses RightCondyleCenter
         var rcCenter = RightCondyleCenter ?? (center.X, center.Y, center.Z);
@@ -235,7 +255,11 @@ public partial class MainViewModel : ObservableObject
             var chinGroup = new System.Windows.Media.Media3D.Transform3DGroup();
             chinGroup.Children.Add(chinLocal);
             // It MUST follow the mandible too!
-            chinGroup.Children.Add(complexTx);
+            System.Windows.Media.Media3D.Transform3D currentMandibleTx = identityTx;
+            if (IsManualOcclusionSurgery || IsMandibleBasedSurgery) currentMandibleTx = mandibleTx;
+            else if (IsMaxillaBasedSurgery && IsKeepOcclusionSurgery) currentMandibleTx = maxillaTx;
+            
+            chinGroup.Children.Add(currentMandibleTx);
             chin.Transform = chinGroup;
         }
     }
@@ -1888,7 +1912,7 @@ public partial class MainViewModel : ObservableObject
             var upperVm = new SegmentViewModel
             {
                 Label = (byte)(Segments.Count + 1),
-                Name = "Cranium (Upper Maxilla)",
+                Name = "Cranium (LeFort Upper)",
                 Vertices = wizard.UpperMaxillaResult,
                 ColorR = 220, ColorG = 200, ColorB = 170,
                 IsVisible = true

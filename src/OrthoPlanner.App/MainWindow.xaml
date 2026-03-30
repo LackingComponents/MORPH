@@ -966,10 +966,28 @@
 
                                     <Button Content="Load &amp; Align Occlusion STLs" Command="{Binding OpenOcclusionAlignmentCommand}" Margin="0,0,0,8" />
 
+                                    <!-- Mode Selector -->
+                                    <Border Background="#FF1E222A" BorderBrush="#FF30343D" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,8">
+                                        <StackPanel>
+                                            <TextBlock Text="SURGERY MODE" Foreground="White" FontSize="11" FontWeight="Bold" Margin="0,0,0,6" />
+                                            <Grid Margin="0,0,0,8" IsEnabled="{Binding IsBaseSwitchEnabled}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <RadioButton Grid.Column="0" Content="Maxilla-based" IsChecked="{Binding IsMaxillaBasedSurgery}" GroupName="BaseMode" Style="{StaticResource DarkToggleButtonStyle}" Height="22" FontSize="10" Margin="0,0,2,0" HorizontalContentAlignment="Center"/>
+                                                <RadioButton Grid.Column="1" Content="Mandible-based" IsChecked="{Binding IsMandibleBasedSurgery}" GroupName="BaseMode" Style="{StaticResource DarkToggleButtonStyle}" Height="22" FontSize="10" Margin="2,0,0,0" HorizontalContentAlignment="Center"/>
+                                            </Grid>
+                                            <StackPanel Orientation="Horizontal">
+                                                <CheckBox Content="Manual occlusion" IsChecked="{Binding IsManualOcclusionSurgery}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" Margin="0,0,12,0"/>
+                                                <CheckBox Content="Keep occlusion" IsChecked="{Binding IsKeepOcclusionSurgery}" IsEnabled="{Binding IsBaseSwitchEnabled}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" Margin="0,0,0,0"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+
                                     <!-- Maxilla Box -->
                                     <Border Background="#FF1E222A" BorderBrush="#FF30343D" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,8">
                                         <StackPanel>
-                                            <CheckBox Content="Maxilla-based" IsChecked="{Binding IsMaxillaBasedSurgery}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" Margin="0,0,0,6"/>
                                             <TextBlock Text="MAXILLA" Foreground="White" FontSize="11" FontWeight="Bold" Margin="0,0,0,8" />
                                             <Grid Margin="0,0,0,4">
                                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>

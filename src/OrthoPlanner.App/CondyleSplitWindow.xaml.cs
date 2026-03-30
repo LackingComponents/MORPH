@@ -73,6 +73,7 @@ public partial class CondyleSplitWindow : Window
     public List<float[]>? MandibleResult { get; private set; }
     public (double X, double Y, double Z)? LeftCondyleCenter { get; private set; }
     public (double X, double Y, double Z)? RightCondyleCenter { get; private set; }
+    public (double X, double Y, double Z)? DentalMidlinePoint { get; private set; }
 
     private void CenterViewportOnBone(System.Windows.Media.Media3D.Vector3D? lookDir = null)
     {
@@ -412,6 +413,10 @@ public partial class CondyleSplitWindow : Window
                 MandibleResult = _mandibleVerts;
                 LeftCondyleCenter = (leftC[0], leftC[1], leftC[2]);
                 RightCondyleCenter = (rightC[0], rightC[1], rightC[2]);
+                if (_splitPoints[2].HasValue)
+                {
+                    DentalMidlinePoint = (_splitPoints[2]!.Value.X, _splitPoints[2]!.Value.Y, _splitPoints[2]!.Value.Z);
+                }
 
                 _currentStep = 3;
                 StepTitle.Text = "Step 3: Review & Accept";
