@@ -2630,6 +2630,21 @@ public partial class MainViewModel : ObservableObject
             if (HardTissueModel != null) HardTissueModel.Transform = System.Windows.Media.Media3D.Transform3D.Identity;
             if (SoftTissueModel != null) SoftTissueModel.Transform = System.Windows.Media.Media3D.Transform3D.Identity;
             if (DentalModel != null)     DentalModel.Transform     = System.Windows.Media.Media3D.Transform3D.Identity;
+
+            // CRITICAL: sync BoneOnlyBounds to the new resliced volume NOW.
+            // Without this, the first visibility toggle after commit would find
+            // newBounds != BoneOnlyBounds (old dims) and snap ModelCenter to the
+            // new padded-volume center, causing a visible caudal translation.
+            BoneOnlyBounds = new Rect3D(0, 0, 0,
+                Volume.Width  * Volume.Spacing[0],
+                Volume.Height * Volume.Spacing[1],
+                Volume.Depth  * Volume.Spacing[2]);
+            ModelCenter = new Point3D(
+                BoneOnlyBounds.X + BoneOnlyBounds.SizeX / 2,
+                BoneOnlyBounds.Y + BoneOnlyBounds.SizeY / 2,
+                BoneOnlyBounds.Z + BoneOnlyBounds.SizeZ / 2);
+            OnPropertyChanged(nameof(BoneOnlyBounds));
+            OnPropertyChanged(nameof(ModelCenter));
             
             // Refresh 2D Slices
             AxialMax = Volume.Depth - 1;
