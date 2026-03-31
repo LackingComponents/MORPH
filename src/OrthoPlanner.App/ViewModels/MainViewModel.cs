@@ -713,14 +713,21 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task CommitNhpAsync()
     {
-        // We track committed transformations so the visual delta works,
-        // but the physical reslice will ALWAYS run against the OriginalVolume.
+        // Capture the uncommitted delta BEFORE locking it in as the new baseline
+        double dPitch = NhpPitch - _cPitch;
+        double dRoll  = NhpRoll  - _cRoll;
+        double dYaw   = NhpYaw   - _cYaw;
+        double dLat   = NhpLateral         - _cLat;
+        double dAnt   = NhpAnteroposterior - _cAnt;
+        double dVert  = NhpVertical        - _cVert;
+
+        // Now lock in as the new committed baseline
         _cLat = NhpLateral; _cAnt = NhpAnteroposterior; _cVert = NhpVertical;
         _cRoll = NhpRoll; _cPitch = NhpPitch; _cYaw = NhpYaw;
         OnPropertyChanged(nameof(IsNhpDirty));
 
-        // Start Reslice Engine
-        await PerformPhysicalResliceAsync();
+        // Start Reslice Engine, passing the true delta that needs to be baked
+        await PerformPhysicalResliceAsync(dPitch, dRoll, dYaw, dLat, dAnt, dVert);
     }
 
     private void UpdateNhpTransform()
@@ -2494,7 +2501,9 @@ public partial class MainViewModel : ObservableObject
         window.Show();
     }
 
-    private async Task PerformPhysicalResliceAsync()
+    private async Task PerformPhysicalResliceAsync(
+        double dPitch = 0, double dRoll = 0, double dYaw = 0,
+        double dLat   = 0, double dAnt  = 0, double dVert = 0)
     {
         if (OriginalVolume == null) OriginalVolume = Volume; // Initial capture
         if (OriginalVolume == null || BoneOnlyBounds.IsEmpty) return;
@@ -2556,21 +2565,14 @@ public partial class MainViewModel : ObservableObject
         
         IsLoading = false;
         
-        // Physically apply the DELTA transform to the vertices of all existing meshes so they align with the new volume!
-        // This ensures the 3D meshes don't lose step when we wipe the visual offset (dPitch = 0).
-        var dPitchFixed = NhpPitch - _cPitch;
-        var dRollFixed = NhpRoll - _cRoll;
-        var dYawFixed = NhpYaw - _cYaw;
-        var dLatFixed = NhpLateral - _cLat;
-        var dAntFixed = NhpAnteroposterior - _cAnt;
-        var dVertFixed = NhpVertical - _cVert;
-        
+        // dPitch/Roll/Yaw/Lat/Ant/Vert are the delta values passed in from CommitNhpAsync
+        // (captured before _cXxx was updated, so they are the true increment to bake)
         var deltaGroup = new Transform3DGroup();
         deltaGroup.Children.Add(new TranslateTransform3D(-center.X, -center.Y, -center.Z));
-        deltaGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), dPitchFixed)));
-        deltaGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), dRollFixed)));
-        deltaGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), dYawFixed)));
-        deltaGroup.Children.Add(new TranslateTransform3D(center.X + dLatFixed, center.Y + dAntFixed, center.Z + dVertFixed));
+        deltaGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), dPitch)));
+        deltaGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), dRoll)));
+        deltaGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), dYaw)));
+        deltaGroup.Children.Add(new TranslateTransform3D(center.X + dLat, center.Y + dAnt, center.Z + dVert));
 
         var m = deltaGroup.Value;
         
@@ -2615,6 +2617,19 @@ public partial class MainViewModel : ObservableObject
             // Rebuild models since we mutated their vertices physically
             foreach (var seg in allSegmentModels) seg.BuildModel();
             foreach (var mesh in ImportedMeshes) mesh.BuildModel();
+
+            // Reset all transforms to identity — vertices are now physically at the correct NHP position
+            _nhpTransform = System.Windows.Media.Media3D.Transform3D.Identity;
+            foreach (var seg in allSegmentModels)
+            {
+                seg.SurgicalTransform = System.Windows.Media.Media3D.Transform3D.Identity;
+                seg.Transform = System.Windows.Media.Media3D.Transform3D.Identity;
+            }
+            foreach (var mesh in ImportedMeshes)
+                mesh.Transform = System.Windows.Media.Media3D.Transform3D.Identity;
+            if (HardTissueModel != null) HardTissueModel.Transform = System.Windows.Media.Media3D.Transform3D.Identity;
+            if (SoftTissueModel != null) SoftTissueModel.Transform = System.Windows.Media.Media3D.Transform3D.Identity;
+            if (DentalModel != null)     DentalModel.Transform     = System.Windows.Media.Media3D.Transform3D.Identity;
             
             // Refresh 2D Slices
             AxialMax = Volume.Depth - 1;
