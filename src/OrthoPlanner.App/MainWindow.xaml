@@ -906,8 +906,7 @@
                                             <Setter Property="Margin" Value="0,0,4,0"/>
                                         </Style>
                                     </StackPanel.Resources>
-
-                                    <Button Content="Load &amp; Align Occlusion STLs" Command="{Binding OpenOcclusionAlignmentCommand}" Margin="0,0,0,8" />
+                                    <Button Content="Load &amp; Align Occlusion STLs" Command="{Binding LoadAndAlignOcclusionCommand}" Margin="0,0,0,8" />
 
                                     <!-- Mode Selector -->
                                     <Border Background="#FF1E222A" BorderBrush="#FF30343D" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,8">

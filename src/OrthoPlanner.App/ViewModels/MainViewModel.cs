@@ -300,6 +300,16 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task LoadAndAlignOcclusionAsync()
+    {
+        await LoadOcclusionAsync();
+        if (LoadedOcclusions.Any(o => o.IsVisible))
+        {
+            await AlignOcclusions();
+        }
+    }
+
+    [RelayCommand]
     private async Task LoadOcclusionAsync()
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
