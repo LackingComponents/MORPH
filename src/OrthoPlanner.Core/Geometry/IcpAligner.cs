@@ -29,63 +29,60 @@ public static class IcpAligner
     /// <param name="tolerance">Convergence threshold on RMS change.</param>
     /// <param name="progress">Optional progress callback (0.0–1.0).</param>
     public static AlignResult Align(
-        List<float[]> sourceVerts,
-        List<float[]> targetVerts,
+        float[] sourceVerts,
+        float[] targetVerts,
         double[,]? initialTransform = null,
         int maxIterations = 80,
         double tolerance = 0.001,
         double trimRatio = 0.60,
         Action<double>? progress = null)
     {
-        // Subsample source for performance (use every Nth point, max ~8000)
-        int step = Math.Max(1, sourceVerts.Count / 8000);
-        var srcSampled = new List<float[]>();
-        for (int i = 0; i < sourceVerts.Count; i += step)
-            srcSampled.Add(sourceVerts[i]);
+        int totalSrcPts = sourceVerts.Length / 3;
+        // Subsample source for performance (max ~8000 points)
+        int step = Math.Max(1, totalSrcPts / 8000);
+        int nSrc = 0;
+        for (int i = 0; i < totalSrcPts; i += step) nSrc++;
 
-        int nSrc = srcSampled.Count;
-
-        // Apply initial transform to sampled source
-        var currentSrc = new double[nSrc, 3];
         var initT = initialTransform ?? Identity4x4();
-
-        for (int i = 0; i < nSrc; i++)
+        var currentSrc = new double[nSrc, 3];
+        int si = 0;
+        for (int i = 0; i < totalSrcPts; i += step)
         {
-            TransformPoint(initT, srcSampled[i][0], srcSampled[i][1], srcSampled[i][2],
+            int b = i * 3;
+            TransformPoint(initT, sourceVerts[b], sourceVerts[b + 1], sourceVerts[b + 2],
                 out double tx, out double ty, out double tz);
-            currentSrc[i, 0] = tx;
-            currentSrc[i, 1] = ty;
-            currentSrc[i, 2] = tz;
+            currentSrc[si, 0] = tx; currentSrc[si, 1] = ty; currentSrc[si, 2] = tz;
+            si++;
         }
 
-        // --- PRE-ICP CULLING OF THE TARGET MESH ---
-        // The CT target mesh is massive (entire skull/cranium) but we only want to align to the teeth.
-        // We temporarily build a KdTree of the *source* (STL cast) at its initial position.
+        // Build KdTree of *source* at initial position for pre-ICP target culling
+        var srcFlat = new float[nSrc * 3];
+        for (int i = 0; i < nSrc; i++)
+        { srcFlat[i*3] = (float)currentSrc[i,0]; srcFlat[i*3+1] = (float)currentSrc[i,1]; srcFlat[i*3+2] = (float)currentSrc[i,2]; }
         var sourceTree = new KdTree();
-        var sourceListForTree = new List<float[]>();
-        for (int i = 0; i < nSrc; i++) sourceListForTree.Add(new float[] { (float)currentSrc[i, 0], (float)currentSrc[i, 1], (float)currentSrc[i, 2] });
-        sourceTree.Build(sourceListForTree);
+        sourceTree.Build(srcFlat, nSrc);
 
-        // Find distance from every target point to the closest source point
-        var tgtDistances = new (float[] pt, double distSq)[targetVerts.Count];
-        for (int i = 0; i < targetVerts.Count; i++)
+        // Cull distant target points (keep nearest 10% = teeth region)
+        int totalTgtPts = targetVerts.Length / 3;
+        var tgtDistances = new (int idx, double distSq)[totalTgtPts];
+        for (int i = 0; i < totalTgtPts; i++)
         {
-            var p = targetVerts[i];
-            var (_, distSq) = sourceTree.FindNearest(p[0], p[1], p[2]);
-            tgtDistances[i] = (p, distSq);
+            int b = i * 3;
+            var (_, distSq) = sourceTree.FindNearest(targetVerts[b], targetVerts[b+1], targetVerts[b+2]);
+            tgtDistances[i] = (i, distSq);
         }
-
-        // Sort and completely discard the furthest 90% of the CT mesh (cranium, spine, etc.)
         Array.Sort(tgtDistances, (a, b) => a.distSq.CompareTo(b.distSq));
-        int keepTgt = Math.Max(10, (int)(targetVerts.Count * 0.10));
-        var croppedTarget = new List<float[]>(keepTgt);
-        for (int i = 0; i < keepTgt; i++) croppedTarget.Add(tgtDistances[i].pt);
+        int keepTgt = Math.Max(10, (int)(totalTgtPts * 0.10));
 
-        // Build main k-d tree on the incredibly cropped target (teeth only!)
+        var croppedFlat = new float[keepTgt * 3];
+        for (int i = 0; i < keepTgt; i++)
+        {
+            int b = tgtDistances[i].idx * 3;
+            croppedFlat[i*3] = targetVerts[b]; croppedFlat[i*3+1] = targetVerts[b+1]; croppedFlat[i*3+2] = targetVerts[b+2];
+        }
         var tree = new KdTree();
-        tree.Build(croppedTarget);
+        tree.Build(croppedFlat, keepTgt);
 
-        // Accumulate total transform
         var totalT = (double[,])initT.Clone();
         double prevRms = double.MaxValue;
         int iter;
@@ -123,10 +120,10 @@ public static class IcpAligner
 
             for (int i = 0; i < nKeep; i++)
             {
-                int si = distances[i].srcIdx;
-                trimSrc[i, 0] = currentSrc[si, 0];
-                trimSrc[i, 1] = currentSrc[si, 1];
-                trimSrc[i, 2] = currentSrc[si, 2];
+                int srcIdx = distances[i].srcIdx;
+                trimSrc[i, 0] = currentSrc[srcIdx, 0];
+                trimSrc[i, 1] = currentSrc[srcIdx, 1];
+                trimSrc[i, 2] = currentSrc[srcIdx, 2];
                 trimTgt[i, 0] = distances[i].tgtX;
                 trimTgt[i, 1] = distances[i].tgtY;
                 trimTgt[i, 2] = distances[i].tgtZ;
@@ -193,21 +190,50 @@ public static class IcpAligner
     }
 
     /// <summary>
-    /// Apply a 4x4 transform to all vertices in place.
+    /// Apply a 4x4 transform to all vertices in place (flat float[] stride-3).
     /// </summary>
+    public static void TransformVertices(float[] vertices, double[,] transform)
+    {
+        for (int i = 0; i < vertices.Length; i += 3)
+        {
+            TransformPoint(transform, vertices[i], vertices[i + 1], vertices[i + 2],
+                out double tx, out double ty, out double tz);
+            vertices[i]     = (float)tx;
+            vertices[i + 1] = (float)ty;
+            vertices[i + 2] = (float)tz;
+        }
+    }
+
+    // ═══ Internal SVD-based rigid transform ═══
+
+    // ─── Compatibility overloads for windows that still use List<float[]> ───
+
+    public static AlignResult Align(
+        List<float[]> sourceVerts, List<float[]> targetVerts,
+        double[,]? initialTransform = null, int maxIterations = 80,
+        double tolerance = 0.001, double trimRatio = 0.60,
+        Action<double>? progress = null)
+    {
+        var srcFlat = new float[sourceVerts.Count * 3];
+        for (int i = 0; i < sourceVerts.Count; i++)
+        { srcFlat[i*3] = sourceVerts[i][0]; srcFlat[i*3+1] = sourceVerts[i][1]; srcFlat[i*3+2] = sourceVerts[i][2]; }
+
+        var tgtFlat = new float[targetVerts.Count * 3];
+        for (int i = 0; i < targetVerts.Count; i++)
+        { tgtFlat[i*3] = targetVerts[i][0]; tgtFlat[i*3+1] = targetVerts[i][1]; tgtFlat[i*3+2] = targetVerts[i][2]; }
+
+        return Align(srcFlat, tgtFlat, initialTransform, maxIterations, tolerance, trimRatio, progress);
+    }
+
     public static void TransformVertices(List<float[]> vertices, double[,] transform)
     {
         for (int i = 0; i < vertices.Count; i++)
         {
             TransformPoint(transform, vertices[i][0], vertices[i][1], vertices[i][2],
                 out double tx, out double ty, out double tz);
-            vertices[i][0] = (float)tx;
-            vertices[i][1] = (float)ty;
-            vertices[i][2] = (float)tz;
+            vertices[i][0] = (float)tx; vertices[i][1] = (float)ty; vertices[i][2] = (float)tz;
         }
     }
-
-    // ═══ Internal SVD-based rigid transform ═══
 
     private static double[,] ComputeRigidTransformSVD(double[,] src, double[,] tgt, int n)
     {

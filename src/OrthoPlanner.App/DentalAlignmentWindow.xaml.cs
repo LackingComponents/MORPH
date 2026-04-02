@@ -44,6 +44,7 @@ public partial class DentalAlignmentWindow : Window
     public double[,]? FinalTransform { get; private set; }
     public bool CleanMerged { get; private set; }
     public List<float[]>? CleanMergedVertices { get; private set; }
+    private EventHandler? _renderingHandler;
 
     public DentalAlignmentWindow(OrthoPlanner.Core.Imaging.VolumeData ctVolume, List<float[]> ctVertices, List<float[]> stlVertices)
     {
@@ -61,7 +62,7 @@ public partial class DentalAlignmentWindow : Window
 
         PairsList.ItemsSource = _pairs;
 
-        System.Windows.Media.CompositionTarget.Rendering += (s, _) =>
+        _renderingHandler = (s, _) =>
         {
             if (CtCamera != null && CtHeadlamp != null && CtBacklamp != null)
             {
@@ -98,8 +99,25 @@ public partial class DentalAlignmentWindow : Window
                 }
             }
         };
+        System.Windows.Media.CompositionTarget.Rendering += _renderingHandler;
 
         Loaded += (_, _) => SetupViewports();
+        Closed += OnWindowClosed;
+    }
+
+    private void OnWindowClosed(object? sender, EventArgs e)
+    {
+        if (_renderingHandler != null)
+        {
+            System.Windows.Media.CompositionTarget.Rendering -= _renderingHandler;
+            _renderingHandler = null;
+        }
+        CtGroup.Children.Clear();
+        StlGroup.Children.Clear();
+        if (CtViewport.EffectsManager is IDisposable d1) d1.Dispose();
+        if (StlViewport.EffectsManager is IDisposable d2) d2.Dispose();
+        CtViewport.EffectsManager = null;
+        StlViewport.EffectsManager = null;
     }
 
     private void SetupViewports()

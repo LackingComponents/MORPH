@@ -564,6 +564,8 @@
                                         Background="#FF1B98E0" Foreground="White" FontWeight="Bold" />
                                 <Button Content="✂ Plan BSSO" Command="{Binding PlanBssoCommand}" Margin="0,0,0,4"
                                         Background="#FF1B98E0" Foreground="White" FontWeight="Bold" />
+                                <Button Content="✂ Plan Genioplasty" Command="{Binding PlanGenioplastyCommand}" Margin="0,0,0,4"
+                                        Background="#FF1B98E0" Foreground="White" FontWeight="Bold" />
                             </StackPanel>
                         </Expander>
 

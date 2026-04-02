@@ -727,11 +727,11 @@ public static class SegmentationEngine
     /// Uses actual HU values (not binary) for smooth interpolation.
     /// The iso value is the midpoint of the threshold range.
     /// </summary>
-    public static List<float[]> ExtractSegmentMesh(
+    public static float[] ExtractSegmentMesh(
         VolumeData volume, SegmentationVolume segVol,
         byte label, int stepSize = 1, Action<double>? progress = null)
     {
-        var vertices = new List<float[]>();
+        var vertices = new List<float>();
         int w = volume.Width, h = volume.Height, d = volume.Depth;
         double sx = volume.Spacing[0], sy = volume.Spacing[1], sz = volume.Spacing[2];
 
@@ -859,24 +859,27 @@ public static class SegmentationEngine
                 var triIndices = MarchingCubes.GetTriangles(cubeIndex);
                 for (int i = 0; i < triIndices.Length && triIndices[i] != -1; i += 3)
                 {
-                    vertices.Add(edgeVerts[triIndices[i]]);
-                    vertices.Add(edgeVerts[triIndices[i + 1]]);
-                    vertices.Add(edgeVerts[triIndices[i + 2]]);
+                    var ev0 = edgeVerts[triIndices[i]];
+                    var ev1 = edgeVerts[triIndices[i + 1]];
+                    var ev2 = edgeVerts[triIndices[i + 2]];
+                    vertices.Add(ev0[0]); vertices.Add(ev0[1]); vertices.Add(ev0[2]);
+                    vertices.Add(ev1[0]); vertices.Add(ev1[1]); vertices.Add(ev1[2]);
+                    vertices.Add(ev2[0]); vertices.Add(ev2[1]); vertices.Add(ev2[2]);
                 }
             }
             progress?.Invoke((double)(z + 1) / d);
         }
-        return vertices;
+        return vertices.ToArray();
     }
 
     /// <summary>
     /// Generates a highly subsampled, raw Marching Cubes mesh directly from the VolumeData
     /// based on min/max HU values for real-time slider proxy rendering.
     /// </summary>
-    public static List<float[]> ExtractLivePreviewMesh(
+    public static float[] ExtractLivePreviewMesh(
         VolumeData volume, short minHU, short maxHU, int stepSize = 4)
     {
-        var vertices = new List<float[]>();
+        var vertices = new List<float>();
         int w = volume.Width, h = volume.Height, d = volume.Depth;
         double sx = volume.Spacing[0], sy = volume.Spacing[1], sz = volume.Spacing[2];
 
@@ -956,13 +959,16 @@ public static class SegmentationEngine
             var triIndices = MarchingCubes.GetTriangles(cubeIndex);
             for (int i = 0; i < triIndices.Length && triIndices[i] != -1; i += 3)
             {
-                vertices.Add(edgeVerts[triIndices[i]]);
-                vertices.Add(edgeVerts[triIndices[i + 1]]);
-                vertices.Add(edgeVerts[triIndices[i + 2]]);
+                var ev0 = edgeVerts[triIndices[i]];
+                var ev1 = edgeVerts[triIndices[i + 1]];
+                var ev2 = edgeVerts[triIndices[i + 2]];
+                vertices.Add(ev0[0]); vertices.Add(ev0[1]); vertices.Add(ev0[2]);
+                vertices.Add(ev1[0]); vertices.Add(ev1[1]); vertices.Add(ev1[2]);
+                vertices.Add(ev2[0]); vertices.Add(ev2[1]); vertices.Add(ev2[2]);
             }
         }
         
-        return vertices;
+        return vertices.ToArray();
     }
 
     /// <summary>

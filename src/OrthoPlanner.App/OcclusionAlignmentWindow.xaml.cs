@@ -27,6 +27,7 @@ public partial class OcclusionAlignmentWindow : Window
     public double[,]? MaxillaTransform { get; private set; }
     public double[,]? MandibleTransform { get; private set; }
     public bool Accepted { get; private set; }
+    private EventHandler? _renderingHandler;
 
     public OcclusionAlignmentWindow(List<float[]> maxillaVertices, List<float[]> mandibleVertices, List<float[]> occlusionVertices)
     {
@@ -39,13 +40,30 @@ public partial class OcclusionAlignmentWindow : Window
         _mandibleVertices = mandibleVertices ?? new List<float[]>();
         _occlusionVertices = occlusionVertices ?? new List<float[]>();
 
-        System.Windows.Media.CompositionTarget.Rendering += (s, e) =>
+        _renderingHandler = (s, e) =>
         {
             UpdateLighting(BoneCamera, BoneHeadlamp, BoneBacklamp);
             UpdateLighting(OccCamera, OccHeadlamp, OccBacklamp);
         };
+        System.Windows.Media.CompositionTarget.Rendering += _renderingHandler;
 
         Loaded += (_, _) => LoadCurrentBone();
+        Closed += OnWindowClosed;
+    }
+
+    private void OnWindowClosed(object? sender, EventArgs e)
+    {
+        if (_renderingHandler != null)
+        {
+            System.Windows.Media.CompositionTarget.Rendering -= _renderingHandler;
+            _renderingHandler = null;
+        }
+        BoneGroup.Children.Clear();
+        OccGroup.Children.Clear();
+        if (BoneViewport.EffectsManager is IDisposable d1) d1.Dispose();
+        if (OccViewport.EffectsManager is IDisposable d2) d2.Dispose();
+        BoneViewport.EffectsManager = null;
+        OccViewport.EffectsManager = null;
     }
 
     private void UpdateLighting(HelixToolkit.Wpf.SharpDX.PerspectiveCamera camera, DirectionalLight3D headlamp, DirectionalLight3D backlamp)

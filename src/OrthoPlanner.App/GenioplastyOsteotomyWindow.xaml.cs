@@ -10,13 +10,13 @@ using OrthoPlanner.Core.Geometry;
 
 namespace OrthoPlanner.App;
 
-public partial class LeFortOsteotomyWindow : Window
+public partial class GenioplastyOsteotomyWindow : Window
 {
-    private List<float[]> _craniumVerts;
+    private List<float[]> _mandibleVerts;
     
     // Results
-    public List<float[]> UpperMaxillaResult { get; private set; } = new();
-    public List<float[]> LowerMaxillaResult { get; private set; } = new();
+    public List<float[]> UpperMandibleResult { get; private set; } = new();
+    public List<float[]> ChinSegmentResult { get; private set; } = new();
     public bool Accepted { get; private set; } = false;
 
     // Viewport elements
@@ -34,13 +34,12 @@ public partial class LeFortOsteotomyWindow : Window
     private (Point3D Position, Vector3D Normal)? _dragPlane;
 
     private int _step = 1;
-    private Point3D _leftPost = new(), _leftDrop = new();
-    private Point3D _rightPost = new(), _rightDrop = new();
-    private MeshGeometryModel3D? _lpVis, _ldVis, _rpVis, _rdVis;
+    private List<Point3D> _posteriorPoints = new();
+    private List<MeshGeometryModel3D> _posteriorVisuals = new();
     private GroupModel3D _polyplaneVis = new();
     private EventHandler? _renderingHandler;
 
-    public LeFortOsteotomyWindow(List<float[]> craniumVerts)
+    public GenioplastyOsteotomyWindow(List<float[]> mandibleVerts)
     {
         InitializeComponent();
         
@@ -52,9 +51,9 @@ public partial class LeFortOsteotomyWindow : Window
         };
         CompositionTarget.Rendering += _renderingHandler;
 
-        _craniumVerts = craniumVerts;
+        _mandibleVerts = mandibleVerts;
 
-        _boneMesh = CreateMeshVisual(_craniumVerts, Color.FromRgb(245, 245, 230), 1.0);
+        _boneMesh = CreateMeshVisual(_mandibleVerts, Color.FromRgb(245, 245, 230), 1.0);
         MainGroup.Children.Add(_boneMesh);
 
         _polyplaneMesh = CreateMeshVisual(new List<float[]>(), Color.FromArgb(128, 50, 200, 100), 1.0);
@@ -62,7 +61,7 @@ public partial class LeFortOsteotomyWindow : Window
         MainGroup.Children.Add(_polyplaneMesh);
         MainGroup.Children.Add(_polyplaneVis);
 
-        Loaded += (_, _) => CenterOn(_craniumVerts);
+        Loaded += (_, _) => CenterOn(_mandibleVerts);
         Closed += OnWindowClosed;
     }
 
@@ -146,17 +145,15 @@ public partial class LeFortOsteotomyWindow : Window
         // 2. Check if we hit a posterior handle (Step 2)
         if (_step == 2)
         {
-            MeshGeometryModel3D?[] pVis = { _lpVis, _ldVis, _rpVis, _rdVis };
-            Point3D[] pPts = { _leftPost, _leftDrop, _rightPost, _rightDrop };
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < _posteriorVisuals.Count; i++)
             {
-                if (ptInfo.Value.Visual == pVis[i] || DistanceTo(ptInfo.Value.Point, pPts[i]) < 2.0)
+                if (ptInfo.Value.Visual == _posteriorVisuals[i] || DistanceTo(ptInfo.Value.Point, _posteriorPoints[i]) < 2.0)
                 {
-                    _draggedPoint = pVis[i];
+                    _draggedPoint = _posteriorVisuals[i];
                     _draggedIndex = 1000 + i;
                     
                     var lookDir = MainViewport.Camera?.LookDirection ?? new Vector3D(0, 0, -1);
-                    _dragPlane = (pPts[i], new Vector3D(-lookDir.X, -lookDir.Y, -lookDir.Z));
+                    _dragPlane = (_posteriorPoints[i], new Vector3D(-lookDir.X, -lookDir.Y, -lookDir.Z));
                     
                     MainViewport.CaptureMouse();
                     e.Handled = true;
@@ -192,16 +189,13 @@ public partial class LeFortOsteotomyWindow : Window
                     if (_draggedIndex >= 1000)
                     {
                         int id = _draggedIndex - 1000;
-                        if (id == 0) _leftPost = intersect.Value;
-                        else if (id == 1) _leftDrop = intersect.Value;
-                        else if (id == 2) _rightPost = intersect.Value;
-                        else if (id == 3) _rightDrop = intersect.Value;
+                        _posteriorPoints[id] = intersect.Value;
                         _draggedPoint.Transform = new TranslateTransform3D(intersect.Value.X, intersect.Value.Y, intersect.Value.Z);
                     }
                     else
                     {
                         if (_step == 2) {
-                            _controlPoints[_draggedIndex] = intersect.Value - GetExtrusionDir(_controlPoints, _draggedIndex) * 15.0;
+                            _controlPoints[_draggedIndex] = intersect.Value - GetExtrusionDir(_controlPoints, _draggedIndex) * 10.0;
                         } else {
                             _controlPoints[_draggedIndex] = intersect.Value;
                             _draggedPoint.Transform = new TranslateTransform3D(intersect.Value.X, intersect.Value.Y, intersect.Value.Z);
@@ -275,7 +269,7 @@ public partial class LeFortOsteotomyWindow : Window
     {
         if (_controlPoints.Count < 2) return;
         _step = 2;
-        StepTitle.Text = "LeFort 1: Adjust Posterior Extensions";
+        StepTitle.Text = "Genioplasty: Adjust Posterior Extensions";
         StepInstructions.Text = "Drag the 4 cyan handles to adjust the posterior extension and drop depth, then Perform Cut.";
         NextBtn.Visibility = Visibility.Collapsed;
         CutBtn.Visibility = Visibility.Visible;
@@ -286,24 +280,17 @@ public partial class LeFortOsteotomyWindow : Window
         _step2ExtrusionDirs.Clear();
         for (int i = 0; i < antCurve.Count; i++) _step2ExtrusionDirs.Add(OutwardDir(antCurve, i));
 
-        double zMin = antCurve.Min(p => p.Z);
-        double yMax = antCurve.Max(p => p.Y);
-        double posteriorY = yMax + 30.0;
-        double dropZ = zMin - 40.0;
-        
-        var ptL = antCurve.First();
-        var ptR = antCurve.Last();
-        
-        // Handles sit at the innermost outer-edge corners of the step-shaped polyplane
-        _leftPost  = new Point3D(ptL.X, posteriorY, ptL.Z);
-        _leftDrop  = new Point3D(ptL.X, posteriorY, dropZ);
-        _rightPost = new Point3D(ptR.X, posteriorY, ptR.Z);
-        _rightDrop = new Point3D(ptR.X, posteriorY, dropZ);
+        _posteriorPoints.Clear(); _posteriorVisuals.Clear();
 
-        _lpVis = CreateSphere(_leftPost, 1.5f, new HelixToolkit.Maths.Color4(0f, 1f, 1f, 1f)); MainGroup.Children.Add(_lpVis);
-        _ldVis = CreateSphere(_leftDrop,  1.5f, new HelixToolkit.Maths.Color4(0f, 1f, 1f, 1f)); MainGroup.Children.Add(_ldVis);
-        _rpVis = CreateSphere(_rightPost, 1.5f, new HelixToolkit.Maths.Color4(0f, 1f, 1f, 1f)); MainGroup.Children.Add(_rpVis);
-        _rdVis = CreateSphere(_rightDrop, 1.5f, new HelixToolkit.Maths.Color4(0f, 1f, 1f, 1f)); MainGroup.Children.Add(_rdVis);
+        for (int i = 0; i < antCurve.Count; i++)
+        {
+            Point3D postPt = new Point3D(antCurve[i].X, antCurve[i].Y + 25.0, antCurve[i].Z);
+            
+            _posteriorPoints.Add(postPt);
+            
+            var sp = CreateSphere(postPt, 1.5f, new HelixToolkit.Maths.Color4(0f, 1f, 1f, 1f));
+            _posteriorVisuals.Add(sp); MainGroup.Children.Add(sp);
+        }
         
         UpdatePolyplane();
     }
@@ -347,24 +334,25 @@ public partial class LeFortOsteotomyWindow : Window
         // Outer perimeter contour tracing the handles strictly:
         var ac = _controlPoints;
         int cols = ac.Count;
-        var p00 = ac.Select((pt, i) => pt + GetExtrusionDir(ac, i) * 15.0).ToList();
+        var p00 = ac.Select((pt, i) => pt + GetExtrusionDir(ac, i) * 10.0).ToList();
 
         if (_step == 2) {
-            for (int i = 0; i < cols; i++)
+            for (int i = 0; i < cols; i++) {
                 _pointVisuals[i].Transform = new TranslateTransform3D(p00[i].X, p00[i].Y, p00[i].Z);
+                _posteriorVisuals[i].Transform = new TranslateTransform3D(_posteriorPoints[i].X, _posteriorPoints[i].Y, _posteriorPoints[i].Z);
+            }
         }
 
         var lb = new HelixToolkit.SharpDX.LineBuilder();
         for (int i = 0; i < cols - 1; i++)
             lb.AddLine(Nv3(p00[i]), Nv3(p00[i + 1])); // front lip connecting Handles
             
-        lb.AddLine(Nv3(p00[cols - 1]), Nv3(_rightPost));
-        
-        lb.AddLine(Nv3(_rightPost),    Nv3(_rightDrop));
-        lb.AddLine(Nv3(_rightDrop),    Nv3(_leftDrop));   
-        lb.AddLine(Nv3(_leftDrop),     Nv3(_leftPost));
-        
-        lb.AddLine(Nv3(_leftPost),     Nv3(p00[0]));
+        if (_step == 2)
+        {
+            lb.AddLine(Nv3(p00[cols-1]), Nv3(_posteriorPoints[cols-1]));
+            for (int i = cols - 1; i > 0; i--) lb.AddLine(Nv3(_posteriorPoints[i]), Nv3(_posteriorPoints[i-1]));
+            lb.AddLine(Nv3(_posteriorPoints[0]), Nv3(p00[0]));
+        }
 
         _polyplaneVis.Children.Clear();
         _polyplaneVis.Children.Add(new LineGeometryModel3D
@@ -393,17 +381,12 @@ public partial class LeFortOsteotomyWindow : Window
             
             Vector3D outA = GetExtrusionDir(ac, i - 1);
             Vector3D outB = GetExtrusionDir(ac, i);
-            Point3D a0 = a + outA * 15.0;
-            Point3D b0 = b + outB * 15.0;
+            Point3D a0 = a + outA * 10.0;
+            Point3D b0 = b + outB * 10.0;
+            Point3D a2 = _step == 2 ? _posteriorPoints[i - 1] : new Point3D(a.X, a.Y + 25.0, a.Z);
+            Point3D b2 = _step == 2 ? _posteriorPoints[i] : new Point3D(b.X, b.Y + 25.0, b.Z);
 
-            // Interpolated posterior & drop corners
-            Point3D a2 = Lerp3(_leftPost, _rightPost, uPrev);
-            Point3D b2 = Lerp3(_leftPost, _rightPost, uCurr);
-            Point3D a3 = Lerp3(_leftDrop, _rightDrop, uPrev);
-            Point3D b3 = Lerp3(_leftDrop, _rightDrop, uCurr);
-
-            AddQ(quads, a0, b0, b2, a2);   // roof: lip → post
-            AddQ(quads, a2, b2, b3, a3); // vertical: post → drop
+            AddQ(quads, a0, b0, b2, a2);
         }
 
         var pp = new Polyplane(0.0);
@@ -441,21 +424,18 @@ public partial class LeFortOsteotomyWindow : Window
             }
             pt += offset;
 
-            Point3D post = Lerp3(_leftPost, _rightPost, u) + offset;
-            Point3D drop = Lerp3(_leftDrop, _rightDrop, u) + offset;
+            Point3D post = _step == 2 ? _posteriorPoints[idx] : new Point3D(pt.X, pt.Y + 25.0, pt.Z);
             
             Vector3D outVec = GetExtrusionDir(ac, idx);
             if (c == -1 && cols > 1) outVec = GetExtrusionDir(ac, 0);
             if (c == cols && cols > 1) outVec = GetExtrusionDir(ac, cols - 1);
 
-            Point3D lip = pt + outVec * 15.0; // The defined front lip
-            Point3D extLip = pt + outVec * 100.0; // HUGE forward/outward padding
+            Point3D lip = pt + outVec * 10.0; // Reduced front lip
 
-            if (step == 0) return extLip;
-            if (step == 1) return lip;
-            if (step == 2) return post;
-            if (step == 3) return drop;
-            if (step == 4) return new Point3D(drop.X, drop.Y, drop.Z - 100.0); // HUGE drop to seal bottom
+            if (step == 0) return lip + offset; // No forward padding anymore, bound tightly to visual plane
+            if (step == 1) return pt + offset;
+            if (step == 2) return post + offset;  // No backward padding anymore, cut ends exactly
+            
             return default;
         }
 
@@ -463,13 +443,9 @@ public partial class LeFortOsteotomyWindow : Window
             var c0 = GetColPoint(i-1, 0); var n0 = GetColPoint(i, 0);
             var c1 = GetColPoint(i-1, 1); var n1 = GetColPoint(i, 1);
             var c2 = GetColPoint(i-1, 2); var n2 = GetColPoint(i, 2);
-            var c3 = GetColPoint(i-1, 3); var n3 = GetColPoint(i, 3);
-            var c4 = GetColPoint(i-1, 4); var n4 = GetColPoint(i, 4);
 
             AddQ(quads, c0, n0, n1, c1);
             AddQ(quads, c1, n1, n2, c2);
-            AddQ(quads, c2, n2, n3, c3);
-            AddQ(quads, c3, n3, n4, c4);
         }
 
         var pp = new Polyplane(0.0);
@@ -520,14 +496,12 @@ public partial class LeFortOsteotomyWindow : Window
         foreach (var p in _pointVisuals) MainGroup.Children.Remove(p);
         _pointVisuals.Clear();
         
-        if (_lpVis != null) { MainGroup.Children.Remove(_lpVis); _lpVis = null; }
-        if (_ldVis != null) { MainGroup.Children.Remove(_ldVis); _ldVis = null; }
-        if (_rpVis != null) { MainGroup.Children.Remove(_rpVis); _rpVis = null; }
-        if (_rdVis != null) { MainGroup.Children.Remove(_rdVis); _rdVis = null; }
+        foreach (var v in _posteriorVisuals) MainGroup.Children.Remove(v);
+        _posteriorVisuals.Clear(); _posteriorPoints.Clear();
 
         _step = 1;
-        StepTitle.Text = "LeFort 1: Draw Cutting Curve";
-        StepInstructions.Text = "Left-click on the maxilla to place control points for the osteotomy curve. Adjust points by dragging them.";
+        StepTitle.Text = "Genioplasty: Draw Cutting Curve";
+        StepInstructions.Text = "Left-click on the chin to place control points for the osteotomy curve. Adjust points by dragging them.";
         NextBtn.Visibility = Visibility.Visible;
         NextBtn.IsEnabled = false;
         CutBtn.Visibility = Visibility.Collapsed;
@@ -552,24 +526,24 @@ public partial class LeFortOsteotomyWindow : Window
         
         try
         {
-            int nTri = _craniumVerts.Count / 3;
+            int nTri = _mandibleVerts.Count / 3;
             var edgeMap = new Dictionary<string, List<int>>(nTri * 2);
             for (int i = 0; i < nTri; i++) {
                 for (int edge = 0; edge < 3; edge++) {
-                    var kA = VKey(_craniumVerts[i * 3 + edge]);
-                    var kB = VKey(_craniumVerts[i * 3 + (edge + 1) % 3]);
+                    var kA = VKey(_mandibleVerts[i * 3 + edge]);
+                    var kB = VKey(_mandibleVerts[i * 3 + (edge + 1) % 3]);
                     var ek = string.Compare(kA, kB) < 0 ? kA + "|" + kB : kB + "|" + kA;
                     if (!edgeMap.TryGetValue(ek, out var lst)) { lst = new List<int>(2); edgeMap[ek] = lst; }
                     lst.Add(i);
                 }
             }
 
-            // ─── Step 1: BFS on the padded math polyplane ───
+            // ─── Step 1: BFS on the visible plane ───
             var polyplane = GetMathPolyplane();
             int seed = -1; float bestZ = float.MinValue;
             for (int i = 0; i < nTri; i++) {
-                float cz = (_craniumVerts[i*3][2] + _craniumVerts[i*3+1][2] + _craniumVerts[i*3+2][2]) / 3f;
-                if (cz > bestZ) { bestZ = cz; seed = i; } // High Z is Cranium top
+                float cz = (_mandibleVerts[i*3][2] + _mandibleVerts[i*3+1][2] + _mandibleVerts[i*3+2][2]) / 3f;
+                if (cz > bestZ) { bestZ = cz; seed = i; } // High Z is Mandible top
             }
 
             var visited = new bool[nTri];
@@ -578,18 +552,18 @@ public partial class LeFortOsteotomyWindow : Window
                 while (q.Count > 0) {
                     int ti = q.Dequeue();
                     for (int edge = 0; edge < 3; edge++) {
-                        var kA = VKey(_craniumVerts[ti * 3 + edge]);
-                        var kB = VKey(_craniumVerts[ti * 3 + (edge + 1) % 3]);
+                        var kA = VKey(_mandibleVerts[ti * 3 + edge]);
+                        var kB = VKey(_mandibleVerts[ti * 3 + (edge + 1) % 3]);
                         var ek = string.Compare(kA, kB) < 0 ? kA + "|" + kB : kB + "|" + kA;
                         if (edgeMap.TryGetValue(ek, out var nbrs))
                             foreach (int ni in nbrs) {
                                 if (!visited[ni]) {
-                                    var cA = new double[]{ (_craniumVerts[ti*3][0]+_craniumVerts[ti*3+1][0]+_craniumVerts[ti*3+2][0])/3.0,
-                                                           (_craniumVerts[ti*3][1]+_craniumVerts[ti*3+1][1]+_craniumVerts[ti*3+2][1])/3.0,
-                                                           (_craniumVerts[ti*3][2]+_craniumVerts[ti*3+1][2]+_craniumVerts[ti*3+2][2])/3.0 };
-                                    var cB = new double[]{ (_craniumVerts[ni*3][0]+_craniumVerts[ni*3+1][0]+_craniumVerts[ni*3+2][0])/3.0,
-                                                           (_craniumVerts[ni*3][1]+_craniumVerts[ni*3+1][1]+_craniumVerts[ni*3+2][1])/3.0,
-                                                           (_craniumVerts[ni*3][2]+_craniumVerts[ni*3+1][2]+_craniumVerts[ni*3+2][2])/3.0 };
+                                    var cA = new double[]{ (_mandibleVerts[ti*3][0]+_mandibleVerts[ti*3+1][0]+_mandibleVerts[ti*3+2][0])/3.0,
+                                                           (_mandibleVerts[ti*3][1]+_mandibleVerts[ti*3+1][1]+_mandibleVerts[ti*3+2][1])/3.0,
+                                                           (_mandibleVerts[ti*3][2]+_mandibleVerts[ti*3+1][2]+_mandibleVerts[ti*3+2][2])/3.0 };
+                                    var cB = new double[]{ (_mandibleVerts[ni*3][0]+_mandibleVerts[ni*3+1][0]+_mandibleVerts[ni*3+2][0])/3.0,
+                                                           (_mandibleVerts[ni*3][1]+_mandibleVerts[ni*3+1][1]+_mandibleVerts[ni*3+2][1])/3.0,
+                                                           (_mandibleVerts[ni*3][2]+_mandibleVerts[ni*3+1][2]+_mandibleVerts[ni*3+2][2])/3.0 };
                                     // Blocked by polyplane? Don't spread!
                                     if (polyplane.SegmentIntersects(cA, cB)) continue; 
                                     visited[ni] = true; q.Enqueue(ni);
@@ -601,29 +575,29 @@ public partial class LeFortOsteotomyWindow : Window
 
 
             // ─── Step 2: Reclassify floaters by polyplane side ───
-            // Any triangle not reached by the cranium BFS is tested: if a segment from the
-            // cranium seed to that triangle does NOT cross the polyplane, it is on the cranium
-            // side (above/behind the cut) and is assigned to cranium. Otherwise → maxilla.
+            // Any triangle not reached by the mandible BFS is tested: if a segment from the
+            // mandible seed to that triangle does NOT cross the polyplane, it is on the mandible
+            // side (above/behind the cut) and is assigned to mandible. Otherwise → chin.
             if (seed >= 0)
             {
                 var seedCtr = new double[]
                 {
-                    (_craniumVerts[seed*3][0]+_craniumVerts[seed*3+1][0]+_craniumVerts[seed*3+2][0])/3.0,
-                    (_craniumVerts[seed*3][1]+_craniumVerts[seed*3+1][1]+_craniumVerts[seed*3+2][1])/3.0,
-                    (_craniumVerts[seed*3][2]+_craniumVerts[seed*3+1][2]+_craniumVerts[seed*3+2][2])/3.0
+                    (_mandibleVerts[seed*3][0]+_mandibleVerts[seed*3+1][0]+_mandibleVerts[seed*3+2][0])/3.0,
+                    (_mandibleVerts[seed*3][1]+_mandibleVerts[seed*3+1][1]+_mandibleVerts[seed*3+2][1])/3.0,
+                    (_mandibleVerts[seed*3][2]+_mandibleVerts[seed*3+1][2]+_mandibleVerts[seed*3+2][2])/3.0
                 };
                 for (int i = 0; i < nTri; i++)
                 {
                     if (visited[i]) continue;
                     var triCtr = new double[]
                     {
-                        (_craniumVerts[i*3][0]+_craniumVerts[i*3+1][0]+_craniumVerts[i*3+2][0])/3.0,
-                        (_craniumVerts[i*3][1]+_craniumVerts[i*3+1][1]+_craniumVerts[i*3+2][1])/3.0,
-                        (_craniumVerts[i*3][2]+_craniumVerts[i*3+1][2]+_craniumVerts[i*3+2][2])/3.0
+                        (_mandibleVerts[i*3][0]+_mandibleVerts[i*3+1][0]+_mandibleVerts[i*3+2][0])/3.0,
+                        (_mandibleVerts[i*3][1]+_mandibleVerts[i*3+1][1]+_mandibleVerts[i*3+2][1])/3.0,
+                        (_mandibleVerts[i*3][2]+_mandibleVerts[i*3+1][2]+_mandibleVerts[i*3+2][2])/3.0
                     };
                     if (!polyplane.SegmentIntersects(seedCtr, triCtr))
-                        visited[i] = true; // Same side as cranium seed → cranium
-                    // else stays false → maxilla
+                        visited[i] = true; // Same side as mandible seed → mandible
+                    // else stays false → chin
                 }
             }
 
@@ -632,18 +606,18 @@ public partial class LeFortOsteotomyWindow : Window
             var above = new List<float[]>();
             var below = new List<float[]>();
             for (int i = 0; i < nTri; i++) {
-                if (visited[i]) { above.Add(_craniumVerts[i*3]); above.Add(_craniumVerts[i*3+1]); above.Add(_craniumVerts[i*3+2]); }
-                else            { below.Add(_craniumVerts[i*3]); below.Add(_craniumVerts[i*3+1]); below.Add(_craniumVerts[i*3+2]); }
+                if (visited[i]) { above.Add(_mandibleVerts[i*3]); above.Add(_mandibleVerts[i*3+1]); above.Add(_mandibleVerts[i*3+2]); }
+                else            { below.Add(_mandibleVerts[i*3]); below.Add(_mandibleVerts[i*3+1]); below.Add(_mandibleVerts[i*3+2]); }
             }
 
-            // Hole closing disabled dynamically for LeFort 1 to completely prevent "rayburst" remeshing artifacts.
-            UpperMaxillaResult = above;
-            LowerMaxillaResult = below;
+            // Hole closing disabled dynamically for Genioplasty to completely prevent "rayburst" remeshing artifacts.
+            UpperMandibleResult = above;
+            ChinSegmentResult = below;
 
             MainGroup.Children.Remove(_boneMesh);
             
-            var upperMesh = CreateMeshVisual(UpperMaxillaResult, Color.FromRgb(245, 245, 230), 1.0); // cranium bone colour
-            var lowerMesh = CreateMeshVisual(LowerMaxillaResult, Color.FromRgb(120, 220, 210), 1.0);  // teal = LeFort maxilla
+            var upperMesh = CreateMeshVisual(UpperMandibleResult, Color.FromRgb(245, 245, 230), 1.0); // mandible bone colour
+            var lowerMesh = CreateMeshVisual(ChinSegmentResult, Color.FromRgb(120, 220, 210), 1.0);  // teal = Genioplasty chin
             
             MainGroup.Children.Add(upperMesh);
             MainGroup.Children.Add(lowerMesh);
@@ -672,8 +646,8 @@ public partial class LeFortOsteotomyWindow : Window
         while (q.Count > 0) {
             int ti = q.Dequeue();
             for (int edge = 0; edge < 3; edge++) {
-                var kA = VKey(_craniumVerts[ti * 3 + edge]);
-                var kB = VKey(_craniumVerts[ti * 3 + (edge + 1) % 3]);
+                var kA = VKey(_mandibleVerts[ti * 3 + edge]);
+                var kB = VKey(_mandibleVerts[ti * 3 + (edge + 1) % 3]);
                 var ek = string.Compare(kA, kB) < 0 ? kA + "|" + kB : kB + "|" + kA;
                 if (edgeMap.TryGetValue(ek, out var nbrs))
                     foreach (int ni in nbrs)

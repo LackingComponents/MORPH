@@ -1,5 +1,7 @@
 using System.IO;
+using System.IO.Compression;
 using System.Collections.ObjectModel;
+using System.Runtime;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -386,6 +388,7 @@ public partial class MainViewModel : ObservableObject
     
     // Original Volume to prevent additive NHP reslicing
     [ObservableProperty] private VolumeData? _originalVolume;
+    private string? _originalVolumeTempPath; // GZip-compressed OriginalVolume on disk (saves ~200 MB)
 
     // ─── Patient Info ───
     [ObservableProperty] private string _patientName = "";
@@ -450,7 +453,8 @@ public partial class MainViewModel : ObservableObject
 
     // ─── Segmentation (Independent Thresholds) ───
     private SegmentationVolume? _segVolume;
-    private SegmentationVolume? _boneOnlySegVolume; // A pristine backup purely for the Cranium/Mandible split
+    private string? _boneOnlySegVolumeTempPath; // GZip-compressed bone mask on disk (saves ~105 MB)
+    private byte _boneOnlySegVolumeLabel; // Store the bone label for reconstruction
     [ObservableProperty] private double _boneMinHU = 400;
     [ObservableProperty] private double _boneMaxHU = 3071;
     [ObservableProperty] private bool _showBoneOverlay;
@@ -477,9 +481,9 @@ public partial class MainViewModel : ObservableObject
     {
         public List<SegmentViewModel> Segments { get; init; } = new();
         public List<MeshViewModel> ImportedMeshes { get; init; } = new();
-        public SegmentViewModel? HardTissueModel { get; init; }
-        public SegmentViewModel? SoftTissueModel { get; init; }
-        public SegmentViewModel? DentalModel { get; init; }
+        public int HardTissueModelIndex { get; init; } = -1;
+        public int SoftTissueModelIndex { get; init; } = -1;
+        public int DentalModelIndex { get; init; } = -1;
     }
 
     // ─── Direct Volume Rendering (Diffused View) ───
@@ -492,6 +496,11 @@ public partial class MainViewModel : ObservableObject
         {
             SetupVolumeMaterial();
         }
+        else if (!value && VolumeNode != null)
+        {
+            // Release DVR texture data when disabled — saves ~420 MB
+            VolumeNode = null;
+        }
     }
 
     private void SetupVolumeMaterial()
@@ -502,25 +511,28 @@ public partial class MainViewModel : ObservableObject
         int h = Volume.Height;
         int d = Volume.Depth;
 
-        var pixels = new Half[Volume.Voxels.Length * 4];
+        // Use R8G8B8A8_UNorm instead of R16G16B16A16_Float:
+        // saves ~1260 MB (840 MB Half[] + 840 MB copy → 420 MB byte[], no copy)
+        var pixels = new byte[Volume.Voxels.Length * 4];
         
         for (int i = 0; i < Volume.Voxels.Length; i++)
         {
             float hu = Volume.Voxels[i];
             float val = (hu + 1024f) / 4000f; 
             val = Math.Clamp(val, 0f, 1f);
+            byte gray = (byte)(val * 255f);
+            byte alpha = (hu > 200) ? (byte)76 : (byte)0; // 0.3 * 255 ≈ 76
             
-            float alpha = (hu > 200) ? 0.3f : 0f;
-            
-            pixels[i*4 + 0] = (Half)val;
-            pixels[i*4 + 1] = (Half)val;
-            pixels[i*4 + 2] = (Half)val;
-            pixels[i*4 + 3] = (Half)alpha;
+            int j = i * 4;
+            pixels[j]     = gray;  // R
+            pixels[j + 1] = gray;  // G
+            pixels[j + 2] = gray;  // B
+            pixels[j + 3] = alpha; // A
         }
 
         var texParams = new HelixToolkit.SharpDX.Model.VolumeTextureParams(
-            System.Runtime.InteropServices.MemoryMarshal.AsBytes(pixels.AsSpan()).ToArray(),
-            w, h, d, SharpDX.DXGI.Format.R16G16B16A16_Float
+            pixels, // byte[] passed directly — no MemoryMarshal copy needed
+            w, h, d, SharpDX.DXGI.Format.R8G8B8A8_UNorm
         );
 
         // Creates a 1D gradient texture for the lookup map
@@ -540,9 +552,6 @@ public partial class MainViewModel : ObservableObject
             IterationOffset = 1
         };
 
-        // By default, the VolumeTextureNode renders from [-0.5, -0.5, -0.5] to [0.5, 0.5, 0.5].
-        // We scale it up by the CT volume physical dimensions, and translate it by half its size
-        // so it starts at (0,0,0) exactly like our CT meshes do.
         float sizeX = (float)(w * Volume.Spacing[0]);
         float sizeY = (float)(h * Volume.Spacing[1]);
         float sizeZ = (float)(d * Volume.Spacing[2]);
@@ -557,8 +566,6 @@ public partial class MainViewModel : ObservableObject
         var group = new HelixToolkit.SharpDX.Model.Scene.GroupNode();
         group.AddChildNode(node);
         VolumeNode = group;
-        // Release large managed buffers held during texture upload
-        GC.Collect(2, GCCollectionMode.Aggressive, true, true);
     }
 
     // ─── Live 3D Preview ───
@@ -1059,6 +1066,7 @@ public partial class MainViewModel : ObservableObject
 
                     Volume = vol;
                     OriginalVolume = null; // Reset starting position for new project
+                    CleanupTempFiles(); // Delete any temp files from previous session
                     IsVolumeLoaded = true;
                     IsoMin = Math.Max(-1000, (double)vol.MinValue);
                     IsoMax = vol.MaxValue;
@@ -1227,6 +1235,7 @@ public partial class MainViewModel : ObservableObject
                     Application.Current.Dispatcher.Invoke(() => LoadProgress = 40 + p * 60)));
 
             OriginalVolume = null; // Reset starting position for new DICOM
+            CleanupTempFiles(); // Delete any temp files from previous session
 
             // Update UI state
             PatientName = Volume.PatientName;
@@ -1582,11 +1591,16 @@ public partial class MainViewModel : ObservableObject
         LoadProgress = 100;
 
         // Isolate the pure bone mask so that subsequent segmentations (e.g., Dental) do not overwrite and destroy it
+        // Compressed to GZip temp file instead of holding ~105 MB in memory
         if (name.Contains("Bone"))
         {
-            _boneOnlySegVolume = new SegmentationVolume(Volume);
-            Array.Copy(_segVolume.Labels, _boneOnlySegVolume.Labels, _segVolume.Labels.Length);
+            _boneOnlySegVolumeLabel = label;
+            await Task.Run(() => SaveBoneMaskToTemp(_segVolume.Labels));
         }
+
+        // Reclaim LOH fragmentation from the two float[W*H*D] smooth/field arrays used during mesh extraction
+        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+        GC.Collect(2, GCCollectionMode.Aggressive, true, true);
 
         IsLoading = false;
     }
@@ -2116,8 +2130,19 @@ public partial class MainViewModel : ObservableObject
 
             StatusText = "Opening Cranium/Mandible Split wizard...";
 
-            // Use the isolated bone mask if available, so Dental/SoftTissue overwrites don't interfere
-            var splitTargetVolume = _boneOnlySegVolume ?? _segVolume;
+            // Reload the compressed bone mask from temp if available
+            SegmentationVolume? boneOnlySegVol = null;
+            if (_boneOnlySegVolumeTempPath != null && File.Exists(_boneOnlySegVolumeTempPath) && Volume != null)
+            {
+                StatusText = "Decompressing bone mask...";
+                var labels = await Task.Run(() => LoadBoneMaskFromTemp());
+                if (labels != null)
+                {
+                    boneOnlySegVol = new SegmentationVolume(Volume);
+                    Array.Copy(labels, boneOnlySegVol.Labels, labels.Length);
+                }
+            }
+            var splitTargetVolume = boneOnlySegVol ?? _segVolume;
 
             var wizard = new CondyleSplitWindow(
                 MeshHelper.ToVertexList(boneSegment.Vertices),
@@ -2171,8 +2196,10 @@ public partial class MainViewModel : ObservableObject
                 }
 
                 RefreshCombinedModel();
-                // Release the backup bone seg volume — no longer needed after the split
-                _boneOnlySegVolume = null;
+                // Delete the bone mask temp file — no longer needed after the split
+                if (_boneOnlySegVolumeTempPath != null && File.Exists(_boneOnlySegVolumeTempPath))
+                    try { File.Delete(_boneOnlySegVolumeTempPath); } catch { }
+                _boneOnlySegVolumeTempPath = null;
                 GC.Collect(2, GCCollectionMode.Optimized, false);
                 StatusText = $"Split complete. Points saved: L=({LeftCondyleCenter?.X:F1},{LeftCondyleCenter?.Y:F1}), R=({RightCondyleCenter?.X:F1},{RightCondyleCenter?.Y:F1}), Mid=({DentalMidlinePoint?.X:F1},{DentalMidlinePoint?.Y:F1})";
             }
@@ -2188,6 +2215,10 @@ public partial class MainViewModel : ObservableObject
                 "Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
             StatusText = "Cranium/Mandible split failed.";
         }
+
+        // Force cleanup of wizard window's freed resources (EffectsManager, viewport geometry, mesh data)
+        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+        GC.Collect(2, GCCollectionMode.Aggressive, true, true);
     }
 
     [RelayCommand]
@@ -2439,12 +2470,12 @@ public partial class MainViewModel : ObservableObject
     {
         _undoStack.Push(CreateStateSnapshot());
         _redoStack.Clear();
-        // Keep at most 5 undo entries to prevent stale mesh data accumulating in memory
-        if (_undoStack.Count > 5)
+        // Keep at most 2 undo entries to minimize mesh memory retained in stale snapshots
+        while (_undoStack.Count > 2)
         {
-            var kept = _undoStack.ToArray(); // index 0 = newest
+            var kept = _undoStack.ToArray();
             _undoStack.Clear();
-            for (int i = 4; i >= 0; i--) _undoStack.Push(kept[i]);
+            for (int i = 1; i >= 0; i--) _undoStack.Push(kept[i]);
         }
     }
 
@@ -2466,27 +2497,59 @@ public partial class MainViewModel : ObservableObject
 
     private StateSnapshot CreateStateSnapshot()
     {
+        // Clone VMs without Geometry/Material to avoid retaining ~48 MB per segment in undo stack.
+        // Geometry is rebuilt from Vertices via BuildModel() on restore.
+        int hardIdx = HardTissueModel != null ? Segments.IndexOf(HardTissueModel) : -1;
+        int softIdx = SoftTissueModel != null ? Segments.IndexOf(SoftTissueModel) : -1;
+        int dentalIdx = DentalModel != null ? Segments.IndexOf(DentalModel) : -1;
+
         return new StateSnapshot
         {
-            Segments = Segments.ToList(),
-            ImportedMeshes = ImportedMeshes.ToList(),
-            HardTissueModel = HardTissueModel,
-            SoftTissueModel = SoftTissueModel,
-            DentalModel = DentalModel
+            Segments = Segments.Select(s => new SegmentViewModel
+            {
+                Label = s.Label, Name = s.Name, Vertices = s.Vertices,
+                ColorR = s.ColorR, ColorG = s.ColorG, ColorB = s.ColorB,
+                IsVisible = s.IsVisible, Opacity = s.Opacity,
+                SurgicalTransform = s.SurgicalTransform
+                // Geometry and Material intentionally omitted
+            }).ToList(),
+            ImportedMeshes = ImportedMeshes.Select(m => new MeshViewModel
+            {
+                Name = m.Name, Vertices = m.Vertices,
+                ColorR = m.ColorR, ColorG = m.ColorG, ColorB = m.ColorB,
+                IsVisible = m.IsVisible, ScanType = m.ScanType
+                // Geometry and Material intentionally omitted
+            }).ToList(),
+            HardTissueModelIndex = hardIdx,
+            SoftTissueModelIndex = softIdx,
+            DentalModelIndex = dentalIdx
         };
     }
 
     private void RestoreStateSnapshot(StateSnapshot snapshot)
     {
         Segments.Clear();
-        foreach (var s in snapshot.Segments) Segments.Add(s);
+        foreach (var s in snapshot.Segments)
+        {
+            s.OnVisibilityChanged = RefreshCombinedModel;
+            s.BuildModel(); // Rebuild geometry from Vertices
+            Segments.Add(s);
+        }
 
         ImportedMeshes.Clear();
-        foreach (var m in snapshot.ImportedMeshes) ImportedMeshes.Add(m);
+        foreach (var m in snapshot.ImportedMeshes)
+        {
+            m.OnVisibilityChanged = RefreshCombinedModel;
+            m.BuildModel();
+            ImportedMeshes.Add(m);
+        }
 
-        HardTissueModel = snapshot.HardTissueModel;
-        SoftTissueModel = snapshot.SoftTissueModel;
-        DentalModel = snapshot.DentalModel;
+        HardTissueModel = snapshot.HardTissueModelIndex >= 0 && snapshot.HardTissueModelIndex < Segments.Count
+            ? Segments[snapshot.HardTissueModelIndex] : null;
+        SoftTissueModel = snapshot.SoftTissueModelIndex >= 0 && snapshot.SoftTissueModelIndex < Segments.Count
+            ? Segments[snapshot.SoftTissueModelIndex] : null;
+        DentalModel = snapshot.DentalModelIndex >= 0 && snapshot.DentalModelIndex < Segments.Count
+            ? Segments[snapshot.DentalModelIndex] : null;
 
         RefreshCombinedModel();
     }
@@ -2505,7 +2568,25 @@ public partial class MainViewModel : ObservableObject
         double dPitch = 0, double dRoll = 0, double dYaw = 0,
         double dLat   = 0, double dAnt  = 0, double dVert = 0)
     {
-        if (OriginalVolume == null) OriginalVolume = Volume; // Initial capture
+        // On first reslice: capture + serialize OriginalVolume to temp, then null in-memory copy
+        if (OriginalVolume == null)
+        {
+            // Try reloading from temp file first (saved ~200 MB by keeping on disk between reslices)
+            if (_originalVolumeTempPath != null && File.Exists(_originalVolumeTempPath))
+            {
+                StatusText = "Reloading baseline volume from temp...";
+                OriginalVolume = await Task.Run(() => LoadOriginalVolumeFromTemp());
+            }
+            else
+            {
+                OriginalVolume = Volume;
+                if (Volume != null)
+                {
+                    StatusText = "Saving baseline volume to temp...";
+                    await Task.Run(() => SaveOriginalVolumeToTemp(Volume));
+                }
+            }
+        }
         if (OriginalVolume == null || BoneOnlyBounds.IsEmpty) return;
 
         StatusText = "Calculating exact physical volume bounds...";
@@ -2662,6 +2743,85 @@ public partial class MainViewModel : ObservableObject
             StatusText = "NHP Alignment Complete. Model frozen.";
             OnPropertyChanged(nameof(IsNhpDirty));
         });
+
+        // Release OriginalVolume from managed heap — it lives in the temp file now (~200 MB saved)
+        OriginalVolume = null;
+        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+        GC.Collect(2, GCCollectionMode.Aggressive, true, true);
+    }
+
+    // ─── GZip Temp File Helpers (bone mask + OriginalVolume) ───
+
+    private void SaveBoneMaskToTemp(byte[] labels)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"ortho_bone_mask_{Guid.NewGuid():N}.gz");
+        using (var fs = File.Create(path))
+        using (var gz = new GZipStream(fs, CompressionLevel.Fastest))
+            gz.Write(labels, 0, labels.Length);
+        _boneOnlySegVolumeTempPath = path;
+    }
+
+    private byte[]? LoadBoneMaskFromTemp()
+    {
+        if (_boneOnlySegVolumeTempPath == null || !File.Exists(_boneOnlySegVolumeTempPath)) return null;
+        using var fs = File.OpenRead(_boneOnlySegVolumeTempPath);
+        using var gz = new GZipStream(fs, CompressionMode.Decompress);
+        using var ms = new MemoryStream();
+        gz.CopyTo(ms);
+        return ms.ToArray();
+    }
+
+    private void SaveOriginalVolumeToTemp(VolumeData vol)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"ortho_orig_vol_{Guid.NewGuid():N}.gz");
+        using (var fs = File.Create(path))
+        using (var gz = new GZipStream(fs, CompressionLevel.Fastest))
+        using (var bw = new BinaryWriter(gz))
+        {
+            bw.Write(vol.Width);
+            bw.Write(vol.Height);
+            bw.Write(vol.Depth);
+            bw.Write(vol.Spacing[0]);
+            bw.Write(vol.Spacing[1]);
+            bw.Write(vol.Spacing[2]);
+            // Write voxels as raw bytes
+            var bytes = new byte[vol.Voxels.Length * 2];
+            Buffer.BlockCopy(vol.Voxels, 0, bytes, 0, bytes.Length);
+            bw.Write(bytes.Length);
+            bw.Write(bytes);
+        }
+        _originalVolumeTempPath = path;
+    }
+
+    private VolumeData? LoadOriginalVolumeFromTemp()
+    {
+        if (_originalVolumeTempPath == null || !File.Exists(_originalVolumeTempPath)) return null;
+        using var fs = File.OpenRead(_originalVolumeTempPath);
+        using var gz = new GZipStream(fs, CompressionMode.Decompress);
+        using var br = new BinaryReader(gz);
+        int w = br.ReadInt32();
+        int h = br.ReadInt32();
+        int d = br.ReadInt32();
+        double sx = br.ReadDouble();
+        double sy = br.ReadDouble();
+        double sz = br.ReadDouble();
+        var vol = new VolumeData(w, h, d, new[] { sx, sy, sz });
+        int byteLen = br.ReadInt32();
+        var bytes = br.ReadBytes(byteLen);
+        Buffer.BlockCopy(bytes, 0, vol.Voxels, 0, byteLen);
+        vol.ComputeMinMax();
+        return vol;
+    }
+
+    private void CleanupTempFiles()
+    {
+        if (_boneOnlySegVolumeTempPath != null)
+            try { if (File.Exists(_boneOnlySegVolumeTempPath)) File.Delete(_boneOnlySegVolumeTempPath); } catch { }
+        _boneOnlySegVolumeTempPath = null;
+
+        if (_originalVolumeTempPath != null)
+            try { if (File.Exists(_originalVolumeTempPath)) File.Delete(_originalVolumeTempPath); } catch { }
+        _originalVolumeTempPath = null;
     }
 }
 

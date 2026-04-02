@@ -6,10 +6,10 @@ namespace OrthoPlanner.Core.Imaging;
 /// </summary>
 public static class MarchingCubes
 {
-    public static List<float[]> Extract(
+    public static float[] Extract(
         VolumeData volume, double isoValue, int stepSize = 1, Action<double>? progress = null)
     {
-        var vertices = new List<float[]>();
+        var vertices = new List<float>();
         int w = volume.Width - 1;
         int h = volume.Height - 1;
         int d = volume.Depth - 1;
@@ -71,14 +71,17 @@ public static class MarchingCubes
                 int offset = cubeIndex * 16;
                 for (int i = 0; i < 16 && TriTable[offset + i] != -1; i += 3)
                 {
-                    vertices.Add(edgeVerts[TriTable[offset + i]]);
-                    vertices.Add(edgeVerts[TriTable[offset + i + 1]]);
-                    vertices.Add(edgeVerts[TriTable[offset + i + 2]]);
+                    var ev0 = edgeVerts[TriTable[offset + i]];
+                    var ev1 = edgeVerts[TriTable[offset + i + 1]];
+                    var ev2 = edgeVerts[TriTable[offset + i + 2]];
+                    vertices.Add(ev0[0]); vertices.Add(ev0[1]); vertices.Add(ev0[2]);
+                    vertices.Add(ev1[0]); vertices.Add(ev1[1]); vertices.Add(ev1[2]);
+                    vertices.Add(ev2[0]); vertices.Add(ev2[1]); vertices.Add(ev2[2]);
                 }
             }
             progress?.Invoke((double)(z + 1) / d);
         }
-        return vertices;
+        return vertices.ToArray();
     }
 
     // Edge pairs: each edge connects two corner vertices
