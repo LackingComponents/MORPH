@@ -6,7 +6,9 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using HelixToolkit.Wpf.SharpDX;
+using HelixToolkit.SharpDX;
 using OrthoPlanner.Core.Geometry;
+using OrthoPlanner.App.ViewModels;
 
 namespace OrthoPlanner.App;
 
@@ -68,7 +70,7 @@ public partial class BssoOsteotomyWindow : Window
     public BssoOsteotomyWindow(List<float[]> mandibleVerts)
     {
         InitializeComponent();
-        MainViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
+        MainViewport.EffectsManager = new DefaultEffectsManager();
         CompositionTarget.Rendering += (_, _) => {
             var d = SubCamera.LookDirection;
             if (d.Length > 0.001) { d.Normalize(); Headlamp.Direction = new Vector3D(-d.X,-d.Y,-d.Z); Backlamp.Direction = new Vector3D(d.X,d.Y,d.Z); }
@@ -96,9 +98,8 @@ public partial class BssoOsteotomyWindow : Window
     private void HiHalf(bool left) {
         float mx = _mandibleVerts.Count>0 ? _mandibleVerts.Average(v=>v[0]) : 0f;
         var h = HalfV(left,mx);
-        var b = new HelixToolkit.Geometry.MeshBuilder();
-        for(int i=0;i+2<h.Count;i+=3) b.AddTriangle(Nv(h[i]),Nv(h[i+1]),Nv(h[i+2]));
-        _hoveredHalf.Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(b.ToMesh());
+        var hMesh = MeshHelper.BuildSmoothMesh(h);
+        _hoveredHalf.Geometry = hMesh;
     }
     private void OvH(bool left, bool show) {
         var brd = (FindName(left?"LeftOverlay":"RightOverlay") as System.Windows.Controls.Border)!;
@@ -599,10 +600,12 @@ public partial class BssoOsteotomyWindow : Window
     private void Cancel_Click(object s, RoutedEventArgs e) { DialogResult=false; Close(); }
 
     // ── Utilities ────────────────────────────────────────────────────────────
-    private MeshGeometryModel3D MkBone(List<float[]> v, HelixToolkit.Maths.Color4 c) {
-        var b = new HelixToolkit.Geometry.MeshBuilder();
-        for(int i=0;i+2<v.Count;i+=3) b.AddTriangle(Nv(v[i]),Nv(v[i+1]),Nv(v[i+2]));
-        return new MeshGeometryModel3D{ Geometry=HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(b.ToMesh()), Material=new PhongMaterial{DiffuseColor=c} };
+    private MeshGeometryModel3D MkBone(List<float[]> v, HelixToolkit.Maths.Color4 col) {
+        var mesh = MeshHelper.BuildSmoothMesh(v);
+        return new MeshGeometryModel3D {
+            Geometry = mesh,
+            Material = MeshHelper.BoneMaterial(col)
+        };
     }
     private MeshGeometryModel3D Sph(Point3D c, float r=2.2f) {
         var b = new HelixToolkit.Geometry.MeshBuilder(); b.AddSphere(new System.Numerics.Vector3(0,0,0),r);

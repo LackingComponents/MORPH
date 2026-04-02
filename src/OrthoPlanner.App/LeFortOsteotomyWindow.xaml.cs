@@ -6,7 +6,9 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using HelixToolkit.Wpf.SharpDX;
+using HelixToolkit.SharpDX;
 using OrthoPlanner.Core.Geometry;
+using OrthoPlanner.App.ViewModels;
 
 namespace OrthoPlanner.App;
 
@@ -38,7 +40,6 @@ public partial class LeFortOsteotomyWindow : Window
     private Point3D _rightPost = new(), _rightDrop = new();
     private MeshGeometryModel3D? _lpVis, _ldVis, _rpVis, _rdVis;
     private GroupModel3D _polyplaneVis = new();
-    private EventHandler? _renderingHandler;
 
     public LeFortOsteotomyWindow(List<float[]> craniumVerts)
     {
@@ -46,11 +47,10 @@ public partial class LeFortOsteotomyWindow : Window
         
         MainViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
 
-        _renderingHandler = (_, _) => {
+        CompositionTarget.Rendering += (_, _) => {
             var d = SubCamera.LookDirection;
             if (d.Length > 0.001) { d.Normalize(); Headlamp.Direction = new System.Windows.Media.Media3D.Vector3D(-d.X, -d.Y, -d.Z); Backlamp.Direction = new System.Windows.Media.Media3D.Vector3D(d.X, d.Y, d.Z); }
         };
-        CompositionTarget.Rendering += _renderingHandler;
 
         _craniumVerts = craniumVerts;
 
@@ -63,20 +63,6 @@ public partial class LeFortOsteotomyWindow : Window
         MainGroup.Children.Add(_polyplaneVis);
 
         Loaded += (_, _) => CenterOn(_craniumVerts);
-        Closed += OnWindowClosed;
-    }
-
-    private void OnWindowClosed(object? sender, EventArgs e)
-    {
-        if (_renderingHandler != null)
-        {
-            CompositionTarget.Rendering -= _renderingHandler;
-            _renderingHandler = null;
-        }
-        MainGroup.Children.Clear();
-        if (MainViewport.EffectsManager is IDisposable disposable)
-            disposable.Dispose();
-        MainViewport.EffectsManager = null;
     }
 
     private void CenterOn(List<float[]> v) {
@@ -94,21 +80,13 @@ public partial class LeFortOsteotomyWindow : Window
 
     private MeshGeometryModel3D CreateMeshVisual(List<float[]> verts, Color color, double opacity)
     {
-        var builder = new HelixToolkit.Geometry.MeshBuilder();
-        for (int i = 0; i < verts.Count; i += 3)
+        var col = new HelixToolkit.Maths.Color4(color.R / 255f, color.G / 255f, color.B / 255f, (float)opacity);
+        return new MeshGeometryModel3D
         {
-            if (i + 2 < verts.Count)
-            {
-                builder.AddTriangle(
-                    new System.Numerics.Vector3(verts[i][0], verts[i][1], verts[i][2]),
-                    new System.Numerics.Vector3(verts[i + 1][0], verts[i + 1][1], verts[i + 1][2]),
-                    new System.Numerics.Vector3(verts[i + 2][0], verts[i + 2][1], verts[i + 2][2]));
-            }
-        }
-        
-        var geom = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh());
-        var mat = new PhongMaterial { DiffuseColor = new HelixToolkit.Maths.Color4(color.R / 255f, color.G / 255f, color.B / 255f, (float)opacity) };
-        return new MeshGeometryModel3D { Geometry = geom, Material = mat };
+            Geometry = MeshHelper.BuildSmoothMesh(verts),
+            Material = MeshHelper.BoneMaterial(col),
+            CullMode  = SharpDX.Direct3D11.CullMode.None   // visible from both sides (cut surface)
+        };
     }
 
     // ═══════════════════════════════════
@@ -339,10 +317,14 @@ public partial class LeFortOsteotomyWindow : Window
                 new System.Numerics.Vector3(meshVerts[i+2][0], meshVerts[i+2][1], meshVerts[i+2][2]));
 
         _polyplaneMesh.Material = new PhongMaterial { 
-            DiffuseColor = new HelixToolkit.Maths.Color4(0f, 1f, 1f, 0.25f),
-            EmissiveColor = new HelixToolkit.Maths.Color4(0f, 1f, 1f, 0.25f)
+            DiffuseColor  = new HelixToolkit.Maths.Color4(0f, 1f, 1f, 0.25f),
+            EmissiveColor = new HelixToolkit.Maths.Color4(0f, 0.6f, 0.8f, 0.25f),
+            SpecularColor = new HelixToolkit.Maths.Color4(0.5f, 0.9f, 1f, 1f),
+            SpecularShininess = 40f
         };
-        _polyplaneMesh.Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(mb.ToMesh());
+        var polyGeom = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(mb.ToMesh());
+        polyGeom.UpdateNormals();
+        _polyplaneMesh.Geometry = polyGeom;
 
         // Outer perimeter contour tracing the handles strictly:
         var ac = _controlPoints;

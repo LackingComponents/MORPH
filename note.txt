@@ -1,0 +1,26 @@
+Riassunto ottimizzazioni MORPH — da CPU-only a GPU+CPU
+
+
+Il software originale era scritto interamente in C# puro senza alcuna libreria di accelerazione. Tutti gli algoritmi pesanti usavano loop sequenziali for z/y/x su array di voxel che possono contenere decine di milioni di elementi (un volume CT tipico è 512×512×300 = ~78 milioni di voxel). Il problema non era un bug — era una scelta architetturale: nessuno aveva mai integrato un backend GPU.
+I colli di bottiglia specifici erano questi:
+Segmentazione threshold — per ogni voxel del volume si controllava se il valore HU era nel range [minHU, maxHU]. Con 78 milioni di voxel indipendenti tra loro, il loop girava su un solo core in sequenza.
+Marching Cubes — l'algoritmo che converte il volume CT in mesh 3D iterava su ogni "cubo" del volume (circa 77 milioni) in modo completamente sequenziale, allocando un new float[] per ogni vertice generato. Questo causava sia saturazione CPU che pressione enorme sul garbage collector.
+Morphological Closing e Smoothing — operazioni di dilatazione/erosione morfologica e smoothing con majority vote 3×3×3 usavano triple loop sequenziali senza nessun parallelismo.
+Reslice Volume — la rotazione trilineare del volume usava un Parallel.For solo sulla riga z, che era l'unica ottimizzazione presente nell'originale.
+ICP Aligner — la ricerca del nearest neighbor per ogni punto sorgente verso il target girava in sequenza, così come l'applicazione della trasformazione a tutti i vertici.
+MeshOps — tutte le operazioni sulle mesh (SubtractByProximity, SplitByZPlane, ClipBoundingBox ecc.) usavano loop for i sequenziali su mesh che possono avere centinaia di migliaia di triangoli.
+
+Cosa è stato aggiunto e perché ora usa la GPU
+GpuContext.cs — nuovo file che gestisce la connessione alla GPU tramite ILGPU. All'avvio prova in ordine: CUDA (NVIDIA), poi OpenCL (AMD/Intel/NVIDIA senza CUDA toolkit), poi ricade su CPU con SIMD. Questo significa che l'app funziona su qualsiasi hardware senza configurazione manuale.
+GpuKernels.cs — nuovo file con tutti i kernel GPU. Un kernel è una funzione che invece di girare su 1 core in sequenza gira su migliaia di thread GPU in parallelo, uno per voxel o per triangolo. Ogni thread fa pochissimo lavoro ma tutti lavorano contemporaneamente.
+OrthoPlanner.Core.csproj — aggiunte le dipendenze ILGPU 1.5.x che forniscono il bridge tra C# e CUDA/OpenCL.
+
+Le modifiche file per file
+SegmentationEngine.cs — ThresholdSegment ora carica i voxel sulla VRAM e lancia il kernel GPU che etichetta tutti i voxel in parallelo. Con una RTX 3070 che ha 5888 CUDA cores, invece di processare 1 voxel alla volta ne processa 5888 simultaneamente. MorphologicalClosing e SmoothLabelMask seguono lo stesso schema. Tutti i metodi hanno un try/catch che ricade automaticamente su Parallel.For se la GPU non è disponibile o lancia un errore.
+MarchingCubes.cs — il calcolo del cube-index (determinare per ognuno degli 8 angoli di ogni cubo se è dentro o fuori l'isosurface) ora gira su GPU. L'interpolazione dei vertici usa Parallel.For con liste thread-local per evitare lock e ridurre le allocazioni GC.
+IcpAligner.cs — la ricerca nearest-neighbor e l'applicazione della trasformazione ora usano Parallel.For, sfruttando tutti i core CPU. L'array dei punti sorgente è stato cambiato da double[n, 3] (multidimensionale, cache-unfriendly) a double[n*3] flat che il prefetcher della CPU gestisce molto meglio.
+MeshOps.cs — SubtractByProximity, SplitByZPlane, ClipBoundingBox, ExcludeBoundingBox e SubtractByArchVolume ora usano Parallel.For con un array bool[] keepFlags che permette di decidere quali triangoli tenere in parallelo senza conflitti di scrittura.
+
+Speedup atteso in pratica
+OperazionePrimaDopoThreshold segmentation (78M voxel)~8s~0.3s GPU / ~1.5s CPU parallelMarching Cubes (mesh estrazione)~15s~3s GPU+parallelMorphological Closing~6s/iter~0.5s GPU / ~1.2s CPU parallelICP alignment~4s~0.8s parallelMesh ops (subtract/split)~2s~0.3s parallel
+I numeri esatti dipendono dalla GPU e dal numero di core CPU, ma l'ordine di grandezza è quello. Su una macchina senza GPU dedicata i guadagni vengono solo dal Parallel.For — tipicamente 4-8x su un quad-core moderno.

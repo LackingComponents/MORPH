@@ -60,7 +60,6 @@ public partial class CondyleSplitWindow : Window
     private List<float[]>? _craniumVerts;
     private List<float[]>? _mandibleVerts;
     private int _currentStep = 1;
-    private EventHandler? _renderingHandler; // Must be stored to unsubscribe from static CompositionTarget.Rendering
 
     // Track the order of point placement: RN=0, RP=1, IN=2, LP=3, LN=4
     private readonly string[] _pointNames = { 
@@ -118,13 +117,12 @@ public partial class CondyleSplitWindow : Window
         
         MainViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
 
-        // Track camera for coaxial headlamp — store handler so we can unsubscribe on close
-        _renderingHandler = (s, _) =>
+        // Track camera for coaxial headlamp — CompositionTarget.Rendering fires every frame
+        System.Windows.Media.CompositionTarget.Rendering += (s, _) =>
         {
             var dir = SubCamera.LookDirection;
             if (dir.Length > 0.001) { dir.Normalize(); Headlamp.Direction = new System.Windows.Media.Media3D.Vector3D(-dir.X, -dir.Y, -dir.Z); Backlamp.Direction = new System.Windows.Media.Media3D.Vector3D(dir.X, dir.Y, dir.Z); }
         };
-        System.Windows.Media.CompositionTarget.Rendering += _renderingHandler;
 
         _boneVerts = boneVerts.Select(v => new float[] { v[0], v[1], v[2] }).ToList();
         _ctVolume = ctVolume;
@@ -132,27 +130,6 @@ public partial class CondyleSplitWindow : Window
         _boneLabel = boneLabel;
         _boneMinHu = boneMinHu;
         Loaded += (_, _) => SetupStep1();
-        Closed += OnWindowClosed;
-    }
-
-    private void OnWindowClosed(object? sender, EventArgs e)
-    {
-        // CRITICAL: Unsubscribe from static event to allow GC of this window
-        if (_renderingHandler != null)
-        {
-            System.Windows.Media.CompositionTarget.Rendering -= _renderingHandler;
-            _renderingHandler = null;
-        }
-
-        // Release large data fields
-        _craniumVerts = null;
-        _mandibleVerts = null;
-
-        // Clear viewport and dispose DirectX resources
-        MainGroup.Children.Clear();
-        if (MainViewport.EffectsManager is IDisposable disposable)
-            disposable.Dispose();
-        MainViewport.EffectsManager = null;
     }
 
     // ═══════════════════════════════════
@@ -647,7 +624,7 @@ public partial class CondyleSplitWindow : Window
         var craniumMesh = SegmentationEngine.ExtractSegmentMesh(ctVol, segVol, cranLabel, 1);
         var mandibleMesh = SegmentationEngine.ExtractSegmentMesh(ctVol, segVol, finalMandibleLabel, 1);
 
-        return (MeshHelper.ToVertexList(craniumMesh), MeshHelper.ToVertexList(mandibleMesh));
+        return (craniumMesh, mandibleMesh);
     }
 
     private static bool IsInBox(float x, float y, float z, float[] center, float[] he)

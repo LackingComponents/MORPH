@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media.Media3D;
 using HelixToolkit.Wpf.SharpDX;
+using HelixToolkit.SharpDX;
 using OrthoPlanner.Core.Geometry;
 using OrthoPlanner.App.ViewModels;
 
@@ -27,43 +28,24 @@ public partial class OcclusionAlignmentWindow : Window
     public double[,]? MaxillaTransform { get; private set; }
     public double[,]? MandibleTransform { get; private set; }
     public bool Accepted { get; private set; }
-    private EventHandler? _renderingHandler;
 
     public OcclusionAlignmentWindow(List<float[]> maxillaVertices, List<float[]> mandibleVertices, List<float[]> occlusionVertices)
     {
         InitializeComponent();
 
-        BoneViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
-        OccViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
-
+        BoneViewport.EffectsManager = new DefaultEffectsManager();
+        OccViewport.EffectsManager = new DefaultEffectsManager();
         _maxillaVertices = maxillaVertices ?? new List<float[]>();
         _mandibleVertices = mandibleVertices ?? new List<float[]>();
         _occlusionVertices = occlusionVertices ?? new List<float[]>();
 
-        _renderingHandler = (s, e) =>
+        System.Windows.Media.CompositionTarget.Rendering += (s, e) =>
         {
             UpdateLighting(BoneCamera, BoneHeadlamp, BoneBacklamp);
             UpdateLighting(OccCamera, OccHeadlamp, OccBacklamp);
         };
-        System.Windows.Media.CompositionTarget.Rendering += _renderingHandler;
 
         Loaded += (_, _) => LoadCurrentBone();
-        Closed += OnWindowClosed;
-    }
-
-    private void OnWindowClosed(object? sender, EventArgs e)
-    {
-        if (_renderingHandler != null)
-        {
-            System.Windows.Media.CompositionTarget.Rendering -= _renderingHandler;
-            _renderingHandler = null;
-        }
-        BoneGroup.Children.Clear();
-        OccGroup.Children.Clear();
-        if (BoneViewport.EffectsManager is IDisposable d1) d1.Dispose();
-        if (OccViewport.EffectsManager is IDisposable d2) d2.Dispose();
-        BoneViewport.EffectsManager = null;
-        OccViewport.EffectsManager = null;
     }
 
     private void UpdateLighting(HelixToolkit.Wpf.SharpDX.PerspectiveCamera camera, DirectionalLight3D headlamp, DirectionalLight3D backlamp)
@@ -236,11 +218,12 @@ public partial class OcclusionAlignmentWindow : Window
         RmsText.Text = $"RMS: {result.RmsError:F3}";
         if (MaxillaTransform != null && MandibleTransform != null) AcceptBtn.IsEnabled = true;
 
-        // Visual preview
-        var preview = verts.Select(v => new float[] { v[0], v[1], v[2] }).ToList();
-        IcpAligner.TransformVertices(preview, result.Transform);
+        // Visual preview — copy flat, transform, rebuild smooth mesh
+        var previewFlat = MeshHelper.ToFlatArray(verts);
+        var previewList  = MeshHelper.ToVertexList(previewFlat);
+        IcpAligner.TransformVertices(previewList, result.Transform);
         BoneGroup.Children.Clear();
-        BoneGroup.Children.Add(MeshHelper.BuildModel3D(preview, 255, 200, 100));
+        BoneGroup.Children.Add(MeshHelper.BuildModel3D(previewList, 255, 200, 100));
         foreach (var v in _boneMarkerVisuals.Where(v => v != null)) BoneGroup.Children.Add(v);
     }
 
