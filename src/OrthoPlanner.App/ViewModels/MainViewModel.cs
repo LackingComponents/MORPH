@@ -445,26 +445,140 @@ public partial class MainViewModel : ObservableObject
                 var manOccTxMat = ConvertToMatrix3D(resultManToOcc.Transform);
 
                 System.Windows.Application.Current.Dispatcher.Invoke(() => {
-                    // Store the occlusion transforms
-                    occlusion.MaxillaOcclusionTransform = maxOccTxMat;
-                    occlusion.MandibleOcclusionTransform = manOccTxMat;
+                    StatusText = "Review alignment in the Checker Window...";
+                    
+                    var wizard = new OcclusionCheckerWindow(
+                        maxillaVertsList, 
+                        mandibleVertsList, 
+                        occVertsList, 
+                        resultManToOcc.RmsError)
+                    {
+                        Owner = Application.Current.MainWindow
+                    };
 
-                    // Update GUI transform properties to force trigger UpdateTransforms()
-                    // The user requested to set the default behavior based on toggle.
-                    // The UpdateSurgeryTransform method will use these.
-                    
-                    // But first apply transformations visually to the occlusion mesh to show where it landed
-                    var finalOccTx = ConvertToMatrix3D(resultOccToMax.Transform);
-                    occlusion.Transform = new System.Windows.Media.Media3D.MatrixTransform3D(finalOccTx);
-                    
-                    UpdateSurgeryTransform();
-                    StatusText = $"Successfully aligned Occlusion STL automatically. RMS=" + resultManToOcc.RmsError.ToString("0.000");
+                    if (wizard.ShowDialog() == true && wizard.Accepted)
+                    {
+                        // Store the occlusion transforms
+                        occlusion.MaxillaOcclusionTransform = maxOccTxMat;
+                        occlusion.MandibleOcclusionTransform = manOccTxMat;
+
+                        // Apply transformations visually to the occlusion mesh to show where it landed
+                        var finalOccTx = ConvertToMatrix3D(resultOccToMax.Transform);
+                        occlusion.Transform = new System.Windows.Media.Media3D.MatrixTransform3D(finalOccTx);
+                        
+                        UpdateSurgeryTransform();
+                        StatusText = $"Successfully aligned Occlusion STL automatically. RMS=" + resultManToOcc.RmsError.ToString("0.000");
+                    }
+                    else
+                    {
+                        StatusText = "Automated occlusion alignment cancelled.";
+                    }
                 });
             });
         }
         catch (Exception ex)
         {
             StatusText = "Error during automated occlusion alignment: " + ex.Message;
+        }
+    }
+
+    [RelayCommand]
+    private async Task OpenManualOcclusionAlignmentAsync()
+    {
+        await LoadOcclusionAsync();
+        var occlusion = LoadedOcclusions.FirstOrDefault(o => o.IsVisible);
+        if (occlusion == null || occlusion.Vertices == null) return;
+
+        var maxilla = Segments.FirstOrDefault(s => s.Name != null && s.Name.Contains("Maxilla"));
+        var mandible = Segments.FirstOrDefault(s => s.Name != null && s.Name.Contains("Mandible") && !s.Name.Contains("Cranium") && !s.Name.StartsWith("Ramus"));
+
+        if (maxilla == null || mandible == null || maxilla.Vertices == null || mandible.Vertices == null)
+        {
+            System.Windows.MessageBox.Show("Maxilla or Mandible bone segments not found or segmented. Please segment them first.", "Missing Bones", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            return;
+        }
+
+        var maxillaVertsList = MeshHelper.ToVertexList(maxilla.Vertices);
+        var mandibleVertsList = MeshHelper.ToVertexList(mandible.Vertices);
+        var occVertsList = MeshHelper.ToVertexList(occlusion.Vertices);
+
+        var manualWizard = new ManualOcclusionAlignmentWindow(maxillaVertsList, mandibleVertsList, occVertsList)
+        {
+            Owner = Application.Current.MainWindow
+        };
+
+        if (manualWizard.ShowDialog() == true && manualWizard.Accepted && manualWizard.InitialLandmarkTransform != null)
+        {
+            SaveStateForUndo();
+            StatusText = "Computing manual occlusion alignment... (Refining with ICP)";
+            
+            try
+            {
+                await Task.Run(() => 
+                {
+                    // Target is either Maxilla or Mandible based on what the user picked in the dropdown
+                    var targetVerts = manualWizard.IsMaxillaSelected ? maxillaVertsList : mandibleVertsList;
+                    
+                    // 1. First ICP: Pull Occlusion to the selected Bone
+                    var resultOccToBone = OrthoPlanner.Core.Geometry.IcpAligner.Align(
+                        occVertsList, targetVerts, manualWizard.InitialLandmarkTransform, 
+                        maxIterations: 150, tolerance: 0.0005, trimRatio: 0.70);
+
+                    // We now mathematically move the occlusion points directly
+                    OrthoPlanner.Core.Geometry.IcpAligner.TransformVertices(occVertsList, resultOccToBone.Transform);
+
+                    // 2. Second ICP: Pull the OTHER bone exactly into the occlusion bite
+                    var otherVerts = manualWizard.IsMaxillaSelected ? mandibleVertsList : maxillaVertsList;
+                    var initialOtherTx = new double[4, 4] { {1,0,0,0}, {0,1,0,0}, {0,0,1,0}, {0,0,0,1} };
+                    
+                    var resultBoneToOcc = OrthoPlanner.Core.Geometry.IcpAligner.Align(
+                        otherVerts, occVertsList, initialOtherTx, 
+                        maxIterations: 150, tolerance: 0.0005, trimRatio: 0.70);
+
+                    System.Windows.Application.Current.Dispatcher.Invoke(() => {
+                        var checker = new OcclusionCheckerWindow(
+                            maxillaVertsList, 
+                            mandibleVertsList, 
+                            occVertsList, 
+                            resultBoneToOcc.RmsError)
+                        {
+                            Owner = Application.Current.MainWindow
+                        };
+
+                        if (checker.ShowDialog() == true && checker.Accepted)
+                        {
+                            if (manualWizard.IsMaxillaSelected)
+                            {
+                                occlusion.MaxillaOcclusionTransform = System.Windows.Media.Media3D.Matrix3D.Identity;
+                                occlusion.MandibleOcclusionTransform = ConvertToMatrix3D(resultBoneToOcc.Transform);
+                            }
+                            else
+                            {
+                                occlusion.MandibleOcclusionTransform = System.Windows.Media.Media3D.Matrix3D.Identity;
+                                occlusion.MaxillaOcclusionTransform = ConvertToMatrix3D(resultBoneToOcc.Transform);
+                            }
+
+                            var finalOccTx = ConvertToMatrix3D(resultOccToBone.Transform);
+                            occlusion.Transform = new System.Windows.Media.Media3D.MatrixTransform3D(finalOccTx);
+                            
+                            UpdateSurgeryTransform();
+                            StatusText = $"Successfully aligned Occlusion STL manually. RMS=" + resultBoneToOcc.RmsError.ToString("0.000");
+                        }
+                        else
+                        {
+                            StatusText = "Manual occlusion alignment cancelled.";
+                        }
+                    });
+                });
+            }
+            catch (Exception ex)
+            {
+                StatusText = "Error during manual occlusion alignment: " + ex.Message;
+            }
+        }
+        else
+        {
+            StatusText = "Manual alignment was cancelled.";
         }
     }
 

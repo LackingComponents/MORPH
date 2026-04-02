@@ -1,0 +1,67 @@
+<Window x:Class="OrthoPlanner.App.OcclusionCheckerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:hx="http://helix-toolkit.org/wpf/SharpDX"
+        Title="Occlusion Alignment Checker" Width="1000" Height="700"
+        Background="#FF0F111A" WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip">
+    <Window.Resources>
+        <SolidColorBrush x:Key="BrandPurple" Color="#FF6B44FF"/>
+        <Style x:Key="ActionButton" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource BrandPurple}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Padding" Value="24,10"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Border Background="#FF1E222A" BorderBrush="#FF30343D" BorderThickness="0,0,0,1" Padding="20">
+            <StackPanel>
+                <TextBlock Text="Automated Alignment Checker" FontSize="18" FontWeight="Bold" Foreground="White" Margin="0,0,0,4"/>
+                <TextBlock Text="Verify the position of the occlusion scan against the segmented Maxilla and Mandible bones." FontSize="13" Foreground="#FFA0AABF"/>
+            </StackPanel>
+        </Border>
+
+        <!-- 3D Preview -->
+        <Border Grid.Row="1" Margin="20" Background="#FF161920" BorderBrush="#FF30343D" BorderThickness="1" CornerRadius="8" ClipToBounds="True">
+            <hx:Viewport3DX x:Name="CheckerViewport" BackgroundColor="#161920" ShowCoordinateSystem="False" ShowViewCube="False">
+                <hx:Viewport3DX.Camera>
+                    <hx:PerspectiveCamera x:Name="MainCamera" Position="0,200,-50" LookDirection="0,-200,50" UpDirection="0,0,1" NearPlaneDistance="0.1" FarPlaneDistance="10000"/>
+                </hx:Viewport3DX.Camera>
+                <hx:DirectionalLight3D x:Name="Headlamp" Direction="0,-1,0.5" Color="White"/>
+                <hx:DirectionalLight3D x:Name="Backlamp" Direction="0,1,-0.5" Color="#FF808080"/>
+                <hx:GroupModel3D x:Name="ViewGroup"/>
+            </hx:Viewport3DX>
+        </Border>
+
+        <!-- Footer -->
+        <Border Grid.Row="2" Background="#FF1E222A" BorderBrush="#FF30343D" BorderThickness="0,1,0,0" Padding="20">
+            <Grid>
+                <TextBlock x:Name="RmsText" Text="RMS Error: -" VerticalAlignment="Center" Foreground="#FFA0AABF" FontSize="14" FontWeight="SemiBold"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="Discard &amp; Cancel" Click="Cancel_Click" Background="#FF30343D" Foreground="White" Padding="16,10" BorderThickness="0" Margin="0,0,12,0" Style="{StaticResource ActionButton}"/>
+                    <Button Content="Accept Alignment" Click="Accept_Click" Style="{StaticResource ActionButton}"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
