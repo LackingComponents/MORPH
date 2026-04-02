@@ -502,78 +502,30 @@ public partial class MainViewModel : ObservableObject
         var mandibleVertsList = MeshHelper.ToVertexList(mandible.Vertices);
         var occVertsList = MeshHelper.ToVertexList(occlusion.Vertices);
 
-        var manualWizard = new ManualOcclusionAlignmentWindow(maxillaVertsList, mandibleVertsList, occVertsList)
+        var manualWizard = new ManualOcclusionAlignmentWindow(maxilla, mandible, occlusion)
         {
             Owner = Application.Current.MainWindow
         };
 
-        if (manualWizard.ShowDialog() == true && manualWizard.Accepted && manualWizard.InitialLandmarkTransform != null)
+        if (manualWizard.ShowDialog() == true && manualWizard.Accepted)
         {
             SaveStateForUndo();
-            StatusText = "Computing manual occlusion alignment... (Refining with ICP)";
-            
             try
             {
-                await Task.Run(() => 
-                {
-                    // Target is either Maxilla or Mandible based on what the user picked in the dropdown
-                    var targetVerts = manualWizard.IsMaxillaSelected ? maxillaVertsList : mandibleVertsList;
-                    
-                    // 1. First ICP: Pull Occlusion to the selected Bone
-                    var resultOccToBone = OrthoPlanner.Core.Geometry.IcpAligner.Align(
-                        occVertsList, targetVerts, manualWizard.InitialLandmarkTransform, 
-                        maxIterations: 150, tolerance: 0.0005, trimRatio: 0.70);
+                // Transform visual occlusion meshes inside the Window directly, so here we only pull the calculated values.
+                occlusion.MaxillaOcclusionTransform = manualWizard.MaxillaTransform;
+                occlusion.MandibleOcclusionTransform = manualWizard.MandibleTransform;
 
-                    // We now mathematically move the occlusion points directly
-                    OrthoPlanner.Core.Geometry.IcpAligner.TransformVertices(occVertsList, resultOccToBone.Transform);
-
-                    // 2. Second ICP: Pull the OTHER bone exactly into the occlusion bite
-                    var otherVerts = manualWizard.IsMaxillaSelected ? mandibleVertsList : maxillaVertsList;
-                    var initialOtherTx = new double[4, 4] { {1,0,0,0}, {0,1,0,0}, {0,0,1,0}, {0,0,0,1} };
-                    
-                    var resultBoneToOcc = OrthoPlanner.Core.Geometry.IcpAligner.Align(
-                        otherVerts, occVertsList, initialOtherTx, 
-                        maxIterations: 150, tolerance: 0.0005, trimRatio: 0.70);
-
-                    System.Windows.Application.Current.Dispatcher.Invoke(() => {
-                        var checker = new OcclusionCheckerWindow(
-                            maxillaVertsList, 
-                            mandibleVertsList, 
-                            occVertsList, 
-                            resultBoneToOcc.RmsError)
-                        {
-                            Owner = Application.Current.MainWindow
-                        };
-
-                        if (checker.ShowDialog() == true && checker.Accepted)
-                        {
-                            if (manualWizard.IsMaxillaSelected)
-                            {
-                                occlusion.MaxillaOcclusionTransform = System.Windows.Media.Media3D.Matrix3D.Identity;
-                                occlusion.MandibleOcclusionTransform = ConvertToMatrix3D(resultBoneToOcc.Transform);
-                            }
-                            else
-                            {
-                                occlusion.MandibleOcclusionTransform = System.Windows.Media.Media3D.Matrix3D.Identity;
-                                occlusion.MaxillaOcclusionTransform = ConvertToMatrix3D(resultBoneToOcc.Transform);
-                            }
-
-                            var finalOccTx = ConvertToMatrix3D(resultOccToBone.Transform);
-                            occlusion.Transform = new System.Windows.Media.Media3D.MatrixTransform3D(finalOccTx);
-                            
-                            UpdateSurgeryTransform();
-                            StatusText = $"Successfully aligned Occlusion STL manually. RMS=" + resultBoneToOcc.RmsError.ToString("0.000");
-                        }
-                        else
-                        {
-                            StatusText = "Manual occlusion alignment cancelled.";
-                        }
-                    });
-                });
+                // For the visible matrix overlay in the main window
+                var finalOccTx = manualWizard.FinalOcclusionTransform;
+                occlusion.Transform = new System.Windows.Media.Media3D.MatrixTransform3D(finalOccTx);
+                
+                UpdateSurgeryTransform();
+                StatusText = $"Successfully aligned Occlusion STL manually.";
             }
             catch (Exception ex)
             {
-                StatusText = "Error during manual occlusion alignment: " + ex.Message;
+                StatusText = "Error applying manual occlusion alignment: " + ex.Message;
             }
         }
         else

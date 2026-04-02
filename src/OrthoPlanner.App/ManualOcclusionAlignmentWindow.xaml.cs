@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media.Media3D;
 using HelixToolkit.Wpf.SharpDX;
@@ -14,31 +13,43 @@ namespace OrthoPlanner.App;
 
 public partial class ManualOcclusionAlignmentWindow : Window
 {
-    private readonly List<float[]> _maxillaVertices;
-    private readonly List<float[]> _mandibleVertices;
-    private readonly List<float[]> _occlusionVertices;
+    private readonly SegmentViewModel _maxilla;
+    private readonly SegmentViewModel _mandible;
+    private readonly MeshViewModel _occlusion;
+    
+    private List<float[]> _maxVerts;
+    private List<float[]> _manVerts;
+    private List<float[]> _occVerts; // We will manipulate this locally in steps
+    
+    public Matrix3D MaxillaTransform { get; private set; } = Matrix3D.Identity;
+    public Matrix3D MandibleTransform { get; private set; } = Matrix3D.Identity;
+    public Matrix3D FinalOcclusionTransform { get; private set; } = Matrix3D.Identity;
+    public bool Accepted { get; private set; }
 
-    // We keep track of landmarks for whichever bone is currently selected
+    private enum WorkflowStep { AlignMaxilla, AlignMandible, Done }
+    private WorkflowStep _currentStep = WorkflowStep.AlignMaxilla;
+
     private List<(double X, double Y, double Z)?> _boneLandmarks = new();
     private List<(double X, double Y, double Z)?> _occLandmarks = new();
     private List<Element3D> _boneMarkerVisuals = new();
     private List<Element3D> _occMarkerVisuals = new();
 
-    public double[,]? InitialLandmarkTransform { get; private set; }
-    public bool IsMaxillaSelected => BoneSelector.SelectedIndex == 0;
-    public bool Accepted { get; private set; }
     private EventHandler? _renderingHandler;
 
-    public ManualOcclusionAlignmentWindow(List<float[]> maxillaVertices, List<float[]> mandibleVertices, List<float[]> occlusionVertices)
+    public ManualOcclusionAlignmentWindow(SegmentViewModel maxilla, SegmentViewModel mandible, MeshViewModel occlusion)
     {
         InitializeComponent();
 
+        _maxilla = maxilla;
+        _mandible = mandible;
+        _occlusion = occlusion;
+
+        _maxVerts = _maxilla.Vertices != null ? MeshHelper.ToVertexList(_maxilla.Vertices) : new List<float[]>();
+        _manVerts = _mandible.Vertices != null ? MeshHelper.ToVertexList(_mandible.Vertices) : new List<float[]>();
+        _occVerts = _occlusion.Vertices != null ? MeshHelper.ToVertexList(_occlusion.Vertices) : new List<float[]>();
+
         BoneViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
         OccViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
-
-        _maxillaVertices = maxillaVertices ?? new List<float[]>();
-        _mandibleVertices = mandibleVertices ?? new List<float[]>();
-        _occlusionVertices = occlusionVertices ?? new List<float[]>();
 
         _renderingHandler = (s, e) =>
         {
@@ -47,7 +58,7 @@ public partial class ManualOcclusionAlignmentWindow : Window
         };
         System.Windows.Media.CompositionTarget.Rendering += _renderingHandler;
 
-        Loaded += (_, _) => LoadCurrentBone();
+        Loaded += (_, _) => LoadStepView();
         Closed += OnWindowClosed;
     }
 
@@ -80,32 +91,57 @@ public partial class ManualOcclusionAlignmentWindow : Window
         }
     }
 
-    private void LoadCurrentBone()
+    private void LoadStepView()
     {
         BoneGroup.Children.Clear();
         OccGroup.Children.Clear();
         ClearMarkers();
 
-        bool isMaxilla = IsMaxillaSelected;
-        var boneVerts = isMaxilla ? _maxillaVertices : _mandibleVertices;
-        BoneLabel.Text = isMaxilla ? "🦴 Maxilla Surface" : "🦴 Mandible Surface";
-
-        if (boneVerts.Count > 0)
+        if (_currentStep == WorkflowStep.AlignMaxilla)
         {
-            BoneGroup.Children.Add(MeshHelper.BuildModel3D(boneVerts, 240, 230, 210));
-            CenterViewportOnMesh(BoneViewport, boneVerts, 1.2);
+            StepTitle.Text = "Step 1: Align Maxilla";
+            StepInstructions.Text = "Place at least 3 point-pairs on the Maxilla and the UPPER teeth of the Occlusion model to establish the bite alignment.";
+            BoneLabel.Text = "🦴 Maxilla Surface";
+            ComputeBtn.Content = "Compute Maxilla ICP";
+
+            if (_maxVerts.Count > 0)
+            {
+                BoneGroup.Children.Add(MeshHelper.BuildModel3D(_maxVerts, (byte)_maxilla.ColorR, (byte)_maxilla.ColorG, (byte)_maxilla.ColorB, 255));
+                CenterViewportOnMesh(BoneViewport, _maxVerts, 1.2);
+            }
+        }
+        else if (_currentStep == WorkflowStep.AlignMandible)
+        {
+            StepTitle.Text = "Step 2: Align Mandible";
+            StepInstructions.Text = "Place at least 3 point-pairs on the Mandible and the LOWER teeth of the aligned Occlusion model to bring the jaw into the bite.";
+            BoneLabel.Text = "🦴 Mandible Surface";
+            ComputeBtn.Content = "Compute Mandible ICP";
+
+            if (_manVerts.Count > 0)
+            {
+                BoneGroup.Children.Add(MeshHelper.BuildModel3D(_manVerts, (byte)_mandible.ColorR, (byte)_mandible.ColorG, (byte)_mandible.ColorB, 255));
+                CenterViewportOnMesh(BoneViewport, _manVerts, 1.2);
+            }
+        }
+        else if (_currentStep == WorkflowStep.Done)
+        {
+            StepTitle.Text = "Alignment Complete";
+            StepInstructions.Text = "Both jaws have been structurally aligned via ICP mapping. Click Accept to return.";
+            BoneLabel.Text = "🦴 Final Jaw Assembly";
+            ComputeBtn.Content = "Accept & Finish";
+            ComputeBtn.IsEnabled = true;
+
+            if (_maxVerts.Count > 0) BoneGroup.Children.Add(MeshHelper.BuildModel3D(_maxVerts, (byte)_maxilla.ColorR, (byte)_maxilla.ColorG, (byte)_maxilla.ColorB, 255));
+            if (_manVerts.Count > 0) BoneGroup.Children.Add(MeshHelper.BuildModel3D(_manVerts, (byte)_mandible.ColorR, (byte)_mandible.ColorG, (byte)_mandible.ColorB, 255));
+            CenterViewportOnMesh(BoneViewport, _maxVerts, 1.5);
         }
 
-        if (_occlusionVertices.Count > 0)
+        if (_occVerts.Count > 0)
         {
-            OccGroup.Children.Add(MeshHelper.BuildModel3D(_occlusionVertices, 245, 245, 230));
-            CenterViewportOnMesh(OccViewport, _occlusionVertices, 1.5);
+            // The occlusion geometry updates natively throughout the steps
+            OccGroup.Children.Add(MeshHelper.BuildModel3D(_occVerts, 245, 245, 230, 255));
+            CenterViewportOnMesh(OccViewport, _occVerts, 1.5);
         }
-    }
-
-    private void BoneSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (IsLoaded) LoadCurrentBone();
     }
 
     private void CenterViewportOnMesh(HelixToolkit.Wpf.SharpDX.Viewport3DX viewport, List<float[]> vertices, double zoomMultiplier)
@@ -131,23 +167,25 @@ public partial class ManualOcclusionAlignmentWindow : Window
 
     private void BoneViewport_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (Keyboard.Modifiers != ModifierKeys.None) return;
+        if (Keyboard.Modifiers != ModifierKeys.None || _currentStep == WorkflowStep.Done) return;
         var hits = BoneViewport.FindHits(e.GetPosition(BoneViewport));
         if (hits?.Count > 0) { SetLandmark(_boneLandmarks, _boneMarkerVisuals, BoneGroup, hits[0].PointHit, System.Windows.Media.Colors.LimeGreen); e.Handled = true; }
     }
     private void OccViewport_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (Keyboard.Modifiers != ModifierKeys.None) return;
+        if (Keyboard.Modifiers != ModifierKeys.None || _currentStep == WorkflowStep.Done) return;
         var hits = OccViewport.FindHits(e.GetPosition(OccViewport));
         if (hits?.Count > 0) { SetLandmark(_occLandmarks, _occMarkerVisuals, OccGroup, hits[0].PointHit, System.Windows.Media.Colors.OrangeRed); e.Handled = true; }
     }
     private void BoneViewport_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
+        if (_currentStep == WorkflowStep.Done) return;
         var hits = BoneViewport.FindHits(e.GetPosition(BoneViewport));
         if (hits?.Count > 0) { RemoveClosestLandmark(_boneLandmarks, _boneMarkerVisuals, BoneGroup, hits[0].PointHit); e.Handled = true; }
     }
     private void OccViewport_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
+        if (_currentStep == WorkflowStep.Done) return;
         var hits = OccViewport.FindHits(e.GetPosition(OccViewport));
         if (hits?.Count > 0) { RemoveClosestLandmark(_occLandmarks, _occMarkerVisuals, OccGroup, hits[0].PointHit); e.Handled = true; }
     }
@@ -202,13 +240,22 @@ public partial class ManualOcclusionAlignmentWindow : Window
 
     private void UpdateStatus()
     {
+        if (_currentStep == WorkflowStep.Done) return;
         int p = Math.Min(_boneLandmarks.Count(l => l.HasValue), _occLandmarks.Count(l => l.HasValue));
         StatusText.Text = $"Selected {p} pairs. Need at least 3 to compute.";
         ComputeBtn.IsEnabled = p >= 3;
     }
 
-    private void Compute_Click(object sender, RoutedEventArgs e)
+    private async void Compute_Click(object sender, RoutedEventArgs e)
     {
+        if (_currentStep == WorkflowStep.Done)
+        {
+            Accepted = true;
+            DialogResult = true;
+            Close();
+            return;
+        }
+
         var src = new List<(double,double,double)>(); 
         var tgt = new List<(double,double,double)>();
         
@@ -216,18 +263,75 @@ public partial class ManualOcclusionAlignmentWindow : Window
         {
             if (_boneLandmarks[i].HasValue && _occLandmarks[i].HasValue)
             {
-                // We want to return the transform that moves OCCLUSION to BONE
-                src.Add(_occLandmarks[i]!.Value);
-                tgt.Add(_boneLandmarks[i]!.Value);
+                // In Step 1: Target=Maxilla, Source=Occlusion
+                // In Step 2: Target=Occlusion, Source=Mandible
+                if (_currentStep == WorkflowStep.AlignMaxilla)
+                {
+                    src.Add(_occLandmarks[i]!.Value);
+                    tgt.Add(_boneLandmarks[i]!.Value);
+                }
+                else
+                {
+                    src.Add(_boneLandmarks[i]!.Value);
+                    tgt.Add(_occLandmarks[i]!.Value);
+                }
             }
         }
         
-        if (src.Count >= 3)
+        if (src.Count < 3) return;
+
+        ComputeBtn.IsEnabled = false;
+        StatusText.Text = "Running ICP...";
+
+        var initialForm = IcpAligner.ComputeLandmarkTransform(src, tgt);
+        
+        try
         {
-            InitialLandmarkTransform = IcpAligner.ComputeLandmarkTransform(src, tgt);
-            Accepted = true;
-            DialogResult = true;
-            Close();
+            if (_currentStep == WorkflowStep.AlignMaxilla)
+            {
+                // Align Occlusion matching Maxilla
+                var result = await Task.Run(() => IcpAligner.Align(_occVerts, _maxVerts, initialForm, maxIterations: 150, tolerance: 0.0005, trimRatio: 0.70));
+                FinalOcclusionTransform = new Matrix3D(
+                    result.Transform[0,0], result.Transform[1,0], result.Transform[2,0], result.Transform[3,0],
+                    result.Transform[0,1], result.Transform[1,1], result.Transform[2,1], result.Transform[3,1],
+                    result.Transform[0,2], result.Transform[1,2], result.Transform[2,2], result.Transform[3,2],
+                    result.Transform[0,3], result.Transform[1,3], result.Transform[2,3], result.Transform[3,3]);
+
+                // Update vertices strictly inline
+                IcpAligner.TransformVertices(_occVerts, result.Transform);
+                RmsText.Text = $"Maxilla-to-Occ RMS: {result.RmsError:F3}";
+
+                // Advance stage
+                _currentStep = WorkflowStep.AlignMandible;
+                LoadStepView();
+            }
+            else if (_currentStep == WorkflowStep.AlignMandible)
+            {
+                // Align Mandible matching to the now locked Occlusion
+                var result = await Task.Run(() => IcpAligner.Align(_manVerts, _occVerts, initialForm, maxIterations: 150, tolerance: 0.0005, trimRatio: 0.70));
+                
+                MandibleTransform = new Matrix3D(
+                    result.Transform[0,0], result.Transform[1,0], result.Transform[2,0], result.Transform[3,0],
+                    result.Transform[0,1], result.Transform[1,1], result.Transform[2,1], result.Transform[3,1],
+                    result.Transform[0,2], result.Transform[1,2], result.Transform[2,2], result.Transform[3,2],
+                    result.Transform[0,3], result.Transform[1,3], result.Transform[2,3], result.Transform[3,3]);
+
+                RmsText.Text += $" | Mandible-to-Occ RMS: {result.RmsError:F3}";
+                
+                // Maxilla transform handles identically to auto-sequence
+                MaxillaTransform = Matrix3D.Identity;
+
+                // Move Mandible inline just for the final visual
+                IcpAligner.TransformVertices(_manVerts, result.Transform);
+
+                _currentStep = WorkflowStep.Done;
+                LoadStepView();
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"ICP Error: {ex.Message}");
+            UpdateStatus();
         }
     }
 }
