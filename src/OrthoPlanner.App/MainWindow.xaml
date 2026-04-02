@@ -418,65 +418,6 @@
                                     </StackPanel>
                                 </Expander>
 
-                                <!-- 5. INTERACTIVE BONE SPLITTER -->
-                                <Expander Header="🎯  Bone Splitter (Region Grow)" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
-                                          Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
-                                    <StackPanel Margin="4,6,4,4">
-                                        <TextBlock Text="Click on the 2D Slice Views to isolate connected bone targets."
-                                                   TextWrapping="Wrap" FontSize="10" FontWeight="Normal"
-                                                   Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6" />
-                                                   
-                                        <TextBlock Text="GROW TOLERANCE (± HU)" Style="{StaticResource PanelHeader}" FontSize="9" Margin="0,4,0,2" />
-                                        <DockPanel Margin="0,0,0,6">
-                                            <TextBox Width="45" FontSize="10" TextAlignment="Center" Text="{Binding RegionGrowTolerance, UpdateSourceTrigger=PropertyChanged}" DockPanel.Dock="Right" />
-                                            <Slider Minimum="10" Maximum="1000" Value="{Binding RegionGrowTolerance, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                                        </DockPanel>
-
-                                        <TextBlock Text="SPLITTER MIN HU" Style="{StaticResource PanelHeader}" FontSize="9" Margin="0,4,0,2" />
-                                        <DockPanel Margin="0,0,0,6">
-                                            <TextBox Width="45" FontSize="10" TextAlignment="Center" Text="{Binding SplitterMinHU, UpdateSourceTrigger=PropertyChanged}" DockPanel.Dock="Right" />
-                                            <Slider Minimum="-1000" Maximum="3000" Value="{Binding SplitterMinHU, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                                        </DockPanel>
-
-                                        <TextBlock Text="SPLITTER MAX HU" Style="{StaticResource PanelHeader}" FontSize="9" Margin="0,0,0,2" />
-                                        <DockPanel Margin="0,0,0,6">
-                                            <TextBox Width="45" FontSize="10" TextAlignment="Center" Text="{Binding SplitterMaxHU, UpdateSourceTrigger=PropertyChanged}" DockPanel.Dock="Right" />
-                                            <Slider Minimum="-1000" Maximum="3000" Value="{Binding SplitterMaxHU, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                                        </DockPanel>
-
-                                        <TextBlock Text="ACTIVE SEED TARGET" Style="{StaticResource PanelHeader}" FontSize="9" Margin="0,4,0,2" />
-                                        <Grid Margin="0,0,0,6">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="2" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="2" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <RadioButton Grid.Column="0" Content="Mandible" IsChecked="{Binding IsMandibleSeed}" Style="{StaticResource DarkToggleButtonStyle}" 
-                                                         Foreground="#FFE6A85C" FontSize="10" FontWeight="SemiBold" ToolTip="Joint Collision Target 1" />
-                                            <RadioButton Grid.Column="2" Content="Cranium" IsChecked="{Binding IsCraniumSeed}" Style="{StaticResource DarkToggleButtonStyle}"
-                                                         Foreground="#FF5B9AFF" FontSize="10" FontWeight="SemiBold" ToolTip="Joint Collision Target 2" />
-                                            <RadioButton Grid.Column="4" Content="Exclude" IsChecked="{Binding IsExcludeSeed}" Style="{StaticResource DarkToggleButtonStyle}"
-                                                         Foreground="#FFA0AAB5" FontSize="10" FontWeight="SemiBold" ToolTip="Deleted / Ignored Volume" />
-                                        </Grid>
-
-                                        <ToggleButton Content="🎯 Enable Click-Targeting" IsChecked="{Binding IsRegionGrowMode}"
-                                                      Margin="0,4,0,6" IsEnabled="{Binding IsVolumeLoaded}"
-                                                      Style="{StaticResource DarkToggleButtonStyle}" FontWeight="SemiBold"/>
-                                        
-                                        <Grid Margin="0,0,0,6">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="4"/>
-                                                <ColumnDefinition Width="*"/>
-                                            </Grid.ColumnDefinitions>
-                                            <Button Grid.Column="0" Content="♻ Clear Seeds" Command="{Binding ClearSeedsCommand}" IsEnabled="{Binding IsVolumeLoaded}" Padding="4" />
-                                            <Button Grid.Column="2" Content="⚡ Compute Split" Command="{Binding ComputeMultiSeedSplitCommand}" 
-                                                    IsEnabled="{Binding IsVolumeLoaded}" Padding="4" Background="#FF1B98E0" Foreground="White" FontWeight="Bold"/>
-                                        </Grid>
-                                    </StackPanel>
-                                </Expander>
 
                                 </StackPanel>
                             </Expander>

@@ -231,11 +231,39 @@ public partial class MainViewModel : ObservableObject
             if (IsMaxillaBasedSurgery)
             {
                 ApplySurgical(maxilla,  maxillaTx);
-                ApplySurgical(mandible, IsKeepOcclusionSurgery ? maxillaTx : identityTx);
+                if (IsKeepOcclusionSurgery)
+                {
+                    var occ = LoadedOcclusions.FirstOrDefault(o => o.IsVisible);
+                    var occMat = occ != null ? occ.MandibleOcclusionTransform : System.Windows.Media.Media3D.Matrix3D.Identity;
+                    // Mandible snaps into bite and follows maxilla
+                    var tg = new System.Windows.Media.Media3D.Transform3DGroup();
+                    tg.Children.Add(new System.Windows.Media.Media3D.MatrixTransform3D(occMat));
+                    tg.Children.Add(maxillaTx);
+                    ApplySurgical(mandible, tg);
+                }
+                else
+                {
+                    ApplySurgical(mandible, identityTx);
+                }
             }
             else if (IsMandibleBasedSurgery)
             {
-                ApplySurgical(maxilla,  IsKeepOcclusionSurgery ? mandibleTx : identityTx);
+                if (IsKeepOcclusionSurgery)
+                {
+                    var occ = LoadedOcclusions.FirstOrDefault(o => o.IsVisible);
+                    var occMat = occ != null ? occ.MandibleOcclusionTransform : System.Windows.Media.Media3D.Matrix3D.Identity;
+                    // Maxilla snaps into bite relative to mandible and follows mandible
+                    var maxOcclOffsets = occMat; 
+                    if (maxOcclOffsets.HasInverse) maxOcclOffsets.Invert();
+                    var tg = new System.Windows.Media.Media3D.Transform3DGroup();
+                    tg.Children.Add(new System.Windows.Media.Media3D.MatrixTransform3D(maxOcclOffsets));
+                    tg.Children.Add(mandibleTx);
+                    ApplySurgical(maxilla, tg);
+                }
+                else
+                {
+                    ApplySurgical(maxilla, identityTx);
+                }
                 ApplySurgical(mandible, mandibleTx);
             }
         }
@@ -320,7 +348,7 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void AlignOcclusions()
+    private async Task AlignOcclusions()
     {
         var occlusion = LoadedOcclusions.FirstOrDefault(o => o.IsVisible);
         if (occlusion == null || occlusion.Vertices == null)
@@ -329,8 +357,8 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        var maxilla = Segments.FirstOrDefault(s => s.Name.Contains("Maxilla"));
-        var mandible = Segments.FirstOrDefault(s => s.Name.Contains("Mandible"));
+        var maxilla = Segments.FirstOrDefault(s => s.Name != null && s.Name.Contains("Maxilla"));
+        var mandible = Segments.FirstOrDefault(s => s.Name != null && s.Name.Contains("Mandible") && !s.Name.Contains("Cranium") && !s.Name.StartsWith("Ramus"));
 
         if (maxilla == null || mandible == null || maxilla.Vertices == null || mandible.Vertices == null)
         {
@@ -338,34 +366,95 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        var wizard = new OcclusionAlignmentWindow(
-            MeshHelper.ToVertexList(maxilla.Vertices),
-            MeshHelper.ToVertexList(mandible.Vertices),
-            MeshHelper.ToVertexList(occlusion.Vertices))
+        SaveStateForUndo();
+        StatusText = "Computing automated occlusion alignment... (1/2: Aligning Occlusion to Maxilla)";
+        
+        try 
         {
-            Owner = Application.Current.MainWindow
-        };
+            await Task.Run(() => 
+            {
+                // 1. Center of combined Maxilla and Mandible
+                double mxMinX = double.MaxValue, mxMinY = double.MaxValue, mxMinZ = double.MaxValue;
+                double mxMaxX = double.MinValue, mxMaxY = double.MinValue, mxMaxZ = double.MinValue;
+                void ExpandBounds(float[] v)
+                {
+                    for (int i = 0; i < v.Length; i += 3)
+                    {
+                        if (v[i] < mxMinX) mxMinX = v[i]; if (v[i] > mxMaxX) mxMaxX = v[i];
+                        if (v[i + 1] < mxMinY) mxMinY = v[i + 1]; if (v[i + 1] > mxMaxY) mxMaxY = v[i + 1];
+                        if (v[i + 2] < mxMinZ) mxMinZ = v[i + 2]; if (v[i + 2] > mxMaxZ) mxMaxZ = v[i + 2];
+                    }
+                }
+                ExpandBounds(maxilla.Vertices);
+                ExpandBounds(mandible.Vertices);
+                var jawCenter = new System.Windows.Media.Media3D.Point3D((mxMinX + mxMaxX) / 2, (mxMinY + mxMaxY) / 2, (mxMinZ + mxMaxZ) / 2);
 
-        if (wizard.ShowDialog() == true && wizard.Accepted)
+                // 2. Center of Occlusion
+                double oMinX = double.MaxValue, oMinY = double.MaxValue, oMinZ = double.MaxValue;
+                double oMaxX = double.MinValue, oMaxY = double.MinValue, oMaxZ = double.MinValue;
+                for (int i = 0; i < occlusion.Vertices.Length; i += 3)
+                {
+                    if (occlusion.Vertices[i] < oMinX) oMinX = occlusion.Vertices[i]; if (occlusion.Vertices[i] > oMaxX) oMaxX = occlusion.Vertices[i];
+                    if (occlusion.Vertices[i + 1] < oMinY) oMinY = occlusion.Vertices[i + 1]; if (occlusion.Vertices[i + 1] > oMaxY) oMaxY = occlusion.Vertices[i + 1];
+                    if (occlusion.Vertices[i + 2] < oMinZ) oMinZ = occlusion.Vertices[i + 2]; if (occlusion.Vertices[i + 2] > oMaxZ) oMaxZ = occlusion.Vertices[i + 2];
+                }
+                var occCenter = new System.Windows.Media.Media3D.Point3D((oMinX + oMaxX) / 2, (oMinY + oMaxY) / 2, (oMinZ + oMaxZ) / 2);
+
+                // 3. Initial transform: move Occlusion to jawCenter
+                double dX = jawCenter.X - occCenter.X;
+                double dY = jawCenter.Y - occCenter.Y;
+                double dZ = jawCenter.Z - occCenter.Z;
+                var initialTx = new double[4, 4] {
+                    { 1, 0, 0, dX },
+                    { 0, 1, 0, dY },
+                    { 0, 0, 1, dZ },
+                    { 0, 0, 0, 1 }
+                };
+
+                var maxillaVertsList = MeshHelper.ToVertexList(maxilla.Vertices);
+                var mandibleVertsList = MeshHelper.ToVertexList(mandible.Vertices);
+                var occVertsList = MeshHelper.ToVertexList(occlusion.Vertices);
+
+                // 4. ICP 1: Pull Occlusion (source) to Maxilla (target)
+                // We use similar params as DentalAlignmentWindow
+                var resultOccToMax = OrthoPlanner.Core.Geometry.IcpAligner.Align(occVertsList, maxillaVertsList, initialTx, maxIterations: 150, tolerance: 0.0005, trimRatio: 0.70);
+                
+                // Keep maxilla at identity, since we pulled the occlusion to it.
+                var maxOccTxMat = System.Windows.Media.Media3D.Matrix3D.Identity;
+                
+                // Transform the internal occlusion points to their newly aligned position to prepare for stage 2
+                OrthoPlanner.Core.Geometry.IcpAligner.TransformVertices(occVertsList, resultOccToMax.Transform);
+                
+                System.Windows.Application.Current.Dispatcher.Invoke(() => StatusText = "Computing automated occlusion alignment... (2/2: Aligning Mandible to Occlusion)");
+
+                // 5. ICP 2: Pull Mandible (source) to Occlusion (target)
+                // The occlusion is now "Maxilla-aligned". Pull the mandible to the lower teeth of the occlusion.
+                var initialManTx = new double[4, 4] { {1,0,0,0}, {0,1,0,0}, {0,0,1,0}, {0,0,0,1} };
+                var resultManToOcc = OrthoPlanner.Core.Geometry.IcpAligner.Align(mandibleVertsList, occVertsList, initialManTx, maxIterations: 150, tolerance: 0.0005, trimRatio: 0.70);
+
+                var manOccTxMat = ConvertToMatrix3D(resultManToOcc.Transform);
+
+                System.Windows.Application.Current.Dispatcher.Invoke(() => {
+                    // Store the occlusion transforms
+                    occlusion.MaxillaOcclusionTransform = maxOccTxMat;
+                    occlusion.MandibleOcclusionTransform = manOccTxMat;
+
+                    // Update GUI transform properties to force trigger UpdateTransforms()
+                    // The user requested to set the default behavior based on toggle.
+                    // The UpdateSurgeryTransform method will use these.
+                    
+                    // But first apply transformations visually to the occlusion mesh to show where it landed
+                    var finalOccTx = ConvertToMatrix3D(resultOccToMax.Transform);
+                    occlusion.Transform = new System.Windows.Media.Media3D.MatrixTransform3D(finalOccTx);
+                    
+                    UpdateSurgeryTransform();
+                    StatusText = $"Successfully aligned Occlusion STL automatically. RMS=" + resultManToOcc.RmsError.ToString("0.000");
+                });
+            });
+        }
+        catch (Exception ex)
         {
-            SaveStateForUndo();
-
-            // apply transforms visually
-            if (wizard.MaxillaTransform != null)
-            {
-                OrthoPlanner.Core.Geometry.IcpAligner.TransformVertices(maxilla.Vertices, wizard.MaxillaTransform);
-                maxilla.BuildModel();
-                occlusion.MaxillaOcclusionTransform = ConvertToMatrix3D(wizard.MaxillaTransform);
-            }
-            if (wizard.MandibleTransform != null)
-            {
-                OrthoPlanner.Core.Geometry.IcpAligner.TransformVertices(mandible.Vertices, wizard.MandibleTransform);
-                mandible.BuildModel();
-                occlusion.MandibleOcclusionTransform = ConvertToMatrix3D(wizard.MandibleTransform);
-            }
-
-            RefreshCombinedModel();
-            StatusText = $"Successfully aligned Maxilla and Mandible to {occlusion.Name}.";
+            StatusText = "Error during automated occlusion alignment: " + ex.Message;
         }
     }
 
@@ -636,37 +725,7 @@ public partial class MainViewModel : ObservableObject
         catch (TaskCanceledException) { }
     }
 
-    // ─── Region Growing ───
-    [ObservableProperty] private bool _isRegionGrowMode;
-    [ObservableProperty] private short _regionGrowTolerance = 500; // Generous guiding mask tolerance
-    [ObservableProperty] private double _splitterMinHU = 200; // Step 2 Strict Bounds
-    [ObservableProperty] private double _splitterMaxHU = 3000;
-    
-    // 0 = Mandible (Red), 1 = Cranium (Blue), 2 = Exclude (deleted)
-    [ObservableProperty] private int _activeSeedClass = 0; 
-    
-    public bool IsMandibleSeed 
-    { 
-        get => ActiveSeedClass == 0; 
-        set { if (value) ActiveSeedClass = 0; OnPropertyChanged(); } 
-    }
-    public bool IsCraniumSeed 
-    { 
-        get => ActiveSeedClass == 1; 
-        set { if (value) ActiveSeedClass = 1; OnPropertyChanged(); } 
-    }
-    public bool IsExcludeSeed 
-    { 
-        get => ActiveSeedClass == 2; 
-        set { if (value) ActiveSeedClass = 2; OnPropertyChanged(); } 
-    }
-
-    partial void OnActiveSeedClassChanged(int value)
-    {
-        OnPropertyChanged(nameof(IsMandibleSeed));
-        OnPropertyChanged(nameof(IsCraniumSeed));
-        OnPropertyChanged(nameof(IsExcludeSeed));
-    }
+    // ─── Region Growing Removed ───
 
     // ─── NHP Parameters (Live adjusted) ───
     [ObservableProperty] private double _nhpLateral = 0.0;
@@ -787,14 +846,6 @@ public partial class MainViewModel : ObservableObject
         return g;
     }
 
-    public ObservableCollection<(int X, int Y, int Z, byte ClassLabel)> MultiSeeds { get; } = new();
-
-    [RelayCommand]
-    private void ClearSeeds()
-    {
-        MultiSeeds.Clear();
-        StatusText = "Seeds cleared.";
-    }
 
     // ─── Viewport toggles ───
     [ObservableProperty] private bool _isOrthographic;
@@ -1303,13 +1354,7 @@ public partial class MainViewModel : ObservableObject
     private void UpdateAxialSlice()
     {
         if (Volume == null) return;
-        if (IsRegionGrowMode && _segVolume != null)
-        {
-            var data = Volume.GetAxialSliceWithMaskBgra(AxialIndex, WindowCenter, WindowWidth, _segVolume);
-            AxialImage = CreateBgraBitmap(data, Volume.Width, Volume.Height,
-                Volume.Spacing[0], Volume.Spacing[1]);
-        }
-        else if (GetActiveThreshold(out double min, out double max))
+        if (GetActiveThreshold(out double min, out double max))
         {
             var data = Volume.GetAxialSliceBgra(AxialIndex, WindowCenter, WindowWidth,
                 (short)min, (short)max);
@@ -1327,13 +1372,7 @@ public partial class MainViewModel : ObservableObject
     private void UpdateCoronalSlice()
     {
         if (Volume == null) return;
-        if (IsRegionGrowMode && _segVolume != null)
-        {
-            var data = Volume.GetCoronalSliceWithMaskBgra(CoronalIndex, WindowCenter, WindowWidth, _segVolume);
-            CoronalImage = CreateBgraBitmap(data, Volume.Width, Volume.Depth,
-                Volume.Spacing[0], Volume.Spacing[2]);
-        }
-        else if (GetActiveThreshold(out double min, out double max))
+        if (GetActiveThreshold(out double min, out double max))
         {
             var data = Volume.GetCoronalSliceBgra(CoronalIndex, WindowCenter, WindowWidth,
                 (short)min, (short)max);
@@ -1351,13 +1390,7 @@ public partial class MainViewModel : ObservableObject
     private void UpdateSagittalSlice()
     {
         if (Volume == null) return;
-        if (IsRegionGrowMode && _segVolume != null)
-        {
-            var data = Volume.GetSagittalSliceWithMaskBgra(SagittalIndex, WindowCenter, WindowWidth, _segVolume);
-            SagittalImage = CreateBgraBitmap(data, Volume.Height, Volume.Depth,
-                Volume.Spacing[1], Volume.Spacing[2]);
-        }
-        else if (GetActiveThreshold(out double min, out double max))
+        if (GetActiveThreshold(out double min, out double max))
         {
             var data = Volume.GetSagittalSliceBgra(SagittalIndex, WindowCenter, WindowWidth,
                 (short)min, (short)max);
@@ -1605,135 +1638,7 @@ public partial class MainViewModel : ObservableObject
         IsLoading = false;
     }
 
-    public async Task AddSeedPointAsync(int x, int y, int z)
-    {
-        if (Volume == null || !IsRegionGrowMode) return;
 
-        // 0 = Mandible, 1 = Cranium, 2 = Exclude
-        byte classLabel = (byte)(ActiveSeedClass + 1); 
-        MultiSeeds.Add((x, y, z, classLabel));
-        
-        StatusText = $"Added seed for Class {classLabel} at ({x}, {y}, {z}). Previewing mask...";
-        IsLoading = true;
-        LoadProgress = 0;
-
-        try
-        {
-            if (_segVolume == null)
-            {
-                _segVolume = new SegmentationVolume(Volume);
-                _segVolume.AddSegment(new SegmentInfo { Id = 1, Name = "Mandible (Preview)", ColorR = 255, ColorG = 150, ColorB = 0 }); // Orange
-                _segVolume.AddSegment(new SegmentInfo { Id = 2, Name = "Cranium (Preview)", ColorR = 0, ColorG = 100, ColorB = 255 }); // Dark Blue
-                _segVolume.AddSegment(new SegmentInfo { Id = 3, Name = "Exclude (Preview)", ColorR = 255, ColorG = 0, ColorB = 0 }); // Red
-            }
-            else
-            {
-                _segVolume.ClearAll(); // Clear previous preview
-            }
-
-            var engineSeeds = MultiSeeds.Select(s => (s.X, s.Y, s.Z, s.ClassLabel)).ToList();
-
-            short minSeedVal = short.MaxValue, maxSeedVal = short.MinValue;
-            foreach (var s in engineSeeds)
-            {
-                short val = Volume.GetVoxel(s.X, s.Y, s.Z);
-                if (val < minSeedVal) minSeedVal = val;
-                if (val > maxSeedVal) maxSeedVal = val;
-            }
-
-            short genMin = (short)(minSeedVal - RegionGrowTolerance);
-            short genMax = (short)(maxSeedVal + RegionGrowTolerance);
-
-            await Task.Run(() =>
-                SegmentationEngine.CompetitiveRegionGrow(Volume, _segVolume, engineSeeds, genMin, genMax, null));
-
-            UpdateAllSlices(); // Force MPR to redraw with new alpha-blended segVolume
-            StatusText = $"Preview updated for {MultiSeeds.Count} seeds.";
-        }
-        finally
-        {
-            IsLoading = false;
-            LoadProgress = 100;
-        }
-    }
-
-    [RelayCommand]
-    private async Task ComputeMultiSeedSplitAsync()
-    {
-        if (Volume == null || MultiSeeds.Count == 0 || IsLoading) return;
-
-        IsLoading = true;
-        StatusText = "Step 1/2: Competitive Multi-Source Growth...";
-        LoadProgress = 0;
-
-        SaveStateForUndo();
-
-        if (_segVolume == null)
-            _segVolume = new SegmentationVolume(Volume);
-
-        // 1. Convert ViewModel UI seeds into Engine seeds
-        var engineSeeds = MultiSeeds.Select(s => (s.X, s.Y, s.Z, s.ClassLabel)).ToList();
-
-        // 2. Find the global max/min of all seeds to set the Generous Tolerance Window
-        short minSeedVal = short.MaxValue, maxSeedVal = short.MinValue;
-        foreach (var s in engineSeeds)
-        {
-            short val = Volume.GetVoxel(s.X, s.Y, s.Z);
-            if (val < minSeedVal) minSeedVal = val;
-            if (val > maxSeedVal) maxSeedVal = val;
-        }
-
-        short genMin = (short)(minSeedVal - RegionGrowTolerance);
-        short genMax = (short)(maxSeedVal + RegionGrowTolerance);
-
-        // 3. Fire the BFS Race!
-        await Task.Run(() =>
-            SegmentationEngine.CompetitiveRegionGrow(Volume, _segVolume, engineSeeds, genMin, genMax,
-                p => Application.Current.Dispatcher.Invoke(() => LoadProgress = p * 40)));
-
-        // 4. Strict Threshold Cut and Mesh Extraction
-        StatusText = $"Step 2/2: Strict Mask Cut [{SplitterMinHU:F0}, {SplitterMaxHU:F0}] HU...";
-        short strictMin = (short)SplitterMinHU;
-        short strictMax = (short)SplitterMaxHU;
-
-        await Task.Run(() => 
-        {
-            int total = Volume.Width * Volume.Height * Volume.Depth;
-            for (int i = 0; i < total; i++)
-            {
-                byte label = _segVolume.Labels[i];
-                if (label > 0 && label <= 3) // 1=Mand, 2=Cran, 3=Excl
-                {
-                    short val = Volume.Voxels[i];
-                    if (val < strictMin || val > strictMax || label == 3)
-                    {
-                        // Strip fat, OR totally delete the "Exclude" class
-                        _segVolume.Labels[i] = 0; 
-                    }
-                }
-            }
-        });
-
-        Application.Current.Dispatcher.Invoke(() => LoadProgress = 50);
-
-        // 5. Generate meshes for Mandible (1) and Cranium (2)
-        if (_segVolume.CountVoxels(1) > 0)
-        {
-            StatusText = "Meshing Mandible...";
-            await GenerateSegmentMeshAsync(1, "Isolated Mandible", 255, 150, 0); // Orange
-        }
-
-        if (_segVolume.CountVoxels(2) > 0)
-        {
-            StatusText = "Meshing Cranium...";
-            await GenerateSegmentMeshAsync(2, "Isolated Cranium", 0, 100, 255); // Dark Blue
-        }
-
-        StatusText = "Multi-Seed Competitive Split Complete.";
-        LoadProgress = 100;
-        IsLoading = false;
-        MultiSeeds.Clear();
-    }
 
     [RelayCommand]
     private async Task SplitComponentsAsync()

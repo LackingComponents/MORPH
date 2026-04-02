@@ -425,51 +425,10 @@ public partial class MainWindow : Window
     private System.Windows.Point _rightClickOrigin;
     private double _origWC, _origWW;
     private bool _rightDragging;
-    private async void SlicePanel_LeftDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    private void SlicePanel_LeftDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (VM == null || !VM.IsVolumeLoaded) return;
         
-        // If clicking while in Region Grow Mode, capture seed and spawn new mesh region
-        if (VM.IsRegionGrowMode && !VM.IsLoading)
-        {
-            var grid = sender as System.Windows.Controls.Grid;
-            if (grid == null) return;
-
-            var pos = e.GetPosition(grid);
-            double rx = Math.Clamp(pos.X / grid.ActualWidth, 0, 1);
-            double ry = Math.Clamp(pos.Y / grid.ActualHeight, 0, 1);
-
-            int viewType = 0;
-            if (grid.Name == "AxialPanel") viewType = 1;
-            else if (grid.Name == "CoronalPanel") viewType = 2;
-            else if (grid.Name == "SagittalPanel") viewType = 3;
-            else if (grid.Name == "EnlargedGrid") viewType = VM.EnlargedView;
-
-            int targetX = VM.SagittalIndex;
-            int targetY = VM.CoronalIndex;
-            int targetZ = VM.AxialIndex;
-
-            switch (viewType)
-            {
-                case 1: // Axial
-                    targetX = (int)(rx * VM.SagittalMax);
-                    targetY = (int)(ry * VM.CoronalMax);
-                    break;
-                case 2: // Coronal
-                    targetX = (int)(rx * VM.SagittalMax);
-                    targetZ = VM.AxialMax - (int)(ry * VM.AxialMax);
-                    break;
-                case 3: // Sagittal
-                    targetY = (int)(rx * VM.CoronalMax);
-                    targetZ = VM.AxialMax - (int)(ry * VM.AxialMax);
-                    break;
-            }
-
-            e.Handled = true;
-            await VM.AddSeedPointAsync(targetX, targetY, targetZ);
-            return;
-        }
-
         // Standard behavior: Move Crosshair
         UpdateSliceFromClick(sender, e);
         e.Handled = true;

@@ -78,7 +78,8 @@ public partial class BssoOsteotomyWindow : Window
         MainGroup.Children.Add(_boneMesh);
         _hoveredHalf = new MeshGeometryModel3D {
             Material = new PhongMaterial { DiffuseColor = new HelixToolkit.Maths.Color4(0f,0.8f,1f,0.30f) },
-            CullMode = SharpDX.Direct3D11.CullMode.None
+            CullMode = SharpDX.Direct3D11.CullMode.None,
+            IsTransparent = true
         };
         MainGroup.Children.Add(_hoveredHalf);
         foreach (var g in new GroupModel3D[]{_lingualVis,_sagittalVis,_postArmVis,_buccalVis})
@@ -287,8 +288,7 @@ public partial class BssoOsteotomyWindow : Window
 
         AddQuad(mb, _sagTop[0], _sagTop[1], _sagBot[1], _sagBot[0]); // S1
         AddQuad(mb, _sagTop[1], _sagTop[2], bInf, _sagBot[1]);        // Bridge
-        mb.AddTriangle(Nv3(_sagTop[2]),Nv3(bSup),Nv3(bInf));
-        mb.AddTriangle(Nv3(bInf),Nv3(bSup),Nv3(_sagTop[2]));          // Triangle
+        mb.AddTriangle(Nv3(_sagTop[2]),Nv3(bSup),Nv3(bInf)); // CullMode.None handles back-side
 
         lb.AddLine(Nv3(_sagTop[0]),Nv3(_sagTop[1]));
         lb.AddLine(Nv3(_sagTop[1]),Nv3(_sagTop[2]));
@@ -303,7 +303,8 @@ public partial class BssoOsteotomyWindow : Window
         _sagittalVis.Children.Add(new MeshGeometryModel3D{
             Geometry=HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(mb.ToMesh()),
             Material=new PhongMaterial{DiffuseColor=CyanFill, EmissiveColor=CyanFill},
-            CullMode=SharpDX.Direct3D11.CullMode.None
+            CullMode=SharpDX.Direct3D11.CullMode.None,
+            IsTransparent=true
         });
         _sagittalVis.Children.Add(new LineGeometryModel3D{Geometry=lb.ToLineGeometry3D(),Color=Colors.Cyan,Thickness=2});
 
@@ -313,7 +314,7 @@ public partial class BssoOsteotomyWindow : Window
     private static void AddQuad(HelixToolkit.Geometry.MeshBuilder mb, Point3D a, Point3D b, Point3D c, Point3D d)
     {
         mb.AddTriangle(Nv3(a),Nv3(b),Nv3(c)); mb.AddTriangle(Nv3(a),Nv3(c),Nv3(d));
-        mb.AddTriangle(Nv3(c),Nv3(b),Nv3(a)); mb.AddTriangle(Nv3(d),Nv3(c),Nv3(a));
+        // No reverse winding needed: CullMode.None handles back-side visibility
     }
 
     private void BuildGP(GroupModel3D grp, Point3D[] c)
@@ -321,13 +322,15 @@ public partial class BssoOsteotomyWindow : Window
         grp.Children.Clear();
         var mb = new HelixToolkit.Geometry.MeshBuilder();
         mb.AddTriangle(Nv3(c[0]),Nv3(c[1]),Nv3(c[2])); mb.AddTriangle(Nv3(c[0]),Nv3(c[2]),Nv3(c[3]));
-        mb.AddTriangle(Nv3(c[2]),Nv3(c[1]),Nv3(c[0])); mb.AddTriangle(Nv3(c[3]),Nv3(c[2]),Nv3(c[0]));
+        // No reverse winding needed: CullMode.None handles back-side visibility
         var lb = new HelixToolkit.SharpDX.LineBuilder();
         lb.AddLine(Nv3(c[0]),Nv3(c[1])); lb.AddLine(Nv3(c[1]),Nv3(c[2]));
         lb.AddLine(Nv3(c[2]),Nv3(c[3])); lb.AddLine(Nv3(c[3]),Nv3(c[0]));
         grp.Children.Add(new MeshGeometryModel3D{
             Geometry=HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(mb.ToMesh()),
-            Material=new PhongMaterial{DiffuseColor=CyanFill, EmissiveColor=CyanFill}
+            Material=new PhongMaterial{DiffuseColor=CyanFill, EmissiveColor=CyanFill},
+            CullMode=SharpDX.Direct3D11.CullMode.None,
+            IsTransparent=true
         });
         grp.Children.Add(new LineGeometryModel3D {Geometry=lb.ToLineGeometry3D(),Color=Colors.Cyan,Thickness=2});
     }
