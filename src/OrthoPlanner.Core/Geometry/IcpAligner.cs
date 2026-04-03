@@ -72,7 +72,7 @@ public static class IcpAligner
             tgtDistances[i] = (i, distSq);
         }
         Array.Sort(tgtDistances, (a, b) => a.distSq.CompareTo(b.distSq));
-        int keepTgt = Math.Max(10, (int)(totalTgtPts * 0.10));
+        int keepTgt = Math.Max(10, (int)(totalTgtPts * 0.25));
 
         var croppedFlat = new float[keepTgt * 3];
         for (int i = 0; i < keepTgt; i++)
@@ -87,52 +87,89 @@ public static class IcpAligner
         double prevRms = double.MaxValue;
         int iter;
 
+        // ── Robust parameter schedule ──────────────────────────────────────────
+        // σ controls the Gaussian weight window: exp(-d²/σ²).
+        //  • Start wide (σ_start) so the initial coarse alignment can move freely.
+        //  • Anneal down to σ_end so that by convergence only very close pairs matter.
+        // d_cap is the hard maximum distance — any pair beyond it is excluded entirely,
+        // preventing large non-dental bone areas from contaminating the centroid.
+        //
+        // Both σ and d_cap are expressed in the same units as the mesh vertices (mm).
+        const double SigmaStart = 20.0;   // wide early phase
+        const double SigmaEnd   =  2.0;   // tight late phase — ~half a tooth cusp
+        const double DCapStart  = 30.0;   // generous early hard cap
+        const double DCapEnd    =  8.0;   // tight hard cap at convergence
+
         for (iter = 0; iter < maxIterations; iter++)
         {
             progress?.Invoke((double)iter / maxIterations);
 
-            // Step 1: Find closest points in target for each source point
-            var distances = new (int srcIdx, double distSq, double tgtX, double tgtY, double tgtZ)[nSrc];
+            // Anneal σ and d_cap linearly over the first 60 iterations
+            double t      = Math.Min(1.0, iter / 60.0);
+            double sigma  = SigmaStart + (SigmaEnd  - SigmaStart) * t;
+            double dCap   = DCapStart  + (DCapEnd   - DCapStart)  * t;
+            double dCapSq = dCap * dCap;
+            double sigSq  = sigma * sigma;
+
+            // Step 1: find closest target for every source point
+            double sumWDistSq = 0;
+            double sumW       = 0;
+            int    nInliers   = 0;
+
+            // Accumulators for the weighted cross-covariance
+            double wSumX  = 0, wSumY  = 0, wSumZ  = 0;   // weighted source centroid
+            double wTSumX = 0, wTSumY = 0, wTSumZ = 0;   // weighted target centroid
+            // H = weighted cross-covariance — accumulate after centroid pass
+            // We do two-pass: first pass to get weighted centroids, second for H.
+            // Store inlier pairs to avoid re-querying the kd-tree.
+            var pairs = new (double sx, double sy, double sz,
+                             double tx, double ty, double tz,
+                             double w)[nSrc];
 
             for (int i = 0; i < nSrc; i++)
             {
                 var (idx, distSq) = tree.FindNearest(
                     (float)currentSrc[i, 0], (float)currentSrc[i, 1], (float)currentSrc[i, 2]);
+
+                // Hard reject points too far from any dental surface
+                if (distSq > dCapSq) { pairs[i] = (0,0,0, 0,0,0, 0); continue; }
+
+                double w = Math.Exp(-distSq / sigSq);   // Gaussian weight
                 var (ptx, pty, ptz) = tree.GetPoint(idx);
-                distances[i] = (i, distSq, ptx, pty, ptz);
+
+                pairs[i] = (currentSrc[i,0], currentSrc[i,1], currentSrc[i,2],
+                            ptx, pty, ptz, w);
+
+                wSumX  += w * currentSrc[i,0]; wSumY  += w * currentSrc[i,1]; wSumZ  += w * currentSrc[i,2];
+                wTSumX += w * ptx;              wTSumY += w * pty;              wTSumZ += w * ptz;
+                sumW   += w;
+                sumWDistSq += w * distSq;
+                nInliers++;
             }
 
-            // DYNAMIC TRIMMING: Start with 100% of points, linearly decrease to trimRatio over first 40 iterations
-            double currentTrimRatio = trimRatio;
-            if (iter < 40)
+            if (sumW < 1e-12 || nInliers < 6) break;   // degenerate — stop
+
+            // Weighted centroids
+            double csx = wSumX / sumW, csy = wSumY / sumW, csz = wSumZ / sumW;
+            double ctx = wTSumX / sumW, cty = wTSumY / sumW, ctz = wTSumZ / sumW;
+
+            // Weighted cross-covariance H
+            var H = new double[3, 3];
+            for (int i = 0; i < nSrc; i++)
             {
-                double t = iter / 40.0;
-                currentTrimRatio = 1.0 * (1.0 - t) + trimRatio * t;
+                double w = pairs[i].w;
+                if (w < 1e-12) continue;
+                double ax = pairs[i].sx - csx, ay = pairs[i].sy - csy, az = pairs[i].sz - csz;
+                double bx = pairs[i].tx - ctx, by = pairs[i].ty - cty, bz = pairs[i].tz - ctz;
+                H[0,0] += w*ax*bx; H[0,1] += w*ax*by; H[0,2] += w*ax*bz;
+                H[1,0] += w*ay*bx; H[1,1] += w*ay*by; H[1,2] += w*ay*bz;
+                H[2,0] += w*az*bx; H[2,1] += w*az*by; H[2,2] += w*az*bz;
             }
 
-            Array.Sort(distances, (a, b) => a.distSq.CompareTo(b.distSq));
-            int nKeep = Math.Max(10, (int)(nSrc * currentTrimRatio));
+            // Weighted RMS
+            double rms = Math.Sqrt(sumWDistSq / sumW);
 
-            // Build trimmed correspondence arrays
-            var trimSrc = new double[nKeep, 3];
-            var trimTgt = new double[nKeep, 3];
-            double sumDistSq = 0;
-
-            for (int i = 0; i < nKeep; i++)
-            {
-                int srcIdx = distances[i].srcIdx;
-                trimSrc[i, 0] = currentSrc[srcIdx, 0];
-                trimSrc[i, 1] = currentSrc[srcIdx, 1];
-                trimSrc[i, 2] = currentSrc[srcIdx, 2];
-                trimTgt[i, 0] = distances[i].tgtX;
-                trimTgt[i, 1] = distances[i].tgtY;
-                trimTgt[i, 2] = distances[i].tgtZ;
-                sumDistSq += distances[i].distSq;
-            }
-
-            double rms = Math.Sqrt(sumDistSq / nKeep);
-
-            // Convergence check: require at least 20 iterations to avoid getting trapped in early local minima during dynamic trimming
+            // Convergence — require at least 20 iterations to avoid early local minima
             if (iter > 20 && Math.Abs(prevRms - rms) < tolerance)
             {
                 prevRms = rms;
@@ -141,20 +178,17 @@ public static class IcpAligner
             }
             prevRms = rms;
 
-            // Step 2: Compute optimal rigid transform from TRIMMED pairs only
-            var stepT = ComputeRigidTransformSVD(trimSrc, trimTgt, nKeep);
+            // Step 2: optimal rotation from weighted SVD
+            var stepT = ComputeRigidTransformFromH(H, csx, csy, csz, ctx, cty, ctz);
 
-            // Apply step transform to ALL current source positions
+            // Apply step transform to all current source positions
             for (int i = 0; i < nSrc; i++)
             {
-                TransformPoint(stepT, currentSrc[i, 0], currentSrc[i, 1], currentSrc[i, 2],
+                TransformPoint(stepT, currentSrc[i,0], currentSrc[i,1], currentSrc[i,2],
                     out double nx, out double ny, out double nz);
-                currentSrc[i, 0] = nx;
-                currentSrc[i, 1] = ny;
-                currentSrc[i, 2] = nz;
+                currentSrc[i,0] = nx; currentSrc[i,1] = ny; currentSrc[i,2] = nz;
             }
 
-            // Accumulate: totalT = stepT * totalT
             totalT = Multiply4x4(stepT, totalT);
         }
 
@@ -162,10 +196,54 @@ public static class IcpAligner
 
         return new AlignResult
         {
-            Transform = totalT,
-            RmsError = prevRms,
+            Transform  = totalT,
+            RmsError   = prevRms,
             Iterations = iter
         };
+    }
+
+    // ─── Build a rigid transform from a pre-computed cross-covariance matrix H ─
+    // and the weighted centroids of source and target. (Avoids re-allocating pair arrays.)
+    private static double[,] ComputeRigidTransformFromH(
+        double[,] H,
+        double csx, double csy, double csz,
+        double ctx, double cty, double ctz)
+    {
+        SVD3x3(H, out double[,] U, out double[,] V);
+
+        var R = new double[3,3];
+        for (int i = 0; i < 3; i++)
+            for (int j = 0; j < 3; j++)
+            {
+                double s = 0;
+                for (int k = 0; k < 3; k++) s += V[i,k] * U[j,k];
+                R[i,j] = s;
+            }
+
+        // Ensure proper rotation (det = +1)
+        double det = R[0,0]*(R[1,1]*R[2,2]-R[1,2]*R[2,1])
+                   - R[0,1]*(R[1,0]*R[2,2]-R[1,2]*R[2,0])
+                   + R[0,2]*(R[1,0]*R[2,1]-R[1,1]*R[2,0]);
+        if (det < 0)
+        {
+            for (int i = 0; i < 3; i++) V[i,2] = -V[i,2];
+            for (int i = 0; i < 3; i++)
+                for (int j = 0; j < 3; j++)
+                {
+                    double s = 0;
+                    for (int k = 0; k < 3; k++) s += V[i,k] * U[j,k];
+                    R[i,j] = s;
+                }
+        }
+
+        double ttx = ctx - (R[0,0]*csx + R[0,1]*csy + R[0,2]*csz);
+        double tty = cty - (R[1,0]*csx + R[1,1]*csy + R[1,2]*csz);
+        double ttz = ctz - (R[2,0]*csx + R[2,1]*csy + R[2,2]*csz);
+
+        var T = new double[4,4];
+        for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) T[i,j] = R[i,j];
+        T[0,3] = ttx; T[1,3] = tty; T[2,3] = ttz; T[3,3] = 1.0;
+        return T;
     }
 
     /// <summary>
