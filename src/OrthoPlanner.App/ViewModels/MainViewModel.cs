@@ -489,7 +489,7 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void OpenManualOcclusionAlignment()
+    private async void OpenManualOcclusionAlignment()
     {
         var occlusion = LoadedOcclusions.FirstOrDefault(o => o.IsVisible);
         if (occlusion == null || occlusion.Vertices == null)
@@ -517,15 +517,27 @@ public partial class MainViewModel : ObservableObject
             SaveStateForUndo();
             try
             {
-                // The wizard mutated the occlusion vertex list in-place (Maxilla phase),
-                // and stored the Mandible ICP transform. Map results to the MeshViewModel.
-                occlusion.MaxillaOcclusionTransform  = manualWizard.MaxillaTransform;   // Identity (occ was pushed to max)
-                occlusion.MandibleOcclusionTransform = manualWizard.MandibleTransform;  // Mandible→Occ ICP
+                // Dental alignment baked its transform into occlusion.Vertices (CT space).
+                // The wizard computed FinalOcclusionTransform from those already-aligned vertices.
+                // Bake it in (matching DentalAlignmentWindow convention) and rebuild the model.
+                if (manualWizard.FinalOcclusionTransform != System.Windows.Media.Media3D.Matrix3D.Identity)
+                {
+                    var txArr = ToDoubleMatrix(manualWizard.FinalOcclusionTransform);
+                    await Task.Run(() => OrthoPlanner.Core.Geometry.IcpAligner.TransformVertices(occlusion.Vertices, txArr));
+                    occlusion.BuildModel();
+                }
 
-                // Apply the accumulated occlusion visual transform so the mesh renders
-                // in its final aligned position in the main viewport.
-                occlusion.Transform = new System.Windows.Media.Media3D.MatrixTransform3D(
-                    manualWizard.FinalOcclusionTransform);
+                // Bake mandible transform into mandible.Vertices.
+                if (manualWizard.MandibleTransform != System.Windows.Media.Media3D.Matrix3D.Identity)
+                {
+                    var manTxArr = ToDoubleMatrix(manualWizard.MandibleTransform);
+                    await Task.Run(() => OrthoPlanner.Core.Geometry.IcpAligner.TransformVertices(mandible.Vertices, manTxArr));
+                    mandible.BuildModel();
+                }
+
+                occlusion.MaxillaOcclusionTransform  = manualWizard.MaxillaTransform;
+                occlusion.MandibleOcclusionTransform = manualWizard.MandibleTransform;
+                // Do NOT set .Transform — vertices are now in the correct space.
 
                 UpdateSurgeryTransform();
                 StatusText = "Occlusion STL aligned manually.";
@@ -549,6 +561,19 @@ public partial class MainViewModel : ObservableObject
             m[0,2], m[1,2], m[2,2], m[3,2],
             m[0,3], m[1,3], m[2,3], m[3,3]);
     }
+
+    /// <summary>
+    /// Converts a WPF Matrix3D (row-vector convention) back to a double[4,4]
+    /// (column-vector convention) compatible with IcpAligner.TransformVertices.
+    /// </summary>
+    private static double[,] ToDoubleMatrix(System.Windows.Media.Media3D.Matrix3D m) =>
+        new double[4, 4]
+        {
+            { m.M11, m.M21, m.M31, m.OffsetX },
+            { m.M12, m.M22, m.M32, m.OffsetY },
+            { m.M13, m.M23, m.M33, m.OffsetZ },
+            { 0,     0,     0,     1          }
+        };
 
     /// <summary>
     /// Returns the teeth-bearing mandible segment with the correct priority:
