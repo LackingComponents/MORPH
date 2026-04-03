@@ -55,14 +55,15 @@ public static class IcpAligner
             si++;
         }
 
-        // Build KdTree of *source* at initial position for pre-ICP target culling
+        // Build KdTree of *source* at initial position for pre-ICP TARGET culling
         var srcFlat = new float[nSrc * 3];
         for (int i = 0; i < nSrc; i++)
         { srcFlat[i*3] = (float)currentSrc[i,0]; srcFlat[i*3+1] = (float)currentSrc[i,1]; srcFlat[i*3+2] = (float)currentSrc[i,2]; }
         var sourceTree = new KdTree();
         sourceTree.Build(srcFlat, nSrc);
 
-        // Cull distant target points (keep nearest 10% = teeth region)
+        // ── Pass 1: Cull TARGET — keep only bone points nearest to the occlusion source ──
+        // This removes the large non-dental bone regions (chin, ramus, palate, etc.).
         int totalTgtPts = targetVerts.Length / 3;
         var tgtDistances = new (int idx, double distSq)[totalTgtPts];
         for (int i = 0; i < totalTgtPts; i++)
@@ -82,6 +83,31 @@ public static class IcpAligner
         }
         var tree = new KdTree();
         tree.Build(croppedFlat, keepTgt);
+
+        // ── Pass 2: Cull SOURCE — keep only occlusion points nearest to the dental target ──
+        // This removes gum tissue, arch-base geometry, and any scan region with no bone
+        // correspondence, which would otherwise pull the Gaussian centroid away from the crowns.
+        var srcToTgtDist = new (int srcIdx, double distSq)[nSrc];
+        for (int i = 0; i < nSrc; i++)
+        {
+            var (_, dSq) = tree.FindNearest(
+                (float)currentSrc[i,0], (float)currentSrc[i,1], (float)currentSrc[i,2]);
+            srcToTgtDist[i] = (i, dSq);
+        }
+        Array.Sort(srcToTgtDist, (a, b) => a.distSq.CompareTo(b.distSq));
+        int nSrcActive = Math.Max(6, (int)(nSrc * 0.45));   // keep ~45% closest source points
+
+        // Rebuild currentSrc as the active (dental-zone) subset only
+        var activeSrc = new double[nSrcActive, 3];
+        for (int i = 0; i < nSrcActive; i++)
+        {
+            int old = srcToTgtDist[i].srcIdx;
+            activeSrc[i, 0] = currentSrc[old, 0];
+            activeSrc[i, 1] = currentSrc[old, 1];
+            activeSrc[i, 2] = currentSrc[old, 2];
+        }
+        currentSrc = activeSrc;
+        nSrc = nSrcActive;
 
         var totalT = (double[,])initT.Clone();
         double prevRms = double.MaxValue;
