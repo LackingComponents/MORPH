@@ -572,11 +572,8 @@ public partial class ManualOcclusionAlignmentWindow : Window
 
             // ICP — same parameters as DentalAlignmentWindow
             var result = await Task.Run(() =>
-                IcpAligner.Align(
+                IcpAligner.AlignRobust(
                     _occVerts, targetVerts, initial,
-                    maxIterations: 150,
-                    tolerance:     0.0005,
-                    trimRatio:     0.70,
                     progress: p => Dispatcher.Invoke(() =>
                         StepInstructions.Text = $"ICP iteration… {p*100:F0}%")));
 
