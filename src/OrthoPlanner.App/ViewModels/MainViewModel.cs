@@ -368,7 +368,7 @@ public partial class MainViewModel : ObservableObject
         }
 
         var maxilla = Segments.FirstOrDefault(s => s.Name != null && s.Name.Contains("Maxilla"));
-        var mandible = Segments.FirstOrDefault(s => s.Name != null && s.Name.Contains("Mandible") && !s.Name.Contains("Cranium") && !s.Name.StartsWith("Ramus"));
+        var mandible = ResolveTeethBearingMandible();
 
         if (maxilla == null || mandible == null || maxilla.Vertices == null || mandible.Vertices == null)
         {
@@ -493,7 +493,7 @@ public partial class MainViewModel : ObservableObject
         }
 
         var maxilla = Segments.FirstOrDefault(s => s.Name != null && s.Name.Contains("Maxilla"));
-        var mandible = Segments.FirstOrDefault(s => s.Name != null && s.Name.Contains("Mandible") && !s.Name.Contains("Cranium") && !s.Name.StartsWith("Ramus"));
+        var mandible = ResolveTeethBearingMandible();
 
         if (maxilla == null || mandible == null || maxilla.Vertices == null || mandible.Vertices == null)
         {
@@ -542,6 +542,37 @@ public partial class MainViewModel : ObservableObject
             m[0,1], m[1,1], m[2,1], m[3,1],
             m[0,2], m[1,2], m[2,2], m[3,2],
             m[0,3], m[1,3], m[2,3], m[3,3]);
+    }
+
+    /// <summary>
+    /// Returns the teeth-bearing mandible segment with the correct priority:
+    ///   1. "Mandible"           — the BSSO distal/teeth-bearing fragment.
+    ///   2. "Mandible (Split)"   — after condyle-split but no BSSO.
+    ///   3. Any visible segment whose name contains "Mandible" (excluding Cranium / Ramus).
+    /// </summary>
+    private SegmentViewModel? ResolveTeethBearingMandible()
+    {
+        // Priority 1: exact BSSO distal segment
+        var bssoDistal = Segments.FirstOrDefault(s =>
+            s.Name != null &&
+            string.Equals(s.Name, "Mandible", StringComparison.OrdinalIgnoreCase) &&
+            s.Vertices != null);
+        if (bssoDistal != null) return bssoDistal;
+
+        // Priority 2: condyle-split mandible
+        var splitMandible = Segments.FirstOrDefault(s =>
+            s.Name != null &&
+            string.Equals(s.Name, "Mandible (Split)", StringComparison.OrdinalIgnoreCase) &&
+            s.Vertices != null);
+        if (splitMandible != null) return splitMandible;
+
+        // Priority 3: any mandible that is not a ramus or cranium fragment
+        return Segments.FirstOrDefault(s =>
+            s.Name != null &&
+            s.Name.IndexOf("Mandible", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            !s.Name.Contains("Cranium") &&
+            !s.Name.StartsWith("Ramus") &&
+            s.Vertices != null);
     }
 
     // ─── Volume State ───
