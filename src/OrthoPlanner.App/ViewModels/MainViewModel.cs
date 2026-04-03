@@ -483,24 +483,23 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task OpenManualOcclusionAlignmentAsync()
+    private void OpenManualOcclusionAlignment()
     {
-        await LoadOcclusionAsync();
         var occlusion = LoadedOcclusions.FirstOrDefault(o => o.IsVisible);
-        if (occlusion == null || occlusion.Vertices == null) return;
+        if (occlusion == null || occlusion.Vertices == null)
+        {
+            System.Windows.MessageBox.Show("No occlusion STL is currently loaded. Use 'Load & Align Occlusion' first.", "No Occlusion", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            return;
+        }
 
         var maxilla = Segments.FirstOrDefault(s => s.Name != null && s.Name.Contains("Maxilla"));
         var mandible = Segments.FirstOrDefault(s => s.Name != null && s.Name.Contains("Mandible") && !s.Name.Contains("Cranium") && !s.Name.StartsWith("Ramus"));
 
         if (maxilla == null || mandible == null || maxilla.Vertices == null || mandible.Vertices == null)
         {
-            System.Windows.MessageBox.Show("Maxilla or Mandible bone segments not found or segmented. Please segment them first.", "Missing Bones", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            System.Windows.MessageBox.Show("Maxilla or Mandible bone segments not found. Please segment them first.", "Missing Bones", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
             return;
         }
-
-        var maxillaVertsList = MeshHelper.ToVertexList(maxilla.Vertices);
-        var mandibleVertsList = MeshHelper.ToVertexList(mandible.Vertices);
-        var occVertsList = MeshHelper.ToVertexList(occlusion.Vertices);
 
         var manualWizard = new ManualOcclusionAlignmentWindow(maxilla, mandible, occlusion)
         {
@@ -512,16 +511,18 @@ public partial class MainViewModel : ObservableObject
             SaveStateForUndo();
             try
             {
-                // Transform visual occlusion meshes inside the Window directly, so here we only pull the calculated values.
-                occlusion.MaxillaOcclusionTransform = manualWizard.MaxillaTransform;
-                occlusion.MandibleOcclusionTransform = manualWizard.MandibleTransform;
+                // The wizard mutated the occlusion vertex list in-place (Maxilla phase),
+                // and stored the Mandible ICP transform. Map results to the MeshViewModel.
+                occlusion.MaxillaOcclusionTransform  = manualWizard.MaxillaTransform;   // Identity (occ was pushed to max)
+                occlusion.MandibleOcclusionTransform = manualWizard.MandibleTransform;  // Mandible→Occ ICP
 
-                // For the visible matrix overlay in the main window
-                var finalOccTx = manualWizard.FinalOcclusionTransform;
-                occlusion.Transform = new System.Windows.Media.Media3D.MatrixTransform3D(finalOccTx);
-                
+                // Apply the accumulated occlusion visual transform so the mesh renders
+                // in its final aligned position in the main viewport.
+                occlusion.Transform = new System.Windows.Media.Media3D.MatrixTransform3D(
+                    manualWizard.FinalOcclusionTransform);
+
                 UpdateSurgeryTransform();
-                StatusText = $"Successfully aligned Occlusion STL manually.";
+                StatusText = "Occlusion STL aligned manually.";
             }
             catch (Exception ex)
             {
@@ -530,7 +531,7 @@ public partial class MainViewModel : ObservableObject
         }
         else
         {
-            StatusText = "Manual alignment was cancelled.";
+            StatusText = "Manual alignment cancelled.";
         }
     }
 
