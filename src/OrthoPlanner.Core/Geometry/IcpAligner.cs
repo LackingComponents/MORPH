@@ -144,8 +144,10 @@ public static class IcpAligner
         float[] sourceVerts,
         float[] targetVerts,
         double[,]? initialTransform = null,
-        int maxIterations = 150,
+        int maxIterations = 200,
         double tolerance = 0.0005,
+        double targetCullRatio = 0.30,   // fraction of target pts nearest to source to keep
+        double sourceCullRatio = 0.50,   // fraction of source pts nearest to cropped target to keep
         Action<double>? progress = null)
     {
         int totalSrcPts = sourceVerts.Length / 3;
@@ -165,8 +167,9 @@ public static class IcpAligner
             si++;
         }
 
-        // ── Pass 1: Source KD-tree → cull TARGET (keep 25% nearest to source) ──
+        // ── Pass 1: Source KD-tree → cull TARGET ──────────────────────────────────────
         // Removes non-dental bone regions (ramus, chin, palate) from the target.
+        // Keeps the closest targetCullRatio fraction of target points (those nearest to source).
         var srcFlat = new float[nSrc * 3];
         for (int i = 0; i < nSrc; i++)
         { srcFlat[i*3] = (float)currentSrc[i,0]; srcFlat[i*3+1] = (float)currentSrc[i,1]; srcFlat[i*3+2] = (float)currentSrc[i,2]; }
@@ -182,7 +185,7 @@ public static class IcpAligner
             tgtDistances[i] = (i, distSq);
         }
         Array.Sort(tgtDistances, (a, b) => a.distSq.CompareTo(b.distSq));
-        int keepTgt = Math.Max(10, (int)(totalTgtPts * 0.25));
+        int keepTgt = Math.Max(10, (int)(totalTgtPts * targetCullRatio));
 
         var croppedFlat = new float[keepTgt * 3];
         for (int i = 0; i < keepTgt; i++)
@@ -193,8 +196,9 @@ public static class IcpAligner
         var tree = new KdTree();
         tree.Build(croppedFlat, keepTgt);
 
-        // ── Pass 2: Cropped-target KD-tree → cull SOURCE (keep 45% nearest to dental target) ──
+        // ── Pass 2: Cropped-target KD-tree → cull SOURCE ──────────────────────────────
         // Removes gum tissue and arch-base from the source so only crown surfaces participate.
+        // Keeps the closest sourceCullRatio fraction of source points (those nearest to target).
         var srcToTgtDist = new (int srcIdx, double distSq)[nSrc];
         for (int i = 0; i < nSrc; i++)
         {
@@ -203,7 +207,7 @@ public static class IcpAligner
             srcToTgtDist[i] = (i, dSq);
         }
         Array.Sort(srcToTgtDist, (a, b) => a.distSq.CompareTo(b.distSq));
-        int nSrcActive = Math.Max(6, (int)(nSrc * 0.45));
+        int nSrcActive = Math.Max(6, (int)(nSrc * sourceCullRatio));
 
         var activeSrc = new double[nSrcActive, 3];
         for (int i = 0; i < nSrcActive; i++)
@@ -362,8 +366,11 @@ public static class IcpAligner
 
     public static AlignResult AlignRobust(
         List<float[]> sourceVerts, List<float[]> targetVerts,
-        double[,]? initialTransform = null, int maxIterations = 150,
-        double tolerance = 0.0005, Action<double>? progress = null)
+        double[,]? initialTransform = null, int maxIterations = 200,
+        double tolerance = 0.0005,
+        double targetCullRatio = 0.30,
+        double sourceCullRatio = 0.50,
+        Action<double>? progress = null)
     {
         var srcFlat = new float[sourceVerts.Count * 3];
         for (int i = 0; i < sourceVerts.Count; i++)
@@ -373,7 +380,8 @@ public static class IcpAligner
         for (int i = 0; i < targetVerts.Count; i++)
         { tgtFlat[i*3] = targetVerts[i][0]; tgtFlat[i*3+1] = targetVerts[i][1]; tgtFlat[i*3+2] = targetVerts[i][2]; }
 
-        return AlignRobust(srcFlat, tgtFlat, initialTransform, maxIterations, tolerance, progress);
+        return AlignRobust(srcFlat, tgtFlat, initialTransform, maxIterations, tolerance,
+            targetCullRatio, sourceCullRatio, progress);
     }
 
     public static void TransformVertices(List<float[]> vertices, double[,] transform)

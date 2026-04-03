@@ -570,10 +570,13 @@ public partial class ManualOcclusionAlignmentWindow : Window
             // Identify which bone is the target for this step
             List<float[]> targetVerts = _step == Step.PickMaxilla ? _maxVerts : _manVerts;
 
-            // ICP — same parameters as DentalAlignmentWindow
+            // ICP — per-bone cull ratios: source (occlusion) keeps 50%, target keeps 30% for maxilla / 25% for mandible
+            double tgtCull = _step == Step.PickMaxilla ? 0.30 : 0.25;
             var result = await Task.Run(() =>
                 IcpAligner.AlignRobust(
                     _occVerts, targetVerts, initial,
+                    targetCullRatio: tgtCull,
+                    sourceCullRatio: 0.50,
                     progress: p => Dispatcher.Invoke(() =>
                         StepInstructions.Text = $"ICP iteration… {p*100:F0}%")));
 
