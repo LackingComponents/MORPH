@@ -131,6 +131,8 @@
             <StackPanel Grid.Column="2" Orientation="Horizontal">
                 <TextBlock x:Name="RmsText" Text="" FontSize="11" Foreground="#8CF"
                            VerticalAlignment="Center" Margin="0,0,12,0"/>
+                <CheckBox x:Name="SkipIcpCheck" Content="Skip ICP" Foreground="#AAB" FontSize="11"
+                          VerticalAlignment="Center" Margin="0,0,12,0"/>
                 <Button x:Name="ComputeBtn" Content="⚡ Compute Maxilla ICP" Padding="10,6"
                         Background="#FF1B98E0" Foreground="White" BorderThickness="0" FontWeight="Bold"
                         IsEnabled="False" Click="Compute_Click"/>

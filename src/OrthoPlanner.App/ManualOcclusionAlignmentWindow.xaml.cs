@@ -33,11 +33,12 @@ public partial class ManualOcclusionAlignmentWindow : Window
     private readonly SegmentViewModel _mandible;
     private readonly MeshViewModel    _occlusion;
 
-    // Working vertex copies — the occlusion list is mutated step by step
+    // Working vertex copies — both _occVerts and _manVerts are mutated in-place per step
     private readonly List<float[]> _maxVerts;
     private readonly List<float[]> _manVerts;
     private readonly List<float[]> _occVerts;           // current (possibly transformed) state
     private readonly List<float[]> _occOriginal;        // pristine snapshot for back-tracking
+    private readonly List<float[]> _manOriginal;        // pristine snapshot of mandible for back-tracking
 
     // ── Public outputs ────────────────────────────────────────────────────
     public bool      Accepted              { get; private set; }
@@ -79,6 +80,7 @@ public partial class ManualOcclusionAlignmentWindow : Window
         _manVerts   = mandible.Vertices  != null ? MeshHelper.ToVertexList(mandible.Vertices)  : new();
         _occVerts   = occlusion.Vertices != null ? MeshHelper.ToVertexList(occlusion.Vertices) : new();
         _occOriginal = _occVerts.Select(v => new float[] { v[0], v[1], v[2] }).ToList();
+        _manOriginal = _manVerts.Select(v => new float[] { v[0], v[1], v[2] }).ToList();
 
         // Set up EffectsManagers
         BoneViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
@@ -535,7 +537,9 @@ public partial class ManualOcclusionAlignmentWindow : Window
     // ── Compute ICP ───────────────────────────────────────────────────────
     private async void Compute_Click(object sender, RoutedEventArgs e)
     {
-        // Collect paired landmarks
+        // ── Collect landmark pairs with correct direction per step ────────
+        // Step 1 (Maxilla): occlusion (source) moves TO maxilla (target)
+        // Step 2 (Mandible): mandible (source) moves TO occlusion (target)
         var srcPts = new List<(double, double, double)>();
         var tgtPts = new List<(double, double, double)>();
         int maxIdx = Math.Max(_boneLandmarks.Count, _occLandmarks.Count);
@@ -543,59 +547,92 @@ public partial class ManualOcclusionAlignmentWindow : Window
             if (i < _boneLandmarks.Count && _boneLandmarks[i].HasValue &&
                 i < _occLandmarks.Count  && _occLandmarks[i].HasValue)
             {
-                // source = occ, target = bone (we push occ towards bone)
-                srcPts.Add(_occLandmarks[i]!.Value);
-                tgtPts.Add(_boneLandmarks[i]!.Value);
+                if (_step == Step.PickMaxilla)
+                {
+                    srcPts.Add(_occLandmarks[i]!.Value);   // source = occlusion
+                    tgtPts.Add(_boneLandmarks[i]!.Value);  // target = maxilla
+                }
+                else
+                {
+                    srcPts.Add(_boneLandmarks[i]!.Value);  // source = mandible
+                    tgtPts.Add(_occLandmarks[i]!.Value);   // target = occlusion (already maxilla-aligned)
+                }
             }
 
         if (srcPts.Count < 3) return;
 
-        // Spread validation (same threshold as DentalAlignmentWindow)
         if (GetMaxDist(srcPts) < 15.0 || GetMaxDist(tgtPts) < 15.0)
         {
             MessageBox.Show(
-                "The landmarks are clustered too closely together. " +
-                "Please place points that span across the arch (e.g., left molar, right molar, incisors).",
+                "Landmarks too clustered. Spread them across the arch (e.g. left molar, right molar, incisors).",
                 "Unstable Landmarks", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
         ComputeBtn.IsEnabled  = false;
-        StepInstructions.Text = "Running landmark registration + trimmed ICP refinement…";
-
+        bool skipIcp = SkipIcpCheck.IsChecked == true;
+        StepInstructions.Text = skipIcp ? "Applying landmark registration only…"
+                                        : "Running landmark registration + ICP refinement…";
         try
         {
             var initial = IcpAligner.ComputeLandmarkTransform(srcPts, tgtPts);
 
-            // Identify which bone is the target for this step
-            List<float[]> targetVerts = _step == Step.PickMaxilla ? _maxVerts : _manVerts;
-
-            // ICP — per-bone cull ratios: source (occlusion) keeps 50%, target keeps 30% for maxilla / 25% for mandible
-            double tgtCull = _step == Step.PickMaxilla ? 0.30 : 0.25;
-            var result = await Task.Run(() =>
-                IcpAligner.AlignRobust(
-                    _occVerts, targetVerts, initial,
-                    targetCullRatio: tgtCull,
-                    sourceCullRatio: 0.50,
-                    progress: p => Dispatcher.Invoke(() =>
-                        StepInstructions.Text = $"ICP iteration… {p*100:F0}%")));
-
-            // Mutate _occVerts in-place (the transformed occlusion is now the basis for the next step)
-            IcpAligner.TransformVertices(_occVerts, result.Transform);
-
             if (_step == Step.PickMaxilla)
             {
-                _maxIcpTransform    = result.Transform;
-                FinalOcclusionTransform = ToMatrix3D(result.Transform);  // accumulated
-                RmsText.Text        = $"Maxilla RMS: {result.RmsError:F3} mm | {result.Iterations} iters";
-                _step               = Step.ReviewMaxilla;
+                // ── Step 1: move OCCLUSION to MAXILLA ─────────────────────
+                double[,] finalTx;
+                string rmsLabel;
+                if (skipIcp)
+                {
+                    finalTx  = initial;
+                    rmsLabel = "Maxilla: landmark-only";
+                }
+                else
+                {
+                    var res = await Task.Run(() =>
+                        IcpAligner.AlignRobust(
+                            _occVerts, _maxVerts, initial,
+                            targetCullRatio: 0.30,
+                            sourceCullRatio: 0.50,
+                            progress: p => Dispatcher.Invoke(() =>
+                                StepInstructions.Text = $"ICP… {p*100:F0}%")));
+                    finalTx  = res.Transform;
+                    rmsLabel = $"Maxilla RMS: {res.RmsError:F3} mm | {res.Iterations} iters";
+                    _maxIcpTransform = res.Transform;
+                }
+                IcpAligner.TransformVertices(_occVerts, finalTx);
+                _maxIcpTransform      = finalTx;
+                FinalOcclusionTransform = ToMatrix3D(finalTx);
+                RmsText.Text          = rmsLabel;
+                _step                 = Step.ReviewMaxilla;
             }
             else
             {
-                _manIcpTransform    = result.Transform;
-                MandibleTransform   = ToMatrix3D(result.Transform);
-                RmsText.Text       += $"   |   Mandible RMS: {result.RmsError:F3} mm | {result.Iterations} iters";
-                _step               = Step.ReviewMandible;
+                // ── Step 2: move MANDIBLE to OCCLUSION (already maxilla-aligned) ──
+                double[,] finalTx;
+                string rmsLabel;
+                if (skipIcp)
+                {
+                    finalTx  = initial;
+                    rmsLabel = " | Mandible: landmark-only";
+                }
+                else
+                {
+                    var res = await Task.Run(() =>
+                        IcpAligner.AlignRobust(
+                            _manVerts, _occVerts, initial,
+                            targetCullRatio: 0.25,
+                            sourceCullRatio: 0.50,
+                            progress: p => Dispatcher.Invoke(() =>
+                                StepInstructions.Text = $"ICP… {p*100:F0}%")));
+                    finalTx  = res.Transform;
+                    rmsLabel = $" | Mandible RMS: {res.RmsError:F3} mm | {res.Iterations} iters";
+                }
+                IcpAligner.TransformVertices(_manVerts, finalTx);
+                _manIcpTransform  = finalTx;
+                MandibleTransform = ToMatrix3D(finalTx);
+                RmsText.Text     += rmsLabel;
+                _step             = Step.ReviewMandible;
             }
 
             LoadStep();
@@ -653,9 +690,9 @@ public partial class ManualOcclusionAlignmentWindow : Window
         }
         if (_step == Step.ReviewMandible)
         {
-            // Revert occlusion to post-maxilla state, discard Mandible ICP
-            RestoreOccToPostMaxilla();
-            _manIcpTransform = null;
+            // Revert mandible to original, discard Mandible ICP
+            RestoreManVerts();
+            _manIcpTransform  = null;
             MandibleTransform = Matrix3D.Identity;
             _step = Step.PickMandible;
             _pairs.Clear();
@@ -682,9 +719,18 @@ public partial class ManualOcclusionAlignmentWindow : Window
     private void RestoreOccToPostMaxilla()
     {
         if (_maxIcpTransform == null) { RestoreOccVerts(); return; }
-        // re-apply maxilla transform to original
         RestoreOccVerts();
         IcpAligner.TransformVertices(_occVerts, _maxIcpTransform);
+    }
+
+    private void RestoreManVerts()
+    {
+        for (int i = 0; i < _manVerts.Count; i++)
+        {
+            _manVerts[i][0] = _manOriginal[i][0];
+            _manVerts[i][1] = _manOriginal[i][1];
+            _manVerts[i][2] = _manOriginal[i][2];
+        }
     }
 
     // ── 4×4 → Matrix3D converter ──────────────────────────────────────────
