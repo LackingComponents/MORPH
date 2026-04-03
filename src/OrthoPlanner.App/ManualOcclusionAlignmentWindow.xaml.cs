@@ -593,7 +593,7 @@ public partial class ManualOcclusionAlignmentWindow : Window
                         IcpAligner.AlignRobust(
                             _occVerts, _maxVerts, initial,
                             targetCullRatio: 0.30,
-                            sourceCullRatio: 0.50,
+                            sourceCullRatio: 1.00,
                             progress: p => Dispatcher.Invoke(() =>
                                 StepInstructions.Text = $"ICP… {p*100:F0}%")));
                     finalTx  = res.Transform;
@@ -621,8 +621,8 @@ public partial class ManualOcclusionAlignmentWindow : Window
                     var res = await Task.Run(() =>
                         IcpAligner.AlignRobust(
                             _manVerts, _occVerts, initial,
-                            targetCullRatio: 0.25,
-                            sourceCullRatio: 0.50,
+                            targetCullRatio: 0.20,
+                            sourceCullRatio: 1.00,
                             progress: p => Dispatcher.Invoke(() =>
                                 StepInstructions.Text = $"ICP… {p*100:F0}%")));
                     finalTx  = res.Transform;

@@ -430,7 +430,7 @@ public partial class MainViewModel : ObservableObject
                 var resultOccToMax = OrthoPlanner.Core.Geometry.IcpAligner.AlignRobust(
                     occVertsList, maxillaVertsList, initialTx,
                     targetCullRatio: 0.30,   // keep closest 30% of maxilla (teeth zone)
-                    sourceCullRatio: 0.50);  // keep closest 50% of occlusion scan (crown surfaces)
+                    sourceCullRatio: 1.00);  // use all occlusion source points
                 
                 // Keep maxilla at identity, since we pulled the occlusion to it.
                 var maxOccTxMat = System.Windows.Media.Media3D.Matrix3D.Identity;
@@ -445,8 +445,8 @@ public partial class MainViewModel : ObservableObject
                 var initialManTx = new double[4, 4] { {1,0,0,0}, {0,1,0,0}, {0,0,1,0}, {0,0,0,1} };
                 var resultManToOcc = OrthoPlanner.Core.Geometry.IcpAligner.AlignRobust(
                     mandibleVertsList, occVertsList, initialManTx,
-                    targetCullRatio: 0.25,   // keep closest 25% of mandible (teeth zone only)
-                    sourceCullRatio: 0.50);  // keep closest 50% of occlusion scan (lower crown surfaces)
+                    targetCullRatio: 0.20,   // keep closest 20% of mandible (teeth zone only)
+                    sourceCullRatio: 1.00);  // use all occlusion source points
 
                 var manOccTxMat = ConvertToMatrix3D(resultManToOcc.Transform);
 

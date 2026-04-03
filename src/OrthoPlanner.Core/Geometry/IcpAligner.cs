@@ -220,12 +220,12 @@ public static class IcpAligner
         currentSrc = activeSrc;
         nSrc = nSrcActive;
 
-        // ── Gaussian-weighted ICP with annealing ──
-        // σ and d_cap start wide (coarse alignment) and tighten to crown-contact scale.
-        const double SigmaStart = 20.0;
-        const double SigmaEnd   =  2.0;
-        const double DCapStart  = 30.0;
-        const double DCapEnd    =  8.0;
+        // ── Gaussian-weighted ICP with sigma annealing ───────────────────────────
+        // After the pre-cull above, ALL surviving source points participate in every
+        // ICP iteration (no additional hard distance cap). The Gaussian weight
+        // exp(-d²/σ²) decays distant pairs smoothly so local dental contacts dominate.
+        const double SigmaStart = 20.0;   // wide early phase
+        const double SigmaEnd   =  2.0;   // tight late phase (~half a cusp width)
 
         var totalT = (double[,])initT.Clone();
         double prevRms = double.MaxValue;
@@ -237,8 +237,6 @@ public static class IcpAligner
 
             double t      = Math.Min(1.0, iter / 60.0);
             double sigma  = SigmaStart + (SigmaEnd - SigmaStart) * t;
-            double dCap   = DCapStart  + (DCapEnd  - DCapStart)  * t;
-            double dCapSq = dCap * dCap;
             double sigSq  = sigma * sigma;
 
             double sumWDistSq = 0, sumW = 0;
@@ -254,8 +252,7 @@ public static class IcpAligner
                 var (idx, distSq) = tree.FindNearest(
                     (float)currentSrc[i, 0], (float)currentSrc[i, 1], (float)currentSrc[i, 2]);
 
-                if (distSq > dCapSq) { pairs[i] = (0,0,0,0,0,0,0); continue; }
-
+                // All surviving post-cull points participate; Gaussian weight handles distance
                 double w = Math.Exp(-distSq / sigSq);
                 var (ptx, pty, ptz) = tree.GetPoint(idx);
 
