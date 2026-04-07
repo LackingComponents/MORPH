@@ -457,8 +457,8 @@ public partial class MainViewModel : ObservableObject
                 var initialManTx = new double[4, 4] { {1,0,0,0}, {0,1,0,0}, {0,0,1,0}, {0,0,0,1} };
                 var resultManToOcc = OrthoPlanner.Core.Geometry.IcpAligner.AlignRobust(
                     mandibleVertsList, occVertsList, initialManTx,
-                    targetCullRatio: 0.20,   // keep closest 20% of mandible (teeth zone only)
-                    sourceCullRatio: 0.50);  // reject farthest 50% of occlusion source
+                    targetCullRatio: 0.50,   // keep closest 50% of occlusion (target = all dental data)
+                    sourceCullRatio: 0.20);  // keep closest 20% of mandible (source = teeth zone only)
 
                 var manOccTxMat = ConvertToMatrix3D(resultManToOcc.Transform);
 
