@@ -230,12 +230,14 @@ public partial class MainViewModel : ObservableObject
         {
             if (IsMaxillaBasedSurgery)
             {
-                ApplySurgical(maxilla,  maxillaTx);
+                // Maxilla is the driver — always gets maxillaTx
+                ApplySurgical(maxilla, maxillaTx);
+
                 if (IsKeepOcclusionSurgery)
                 {
+                    // Mandible snaps into bite relationship, then follows maxilla
                     var occ = LoadedOcclusions.FirstOrDefault(o => o.IsVisible);
                     var occMat = occ != null ? occ.MandibleOcclusionTransform : System.Windows.Media.Media3D.Matrix3D.Identity;
-                    // Mandible snaps into bite and follows maxilla
                     var tg = new System.Windows.Media.Media3D.Transform3DGroup();
                     tg.Children.Add(new System.Windows.Media.Media3D.MatrixTransform3D(occMat));
                     tg.Children.Add(maxillaTx);
@@ -243,17 +245,21 @@ public partial class MainViewModel : ObservableObject
                 }
                 else
                 {
-                    ApplySurgical(mandible, identityTx);
+                    // No bite relationship — mandible moves together with maxilla
+                    ApplySurgical(mandible, maxillaTx);
                 }
             }
             else if (IsMandibleBasedSurgery)
             {
+                // Mandible is the driver — always gets mandibleTx
+                ApplySurgical(mandible, mandibleTx);
+
                 if (IsKeepOcclusionSurgery)
                 {
+                    // Maxilla snaps into inverse bite relationship, then follows mandible
                     var occ = LoadedOcclusions.FirstOrDefault(o => o.IsVisible);
                     var occMat = occ != null ? occ.MandibleOcclusionTransform : System.Windows.Media.Media3D.Matrix3D.Identity;
-                    // Maxilla snaps into bite relative to mandible and follows mandible
-                    var maxOcclOffsets = occMat; 
+                    var maxOcclOffsets = occMat;
                     if (maxOcclOffsets.HasInverse) maxOcclOffsets.Invert();
                     var tg = new System.Windows.Media.Media3D.Transform3DGroup();
                     tg.Children.Add(new System.Windows.Media.Media3D.MatrixTransform3D(maxOcclOffsets));
@@ -262,9 +268,15 @@ public partial class MainViewModel : ObservableObject
                 }
                 else
                 {
-                    ApplySurgical(maxilla, identityTx);
+                    // No bite relationship — maxilla moves together with mandible
+                    ApplySurgical(maxilla, mandibleTx);
                 }
-                ApplySurgical(mandible, mandibleTx);
+            }
+            else
+            {
+                // Neither mode selected — bones at original CT position
+                ApplySurgical(maxilla,  identityTx);
+                ApplySurgical(mandible, identityTx);
             }
         }
 
@@ -489,7 +501,7 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async void OpenManualOcclusionAlignment()
+    private async Task OpenManualOcclusionAlignment()
     {
         var occlusion = LoadedOcclusions.FirstOrDefault(o => o.IsVisible);
         if (occlusion == null || occlusion.Vertices == null)
@@ -517,29 +529,26 @@ public partial class MainViewModel : ObservableObject
             SaveStateForUndo();
             try
             {
-                // Dental alignment baked its transform into occlusion.Vertices (CT space).
-                // The wizard computed FinalOcclusionTransform from those already-aligned vertices.
-                // Bake it in (matching DentalAlignmentWindow convention) and rebuild the model.
+                // Bake the occlusion transform into occlusion.Vertices
+                // (same convention as DentalAlignmentWindow: transform goes into geometry).
                 if (manualWizard.FinalOcclusionTransform != System.Windows.Media.Media3D.Matrix3D.Identity)
                 {
                     var txArr = ToDoubleMatrix(manualWizard.FinalOcclusionTransform);
                     await Task.Run(() => OrthoPlanner.Core.Geometry.IcpAligner.TransformVertices(occlusion.Vertices, txArr));
                     occlusion.BuildModel();
                 }
+                // Reset any stale visual transform — geometry is already in CT space
+                occlusion.Transform = System.Windows.Media.Media3D.Transform3D.Identity;
 
-                // Bake mandible transform into mandible.Vertices.
-                if (manualWizard.MandibleTransform != System.Windows.Media.Media3D.Matrix3D.Identity)
-                {
-                    var manTxArr = ToDoubleMatrix(manualWizard.MandibleTransform);
-                    await Task.Run(() => OrthoPlanner.Core.Geometry.IcpAligner.TransformVertices(mandible.Vertices, manTxArr));
-                    mandible.BuildModel();
-                }
-
+                // Store the transforms for surgical mode use.
+                // Do NOT bake mandible — it must remain at original CT position.
+                // MandibleOcclusionTransform is applied as a visual transform only
+                // when "Keep Occlusion" is toggled on in the surgical planner.
                 occlusion.MaxillaOcclusionTransform  = manualWizard.MaxillaTransform;
                 occlusion.MandibleOcclusionTransform = manualWizard.MandibleTransform;
-                // Do NOT set .Transform — vertices are now in the correct space.
 
                 UpdateSurgeryTransform();
+                RefreshCombinedModel();
                 StatusText = "Occlusion STL aligned manually.";
             }
             catch (Exception ex)
