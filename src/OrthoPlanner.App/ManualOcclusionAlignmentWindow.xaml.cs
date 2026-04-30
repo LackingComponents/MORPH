@@ -263,6 +263,21 @@ public partial class ManualOcclusionAlignmentWindow : Window
                     OccGroup.Children.Add(goldOcc);
 
                     CenterViewport(OccViewport, _manVerts, 1.0);
+
+                    // ── Debug: show centroids to verify transform was applied ──────
+                    double mx = 0, my = 0, mz = 0;
+                    foreach (var v in _manVerts) { mx += v[0]; my += v[1]; mz += v[2]; }
+                    if (_manVerts.Count > 0) { mx /= _manVerts.Count; my /= _manVerts.Count; mz /= _manVerts.Count; }
+
+                    double ox = 0, oy = 0, oz = 0;
+                    foreach (var v in _occVerts) { ox += v[0]; oy += v[1]; oz += v[2]; }
+                    if (_occVerts.Count > 0) { ox /= _occVerts.Count; oy /= _occVerts.Count; oz /= _occVerts.Count; }
+
+                    double dx = mx-ox, dy = my-oy, dz = mz-oz;
+                    double dist = Math.Sqrt(dx*dx + dy*dy + dz*dz);
+                    StepInstructions.Text = $"Blue = Mandible bone (centroid {mx:F1},{my:F1},{mz:F1}); " +
+                                           $"Gold = Occlusion (centroid {ox:F1},{oy:F1},{oz:F1}). " +
+                                           $"Centroid dist: {dist:F1} mm";
                 }
                 break;
         }
@@ -609,6 +624,20 @@ public partial class ManualOcclusionAlignmentWindow : Window
             else
             {
                 // ── Step 2: move MANDIBLE to OCCLUSION (already maxilla-aligned) ──
+                //
+                // DEFENSIVE REBUILD: re-apply _maxIcpTransform to _occOriginal so that
+                // _occVerts is GUARANTEED to be at the post-step-1 position regardless of
+                // any prior mutation (Back/re-run, previous wizard session, etc.)
+                RestoreOccVerts();                                       // reset → _occOriginal
+                if (_maxIcpTransform != null)
+                    IcpAligner.TransformVertices(_occVerts, _maxIcpTransform); // re-apply step-1 tx
+
+                // Restore mandible in case Back was used
+                RestoreManVerts();
+
+                // Recompute the landmark transform with freshly rebuilt vertex state
+                initial = IcpAligner.ComputeLandmarkTransform(srcPts, tgtPts);
+
                 double[,] finalTx;
                 string rmsLabel;
                 if (skipIcp)
@@ -618,9 +647,12 @@ public partial class ManualOcclusionAlignmentWindow : Window
                 }
                 else
                 {
+                    // Take snapshots so the background thread reads consistent data
+                    var manSnap = _manVerts.Select(v => new float[]{v[0],v[1],v[2]}).ToList();
+                    var occSnap = _occVerts.Select(v => new float[]{v[0],v[1],v[2]}).ToList();
                     var res = await Task.Run(() =>
                         IcpAligner.AlignRobust(
-                            _manVerts, _occVerts, initial,
+                            manSnap, occSnap, initial,
                             targetCullRatio: 0.50,
                             sourceCullRatio: 0.20,
                             progress: p => Dispatcher.Invoke(() =>
@@ -634,6 +666,7 @@ public partial class ManualOcclusionAlignmentWindow : Window
                 RmsText.Text     += rmsLabel;
                 _step             = Step.ReviewMandible;
             }
+
 
             LoadStep();
         }
