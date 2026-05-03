@@ -624,19 +624,63 @@ public partial class ManualOcclusionAlignmentWindow : Window
             else
             {
                 // ── Step 2: move MANDIBLE to OCCLUSION (already maxilla-aligned) ──
-                //
-                // DEFENSIVE REBUILD: re-apply _maxIcpTransform to _occOriginal so that
-                // _occVerts is GUARANTEED to be at the post-step-1 position regardless of
-                // any prior mutation (Back/re-run, previous wizard session, etc.)
-                RestoreOccVerts();                                       // reset → _occOriginal
+                RestoreOccVerts();
                 if (_maxIcpTransform != null)
-                    IcpAligner.TransformVertices(_occVerts, _maxIcpTransform); // re-apply step-1 tx
-
-                // Restore mandible in case Back was used
+                    IcpAligner.TransformVertices(_occVerts, _maxIcpTransform);
                 RestoreManVerts();
 
-                // Recompute the landmark transform with freshly rebuilt vertex state
-                initial = IcpAligner.ComputeLandmarkTransform(srcPts, tgtPts);
+                // Recompute the landmark transform with freshly rebuilt vertex state.
+                // IMPORTANT: do NOT use ComputeLandmarkTransform (SVD) here.
+                // With 3 nearly-coplanar landmarks (all tooth-tip heights are similar),
+                // the SVD becomes numerically unstable and produces a large spurious rotation,
+                // which then contaminates the translation via t = centroid_tgt - R * centroid_src.
+                // Both meshes are already in CT space — only a translation is needed as the
+                // initial estimate. ICP (if enabled) will handle residual rotation.
+                {
+                    double dtx = 0, dty = 0, dtz = 0;
+                    for (int pi = 0; pi < srcPts.Count; pi++)
+                    {
+                        dtx += tgtPts[pi].Item1 - srcPts[pi].Item1;
+                        dty += tgtPts[pi].Item2 - srcPts[pi].Item2;
+                        dtz += tgtPts[pi].Item3 - srcPts[pi].Item3;
+                    }
+                    dtx /= srcPts.Count;
+                    dty /= srcPts.Count;
+                    dtz /= srcPts.Count;
+
+                    initial = IcpAligner.Identity4x4();
+                    initial[0, 3] = dtx;
+                    initial[1, 3] = dty;
+                    initial[2, 3] = dtz;
+                }
+
+                // ─── DIAGNOSTIC ───────────────────────────────────────────────────
+                {
+                    // Centroid of _manVerts (original mandible)
+                    double mx=0,my=0,mz=0;
+                    foreach(var v in _manVerts){mx+=v[0];my+=v[1];mz+=v[2];}
+                    if(_manVerts.Count>0){mx/=_manVerts.Count;my/=_manVerts.Count;mz/=_manVerts.Count;}
+
+                    // Centroid of _occVerts (should be step-1 aligned)
+                    double ox=0,oy=0,oz=0;
+                    foreach(var v in _occVerts){ox+=v[0];oy+=v[1];oz+=v[2];}
+                    if(_occVerts.Count>0){ox/=_occVerts.Count;oy/=_occVerts.Count;oz/=_occVerts.Count;}
+
+                    // Landmark pairs
+                    var pairSb = new System.Text.StringBuilder();
+                    for(int pi=0;pi<srcPts.Count;pi++)
+                        pairSb.AppendLine($"  Bone({srcPts[pi].Item1:F1},{srcPts[pi].Item2:F1},{srcPts[pi].Item3:F1}) → Occ({tgtPts[pi].Item1:F1},{tgtPts[pi].Item2:F1},{tgtPts[pi].Item3:F1})");
+
+                    MessageBox.Show(
+                        $"STEP 2 DIAGNOSTIC\n\n" +
+                        $"Mandible centroid: ({mx:F1}, {my:F1}, {mz:F1})\n" +
+                        $"Occlusion centroid: ({ox:F1}, {oy:F1}, {oz:F1})\n\n" +
+                        $"Landmark pairs (Bone → Occ):\n{pairSb}\n" +
+                        $"Computed translation: ({initial[0,3]:F2}, {initial[1,3]:F2}, {initial[2,3]:F2})\n" +
+                        $"_maxIcpTransform is {(_maxIcpTransform == null ? "NULL ← BUG" : "set ✓")}",
+                        "Debug Info", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                // ─────────────────────────────────────────────────────────────────
 
                 double[,] finalTx;
                 string rmsLabel;
@@ -647,7 +691,6 @@ public partial class ManualOcclusionAlignmentWindow : Window
                 }
                 else
                 {
-                    // Take snapshots so the background thread reads consistent data
                     var manSnap = _manVerts.Select(v => new float[]{v[0],v[1],v[2]}).ToList();
                     var occSnap = _occVerts.Select(v => new float[]{v[0],v[1],v[2]}).ToList();
                     var res = await Task.Run(() =>
@@ -666,6 +709,7 @@ public partial class ManualOcclusionAlignmentWindow : Window
                 RmsText.Text     += rmsLabel;
                 _step             = Step.ReviewMandible;
             }
+
 
 
             LoadStep();
