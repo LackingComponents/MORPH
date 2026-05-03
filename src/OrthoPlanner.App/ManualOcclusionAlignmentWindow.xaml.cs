@@ -629,30 +629,8 @@ public partial class ManualOcclusionAlignmentWindow : Window
                     IcpAligner.TransformVertices(_occVerts, _maxIcpTransform);
                 RestoreManVerts();
 
-                // Recompute the landmark transform with freshly rebuilt vertex state.
-                // IMPORTANT: do NOT use ComputeLandmarkTransform (SVD) here.
-                // With 3 nearly-coplanar landmarks (all tooth-tip heights are similar),
-                // the SVD becomes numerically unstable and produces a large spurious rotation,
-                // which then contaminates the translation via t = centroid_tgt - R * centroid_src.
-                // Both meshes are already in CT space — only a translation is needed as the
-                // initial estimate. ICP (if enabled) will handle residual rotation.
-                {
-                    double dtx = 0, dty = 0, dtz = 0;
-                    for (int pi = 0; pi < srcPts.Count; pi++)
-                    {
-                        dtx += tgtPts[pi].Item1 - srcPts[pi].Item1;
-                        dty += tgtPts[pi].Item2 - srcPts[pi].Item2;
-                        dtz += tgtPts[pi].Item3 - srcPts[pi].Item3;
-                    }
-                    dtx /= srcPts.Count;
-                    dty /= srcPts.Count;
-                    dtz /= srcPts.Count;
-
-                    initial = IcpAligner.Identity4x4();
-                    initial[0, 3] = dtx;
-                    initial[1, 3] = dty;
-                    initial[2, 3] = dtz;
-                }
+                // Compute initial rigid transform from landmarks (Horn's quaternion method — stable for coplanar points)
+                initial = IcpAligner.ComputeLandmarkTransform(srcPts, tgtPts);
 
                 // ─── DIAGNOSTIC ───────────────────────────────────────────────────
                 {

@@ -314,16 +314,70 @@ public static class IcpAligner
         int n = Math.Min(sourceLandmarks.Count, targetLandmarks.Count);
         if (n < 3) return Identity4x4();
 
-        var src = new double[n, 3];
-        var tgt = new double[n, 3];
+        // Centroids
+        double sx = 0, sy = 0, sz = 0, tx = 0, ty = 0, tz = 0;
         for (int i = 0; i < n; i++)
         {
-            src[i, 0] = sourceLandmarks[i].X; src[i, 1] = sourceLandmarks[i].Y; src[i, 2] = sourceLandmarks[i].Z;
-            tgt[i, 0] = targetLandmarks[i].X; tgt[i, 1] = targetLandmarks[i].Y; tgt[i, 2] = targetLandmarks[i].Z;
+            sx += sourceLandmarks[i].X; sy += sourceLandmarks[i].Y; sz += sourceLandmarks[i].Z;
+            tx += targetLandmarks[i].X; ty += targetLandmarks[i].Y; tz += targetLandmarks[i].Z;
+        }
+        sx /= n; sy /= n; sz /= n;
+        tx /= n; ty /= n; tz /= n;
+
+        // Cross-covariance H
+        double h00=0,h01=0,h02=0,h10=0,h11=0,h12=0,h20=0,h21=0,h22=0;
+        for (int i = 0; i < n; i++)
+        {
+            double ax = sourceLandmarks[i].X - sx, ay = sourceLandmarks[i].Y - sy, az = sourceLandmarks[i].Z - sz;
+            double bx = targetLandmarks[i].X - tx, by = targetLandmarks[i].Y - ty, bz = targetLandmarks[i].Z - tz;
+            h00+=ax*bx; h01+=ax*by; h02+=ax*bz;
+            h10+=ay*bx; h11+=ay*by; h12+=ay*bz;
+            h20+=az*bx; h21+=az*by; h22+=az*bz;
         }
 
-        return ComputeRigidTransformSVD(src, tgt, n);
+        // Horn's method: build 4×4 symmetric K from H's antisymmetric part
+        // The largest eigenvector of K is the optimal rotation quaternion q=[w,x,y,z]
+        double[,] K = new double[4, 4]
+        {
+            { h00+h11+h22,  h12-h21,      h20-h02,      h01-h10      },
+            { h12-h21,      h00-h11-h22,  h01+h10,      h20+h02      },
+            { h20-h02,      h01+h10,     -h00+h11-h22,  h12+h21      },
+            { h01-h10,      h20+h02,      h12+h21,      -h00-h11+h22 }
+        };
+
+        // Power iteration to find dominant eigenvector of K (converges fast for 4×4)
+        double[] q = { 1, 0, 0, 0 };
+        for (int iter = 0; iter < 200; iter++)
+        {
+            double[] Kq = new double[4];
+            for (int r = 0; r < 4; r++)
+                for (int c = 0; c < 4; c++)
+                    Kq[r] += K[r, c] * q[c];
+            double norm = Math.Sqrt(Kq[0]*Kq[0]+Kq[1]*Kq[1]+Kq[2]*Kq[2]+Kq[3]*Kq[3]);
+            if (norm < 1e-14) break;
+            q[0]=Kq[0]/norm; q[1]=Kq[1]/norm; q[2]=Kq[2]/norm; q[3]=Kq[3]/norm;
+        }
+        // q = [w, x, y, z]
+        double qw=q[0], qx=q[1], qy=q[2], qz=q[3];
+
+        // Quaternion → rotation matrix
+        double R00 = 1-2*(qy*qy+qz*qz), R01 = 2*(qx*qy-qz*qw), R02 = 2*(qx*qz+qy*qw);
+        double R10 = 2*(qx*qy+qz*qw),   R11 = 1-2*(qx*qx+qz*qz), R12 = 2*(qy*qz-qx*qw);
+        double R20 = 2*(qx*qz-qy*qw),   R21 = 2*(qy*qz+qx*qw),   R22 = 1-2*(qx*qx+qy*qy);
+
+        // Translation: t = centroid_tgt - R * centroid_src
+        double ttx = tx - (R00*sx + R01*sy + R02*sz);
+        double tty = ty - (R10*sx + R11*sy + R12*sz);
+        double ttz = tz - (R20*sx + R21*sy + R22*sz);
+
+        var T = new double[4, 4];
+        T[0,0]=R00; T[0,1]=R01; T[0,2]=R02; T[0,3]=ttx;
+        T[1,0]=R10; T[1,1]=R11; T[1,2]=R12; T[1,3]=tty;
+        T[2,0]=R20; T[2,1]=R21; T[2,2]=R22; T[2,3]=ttz;
+        T[3,3]=1.0;
+        return T;
     }
+
 
     /// <summary>
     /// Apply a 4x4 transform to all vertices in place (flat float[] stride-3).
