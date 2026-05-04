@@ -607,8 +607,11 @@ public partial class ManualOcclusionAlignmentWindow : Window
                     var res = await Task.Run(() =>
                         IcpAligner.AlignRobust(
                             _occVerts, _maxVerts, initial,
-                            targetCullRatio: 0.30,
+                            maxIterations: 500,
+                            tolerance: 0,
+                            targetCullRatio: 0.40,
                             sourceCullRatio: 0.50,
+                            sigmaEnd: 1.0,
                             progress: p => Dispatcher.Invoke(() =>
                                 StepInstructions.Text = $"ICP… {p*100:F0}%")));
                     finalTx  = res.Transform;
@@ -624,41 +627,15 @@ public partial class ManualOcclusionAlignmentWindow : Window
             else
             {
                 // ── Step 2: move MANDIBLE to OCCLUSION (already maxilla-aligned) ──
+                // Restore occVerts to pristine, then re-apply maxilla transform so the
+                // occlusion is in its maxilla-aligned state for the mandible ICP.
                 RestoreOccVerts();
                 if (_maxIcpTransform != null)
                     IcpAligner.TransformVertices(_occVerts, _maxIcpTransform);
                 RestoreManVerts();
 
-                // Compute initial rigid transform from landmarks (Horn's quaternion method — stable for coplanar points)
+                // Compute initial rigid transform from landmarks (Horn's quaternion method)
                 initial = IcpAligner.ComputeLandmarkTransform(srcPts, tgtPts);
-
-                // ─── DIAGNOSTIC ───────────────────────────────────────────────────
-                {
-                    // Centroid of _manVerts (original mandible)
-                    double mx=0,my=0,mz=0;
-                    foreach(var v in _manVerts){mx+=v[0];my+=v[1];mz+=v[2];}
-                    if(_manVerts.Count>0){mx/=_manVerts.Count;my/=_manVerts.Count;mz/=_manVerts.Count;}
-
-                    // Centroid of _occVerts (should be step-1 aligned)
-                    double ox=0,oy=0,oz=0;
-                    foreach(var v in _occVerts){ox+=v[0];oy+=v[1];oz+=v[2];}
-                    if(_occVerts.Count>0){ox/=_occVerts.Count;oy/=_occVerts.Count;oz/=_occVerts.Count;}
-
-                    // Landmark pairs
-                    var pairSb = new System.Text.StringBuilder();
-                    for(int pi=0;pi<srcPts.Count;pi++)
-                        pairSb.AppendLine($"  Bone({srcPts[pi].Item1:F1},{srcPts[pi].Item2:F1},{srcPts[pi].Item3:F1}) → Occ({tgtPts[pi].Item1:F1},{tgtPts[pi].Item2:F1},{tgtPts[pi].Item3:F1})");
-
-                    MessageBox.Show(
-                        $"STEP 2 DIAGNOSTIC\n\n" +
-                        $"Mandible centroid: ({mx:F1}, {my:F1}, {mz:F1})\n" +
-                        $"Occlusion centroid: ({ox:F1}, {oy:F1}, {oz:F1})\n\n" +
-                        $"Landmark pairs (Bone → Occ):\n{pairSb}\n" +
-                        $"Computed translation: ({initial[0,3]:F2}, {initial[1,3]:F2}, {initial[2,3]:F2})\n" +
-                        $"_maxIcpTransform is {(_maxIcpTransform == null ? "NULL ← BUG" : "set ✓")}",
-                        "Debug Info", MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-                // ─────────────────────────────────────────────────────────────────
 
                 double[,] finalTx;
                 string rmsLabel;
@@ -674,6 +651,8 @@ public partial class ManualOcclusionAlignmentWindow : Window
                     var res = await Task.Run(() =>
                         IcpAligner.AlignRobust(
                             manSnap, occSnap, initial,
+                            maxIterations: 500,
+                            tolerance: 0,
                             targetCullRatio: 0.50,
                             sourceCullRatio: 0.20,
                             progress: p => Dispatcher.Invoke(() =>

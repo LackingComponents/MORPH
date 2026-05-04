@@ -21,6 +21,9 @@ public partial class MainViewModel : ObservableObject
 {
     public MainViewModel()
     {
+        // Re-evaluate HasLeFort1Maxilla whenever the segments collection changes
+        // (covers project load, undo/redo, and segment deletion).
+        Segments.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasLeFort1Maxilla));
     }
 
     // ─── Photogrammetry ───
@@ -50,7 +53,10 @@ public partial class MainViewModel : ObservableObject
     public bool IsMaxillaMoveable => IsMaxillaBasedSurgery || IsManualOcclusionSurgery;
     public bool IsMandibleMoveable => IsMandibleBasedSurgery || IsManualOcclusionSurgery;
 
-    public ObservableCollection<MeshViewModel> LoadedOcclusions { get; } = new();
+    public ObservableCollection<MeshViewModel>       LoadedOcclusions { get; } = new();
+    public ObservableCollection<OcclusionNodeViewModel> OcclusionNodes { get; } = new();
+    private OcclusionNodeViewModel? _activeOcclusionNode;
+
 
     // Maxilla Transforms
     [ObservableProperty] private double _surgMaxillaLat;
@@ -92,24 +98,68 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private double _surgChinPitch;
     [ObservableProperty] private double _surgChinYaw;
 
+    // Saved jaw-movement values — preserved across mode switches so toggling back restores them.
+    private (double Lat, double Ant, double Vert, double Roll, double Pitch, double Yaw)
+        _savedMaxilla = (0, 0, 0, 0, 0, 0),
+        _savedMandible = (0, 0, 0, 0, 0, 0);
+
+    private void SaveAndZeroMaxilla()
+    {
+        _savedMaxilla = (SurgMaxillaLat, SurgMaxillaAnt, SurgMaxillaVert, SurgMaxillaRoll, SurgMaxillaPitch, SurgMaxillaYaw);
+        SurgMaxillaLat = SurgMaxillaAnt = SurgMaxillaVert = SurgMaxillaRoll = SurgMaxillaPitch = SurgMaxillaYaw = 0;
+    }
+    private void RestoreMaxilla()
+    {
+        SurgMaxillaLat = _savedMaxilla.Lat; SurgMaxillaAnt = _savedMaxilla.Ant;
+        SurgMaxillaVert = _savedMaxilla.Vert; SurgMaxillaRoll = _savedMaxilla.Roll;
+        SurgMaxillaPitch = _savedMaxilla.Pitch; SurgMaxillaYaw = _savedMaxilla.Yaw;
+    }
+    private void SaveAndZeroMandible()
+    {
+        _savedMandible = (SurgMandibleLat, SurgMandibleAnt, SurgMandibleVert, SurgMandibleRoll, SurgMandiblePitch, SurgMandibleYaw);
+        SurgMandibleLat = SurgMandibleAnt = SurgMandibleVert = SurgMandibleRoll = SurgMandiblePitch = SurgMandibleYaw = 0;
+    }
+    private void RestoreMandible()
+    {
+        SurgMandibleLat = _savedMandible.Lat; SurgMandibleAnt = _savedMandible.Ant;
+        SurgMandibleVert = _savedMandible.Vert; SurgMandibleRoll = _savedMandible.Roll;
+        SurgMandiblePitch = _savedMandible.Pitch; SurgMandibleYaw = _savedMandible.Yaw;
+    }
+
     partial void OnIsMaxillaBasedSurgeryChanged(bool value)
     {
-        if (value) { IsMandibleBasedSurgery = false; }
+        if (value)
+        {
+            IsMandibleBasedSurgery = false; // triggers SaveAndZeroMandible via OnIsMandibleBasedSurgeryChanged(false)
+            RestoreMaxilla();
+        }
+        else
+        {
+            SaveAndZeroMaxilla();
+        }
         UpdateMoveableStates();
     }
     partial void OnIsMandibleBasedSurgeryChanged(bool value)
     {
-        if (value) { IsMaxillaBasedSurgery = false; }
+        if (value)
+        {
+            IsMaxillaBasedSurgery = false; // triggers SaveAndZeroMaxilla via OnIsMaxillaBasedSurgeryChanged(false)
+            RestoreMandible();
+        }
+        else
+        {
+            SaveAndZeroMandible();
+        }
         UpdateMoveableStates();
     }
     partial void OnIsManualOcclusionSurgeryChanged(bool value)
     {
         OnPropertyChanged(nameof(IsBaseSwitchEnabled));
-        if (value) 
-        { 
-            IsMaxillaBasedSurgery = false; 
-            IsMandibleBasedSurgery = false; 
-            IsKeepOcclusionSurgery = false; 
+        if (value)
+        {
+            IsMaxillaBasedSurgery = false;
+            IsMandibleBasedSurgery = false;
+            IsKeepOcclusionSurgery = false;
         }
         UpdateMoveableStates();
     }
@@ -228,53 +278,54 @@ public partial class MainViewModel : ObservableObject
         }
         else
         {
+            var occ    = _activeOcclusionNode?.Occlusion ?? LoadedOcclusions.FirstOrDefault(o => o.IsVisible);
+            var occMat = occ?.MandibleOcclusionTransform ?? Matrix3D.Identity;
+
             if (IsMaxillaBasedSurgery)
             {
-                // Maxilla is the driver — always gets maxillaTx
+                // Maxilla is the surgical driver — moves with its sliders.
                 ApplySurgical(maxilla, maxillaTx);
 
                 if (IsKeepOcclusionSurgery)
                 {
-                    // Mandible snaps into bite relationship, then follows maxilla
-                    var occ = LoadedOcclusions.FirstOrDefault(o => o.IsVisible);
-                    var occMat = occ != null ? occ.MandibleOcclusionTransform : System.Windows.Media.Media3D.Matrix3D.Identity;
-                    var tg = new System.Windows.Media.Media3D.Transform3DGroup();
-                    tg.Children.Add(new System.Windows.Media.Media3D.MatrixTransform3D(occMat));
-                    tg.Children.Add(maxillaTx);
-                    ApplySurgical(mandible, tg);
+                    // "Original occlusion" ON: remove the surgical bite — mandible follows maxilla
+                    // freely as in its original (pre-treatment) CT position.
+                    ApplySurgical(mandible, maxillaTx);
                 }
                 else
                 {
-                    // No bite relationship — mandible moves together with maxilla
-                    ApplySurgical(mandible, maxillaTx);
+                    // Default: apply the surgical bite from the dental scan so mandible snaps
+                    // into planned occlusion and tracks the maxilla movement.
+                    var mandibleTg = new Transform3DGroup();
+                    mandibleTg.Children.Add(new MatrixTransform3D(occMat));
+                    mandibleTg.Children.Add(maxillaTx);
+                    ApplySurgical(mandible, mandibleTg);
                 }
             }
             else if (IsMandibleBasedSurgery)
             {
-                // Mandible is the driver — always gets mandibleTx
+                // Mandible is the driver — moves with its sliders (whole complex follows it).
                 ApplySurgical(mandible, mandibleTx);
 
                 if (IsKeepOcclusionSurgery)
                 {
-                    // Maxilla snaps into inverse bite relationship, then follows mandible
-                    var occ = LoadedOcclusions.FirstOrDefault(o => o.IsVisible);
-                    var occMat = occ != null ? occ.MandibleOcclusionTransform : System.Windows.Media.Media3D.Matrix3D.Identity;
-                    var maxOcclOffsets = occMat;
-                    if (maxOcclOffsets.HasInverse) maxOcclOffsets.Invert();
-                    var tg = new System.Windows.Media.Media3D.Transform3DGroup();
-                    tg.Children.Add(new System.Windows.Media.Media3D.MatrixTransform3D(maxOcclOffsets));
-                    tg.Children.Add(mandibleTx);
-                    ApplySurgical(maxilla, tg);
+                    // "Original occlusion" ON: maxilla follows mandible freely (no bite snap).
+                    ApplySurgical(maxilla, mandibleTx);
                 }
                 else
                 {
-                    // No bite relationship — maxilla moves together with mandible
-                    ApplySurgical(maxilla, mandibleTx);
+                    // Default: maxilla snaps to inverse bite then follows mandible.
+                    var invOccMat = occMat;
+                    if (invOccMat.HasInverse) invOccMat.Invert();
+                    var maxillaTg = new Transform3DGroup();
+                    maxillaTg.Children.Add(new MatrixTransform3D(invOccMat));
+                    maxillaTg.Children.Add(mandibleTx);
+                    ApplySurgical(maxilla, maxillaTg);
                 }
             }
             else
             {
-                // Neither mode selected — bones at original CT position
+                // No mode — all bones at original CT position.
                 ApplySurgical(maxilla,  identityTx);
                 ApplySurgical(mandible, identityTx);
             }
@@ -288,7 +339,7 @@ public partial class MainViewModel : ObservableObject
         var lcCenter = LeftCondyleCenter ?? (center.X, center.Y, center.Z);
         ApplySurgical(leftRamus, BuildSurgeryTransform(SurgLeftRamusAnt, SurgLeftRamusLat, SurgLeftRamusVert, SurgLeftRamusRoll, SurgLeftRamusPitch, SurgLeftRamusYaw, new System.Windows.Media.Media3D.Point3D(lcCenter.X, lcCenter.Y, lcCenter.Z)));
 
-        // 4. Chin uses its local centroid — follows mandible movement
+        // 4. Chin follows mandible movement in all modes
         if (chin != null)
         {
             var chinPivot = new System.Windows.Media.Media3D.Point3D(center.X, center.Y, center.Z);
@@ -300,10 +351,11 @@ public partial class MainViewModel : ObservableObject
                 chinPivot = new System.Windows.Media.Media3D.Point3D(cx / chinVCount, cy / chinVCount, cz / chinVCount);
             }
             var chinLocal = BuildSurgeryTransform(SurgChinAnt, SurgChinLat, SurgChinVert, SurgChinRoll, SurgChinPitch, SurgChinYaw, chinPivot);
-            // Chin also follows mandible
+            // Chin always follows whatever the mandible is doing
             System.Windows.Media.Media3D.Transform3D followTx = identityTx;
-            if (IsManualOcclusionSurgery || IsMandibleBasedSurgery) followTx = mandibleTx;
-            else if (IsMaxillaBasedSurgery && IsKeepOcclusionSurgery) followTx = maxillaTx;
+            if (IsManualOcclusionSurgery) followTx = mandibleTx;
+            else if (IsMandibleBasedSurgery) followTx = mandibleTx;
+            else if (IsMaxillaBasedSurgery) followTx = maxillaTx; // mandible tracks maxilla in all maxilla-based sub-modes
             var chinSurg = new System.Windows.Media.Media3D.Transform3DGroup();
             chinSurg.Children.Add(chinLocal);
             chinSurg.Children.Add(followTx);
@@ -350,6 +402,15 @@ public partial class MainViewModel : ObservableObject
             meshVm.OnVisibilityChanged = RefreshCombinedModel;
             meshVm.BuildModel();
             LoadedOcclusions.Add(meshVm);
+
+            // Create a tree node for this occlusion
+            var node = new OcclusionNodeViewModel
+            {
+                Name      = $"Occlusion {OcclusionNodes.Count + 1}",
+                Occlusion = meshVm
+            };
+            OcclusionNodes.Add(node);
+            if (_activeOcclusionNode == null) SetActiveOcclusionNode(node);
         }
 
         RefreshCombinedModel();
@@ -361,12 +422,204 @@ public partial class MainViewModel : ObservableObject
     private void DeleteLoadedOcclusion(MeshViewModel mesh)
     {
         if (mesh == null) return;
-        if (System.Windows.MessageBox.Show($"Are you sure you want to delete occlusion '{mesh.Name}'?", "Confirm Delete", 
+        if (System.Windows.MessageBox.Show($"Are you sure you want to delete occlusion '{mesh.Name}'?", "Confirm Delete",
             System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Question) != System.Windows.MessageBoxResult.Yes)
             return;
 
+        var node = OcclusionNodes.FirstOrDefault(n => n.Occlusion == mesh);
+        if (node != null) OcclusionNodes.Remove(node);
+        if (_activeOcclusionNode == node) SetActiveOcclusionNode(OcclusionNodes.FirstOrDefault());
         LoadedOcclusions.Remove(mesh);
         RefreshCombinedModel();
+    }
+
+    // ─── Occlusion node helpers ──────────────────────────────────────────────
+
+    private void SetActiveOcclusionNode(OcclusionNodeViewModel? node)
+    {
+        foreach (var n in OcclusionNodes) n.IsActive = false;
+        _activeOcclusionNode = node;
+        if (node != null) node.IsActive = true;
+        UpdateSurgeryTransform();
+    }
+
+    private OcclusionPlanViewModel SnapshotCurrentPlan(string name) => new()
+    {
+        Name = name,
+        IsMaxillaBasedSurgery  = IsMaxillaBasedSurgery,
+        IsMandibleBasedSurgery = IsMandibleBasedSurgery,
+        IsKeepOcclusionSurgery = IsKeepOcclusionSurgery,
+        MaxillaLat = SurgMaxillaLat, MaxillaAnt = SurgMaxillaAnt, MaxillaVert = SurgMaxillaVert,
+        MaxillaRoll = SurgMaxillaRoll, MaxillaPitch = SurgMaxillaPitch, MaxillaYaw = SurgMaxillaYaw,
+        MandibleLat = SurgMandibleLat, MandibleAnt = SurgMandibleAnt, MandibleVert = SurgMandibleVert,
+        MandibleRoll = SurgMandibleRoll, MandiblePitch = SurgMandiblePitch, MandibleYaw = SurgMandibleYaw,
+        RightRamusLat = SurgRightRamusLat, RightRamusAnt = SurgRightRamusAnt, RightRamusVert = SurgRightRamusVert,
+        RightRamusRoll = SurgRightRamusRoll, RightRamusPitch = SurgRightRamusPitch, RightRamusYaw = SurgRightRamusYaw,
+        LeftRamusLat = SurgLeftRamusLat, LeftRamusAnt = SurgLeftRamusAnt, LeftRamusVert = SurgLeftRamusVert,
+        LeftRamusRoll = SurgLeftRamusRoll, LeftRamusPitch = SurgLeftRamusPitch, LeftRamusYaw = SurgLeftRamusYaw,
+        ChinLat = SurgChinLat, ChinAnt = SurgChinAnt, ChinVert = SurgChinVert,
+        ChinRoll = SurgChinRoll, ChinPitch = SurgChinPitch, ChinYaw = SurgChinYaw,
+        SavedMaxillaLat = _savedMaxilla.Lat, SavedMaxillaAnt = _savedMaxilla.Ant,
+        SavedMaxillaVert = _savedMaxilla.Vert, SavedMaxillaRoll = _savedMaxilla.Roll,
+        SavedMaxillaPitch = _savedMaxilla.Pitch, SavedMaxillaYaw = _savedMaxilla.Yaw,
+        SavedMandibleLat = _savedMandible.Lat, SavedMandibleAnt = _savedMandible.Ant,
+        SavedMandibleVert = _savedMandible.Vert, SavedMandibleRoll = _savedMandible.Roll,
+        SavedMandiblePitch = _savedMandible.Pitch, SavedMandibleYaw = _savedMandible.Yaw,
+    };
+
+    private void OverwritePlanFromCurrent(OcclusionPlanViewModel plan)
+    {
+        var snap = SnapshotCurrentPlan(plan.Name);
+        plan.IsMaxillaBasedSurgery  = snap.IsMaxillaBasedSurgery;
+        plan.IsMandibleBasedSurgery = snap.IsMandibleBasedSurgery;
+        plan.IsKeepOcclusionSurgery = snap.IsKeepOcclusionSurgery;
+        plan.MaxillaLat = snap.MaxillaLat; plan.MaxillaAnt = snap.MaxillaAnt; plan.MaxillaVert = snap.MaxillaVert;
+        plan.MaxillaRoll = snap.MaxillaRoll; plan.MaxillaPitch = snap.MaxillaPitch; plan.MaxillaYaw = snap.MaxillaYaw;
+        plan.MandibleLat = snap.MandibleLat; plan.MandibleAnt = snap.MandibleAnt; plan.MandibleVert = snap.MandibleVert;
+        plan.MandibleRoll = snap.MandibleRoll; plan.MandiblePitch = snap.MandiblePitch; plan.MandibleYaw = snap.MandibleYaw;
+        plan.RightRamusLat = snap.RightRamusLat; plan.RightRamusAnt = snap.RightRamusAnt; plan.RightRamusVert = snap.RightRamusVert;
+        plan.RightRamusRoll = snap.RightRamusRoll; plan.RightRamusPitch = snap.RightRamusPitch; plan.RightRamusYaw = snap.RightRamusYaw;
+        plan.LeftRamusLat = snap.LeftRamusLat; plan.LeftRamusAnt = snap.LeftRamusAnt; plan.LeftRamusVert = snap.LeftRamusVert;
+        plan.LeftRamusRoll = snap.LeftRamusRoll; plan.LeftRamusPitch = snap.LeftRamusPitch; plan.LeftRamusYaw = snap.LeftRamusYaw;
+        plan.ChinLat = snap.ChinLat; plan.ChinAnt = snap.ChinAnt; plan.ChinVert = snap.ChinVert;
+        plan.ChinRoll = snap.ChinRoll; plan.ChinPitch = snap.ChinPitch; plan.ChinYaw = snap.ChinYaw;
+        plan.SavedMaxillaLat = snap.SavedMaxillaLat; plan.SavedMaxillaAnt = snap.SavedMaxillaAnt;
+        plan.SavedMaxillaVert = snap.SavedMaxillaVert; plan.SavedMaxillaRoll = snap.SavedMaxillaRoll;
+        plan.SavedMaxillaPitch = snap.SavedMaxillaPitch; plan.SavedMaxillaYaw = snap.SavedMaxillaYaw;
+        plan.SavedMandibleLat = snap.SavedMandibleLat; plan.SavedMandibleAnt = snap.SavedMandibleAnt;
+        plan.SavedMandibleVert = snap.SavedMandibleVert; plan.SavedMandibleRoll = snap.SavedMandibleRoll;
+        plan.SavedMandiblePitch = snap.SavedMandiblePitch; plan.SavedMandibleYaw = snap.SavedMandibleYaw;
+    }
+
+    private void ApplyPlan(OcclusionPlanViewModel plan)
+    {
+        // Restore saved backups first (so mode switches don't clobber them)
+        _savedMaxilla  = (plan.SavedMaxillaLat, plan.SavedMaxillaAnt, plan.SavedMaxillaVert, plan.SavedMaxillaRoll, plan.SavedMaxillaPitch, plan.SavedMaxillaYaw);
+        _savedMandible = (plan.SavedMandibleLat, plan.SavedMandibleAnt, plan.SavedMandibleVert, plan.SavedMandibleRoll, plan.SavedMandiblePitch, plan.SavedMandibleYaw);
+        // Active movement values
+        SurgMaxillaLat = plan.MaxillaLat; SurgMaxillaAnt = plan.MaxillaAnt; SurgMaxillaVert = plan.MaxillaVert;
+        SurgMaxillaRoll = plan.MaxillaRoll; SurgMaxillaPitch = plan.MaxillaPitch; SurgMaxillaYaw = plan.MaxillaYaw;
+        SurgMandibleLat = plan.MandibleLat; SurgMandibleAnt = plan.MandibleAnt; SurgMandibleVert = plan.MandibleVert;
+        SurgMandibleRoll = plan.MandibleRoll; SurgMandiblePitch = plan.MandiblePitch; SurgMandibleYaw = plan.MandibleYaw;
+        SurgRightRamusLat = plan.RightRamusLat; SurgRightRamusAnt = plan.RightRamusAnt; SurgRightRamusVert = plan.RightRamusVert;
+        SurgRightRamusRoll = plan.RightRamusRoll; SurgRightRamusPitch = plan.RightRamusPitch; SurgRightRamusYaw = plan.RightRamusYaw;
+        SurgLeftRamusLat = plan.LeftRamusLat; SurgLeftRamusAnt = plan.LeftRamusAnt; SurgLeftRamusVert = plan.LeftRamusVert;
+        SurgLeftRamusRoll = plan.LeftRamusRoll; SurgLeftRamusPitch = plan.LeftRamusPitch; SurgLeftRamusYaw = plan.LeftRamusYaw;
+        SurgChinLat = plan.ChinLat; SurgChinAnt = plan.ChinAnt; SurgChinVert = plan.ChinVert;
+        SurgChinRoll = plan.ChinRoll; SurgChinPitch = plan.ChinPitch; SurgChinYaw = plan.ChinYaw;
+        // Restore mode flags via properties (generated setters handle notification)
+        IsMaxillaBasedSurgery  = plan.IsMaxillaBasedSurgery;
+        IsMandibleBasedSurgery = plan.IsMandibleBasedSurgery;
+        IsKeepOcclusionSurgery = plan.IsKeepOcclusionSurgery;
+        OnPropertyChanged(nameof(IsMaxillaBasedSurgery));
+        OnPropertyChanged(nameof(IsMandibleBasedSurgery));
+        OnPropertyChanged(nameof(IsKeepOcclusionSurgery));
+        UpdateMoveableStates();
+    }
+
+    // ─── Plan tree commands ──────────────────────────────────────────────────
+
+    [RelayCommand]
+    private void AddPlan(OcclusionNodeViewModel node)
+    {
+        var plan = SnapshotCurrentPlan($"Plan {node.Plans.Count + 1}");
+        foreach (var p in node.Plans) p.IsSelected = false;
+        plan.IsSelected = true;
+        node.Plans.Add(plan);
+        SetActiveOcclusionNode(node);
+    }
+
+    [RelayCommand]
+    private void SelectPlan(OcclusionPlanViewModel plan)
+    {
+        var node = OcclusionNodes.FirstOrDefault(n => n.Plans.Contains(plan));
+        if (node == null) return;
+        foreach (var n in OcclusionNodes)
+            foreach (var p in n.Plans) p.IsSelected = false;
+        plan.IsSelected = true;
+        SetActiveOcclusionNode(node);
+        ApplyPlan(plan);
+    }
+
+    [RelayCommand]
+    private void SavePlan(OcclusionPlanViewModel plan)
+    {
+        OverwritePlanFromCurrent(plan);
+        StatusText = $"Plan '{plan.Name}' saved.";
+    }
+
+    /// <summary>Load a new STL and immediately open the manual alignment wizard to create a new node.</summary>
+    [RelayCommand]
+    private async Task AddOcclusionNodeAsync()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Import Occlusion STL",
+            Filter = "STL Files (*.stl)|*.stl|All Files (*.*)|*.*"
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        IsLoading = true;
+        StatusText = "Importing new occlusion STL...";
+        var vertices = await Task.Run(() => StlIO.LoadStl(dialog.FileName));
+
+        var meshVm = new MeshViewModel
+        {
+            Name    = Path.GetFileNameWithoutExtension(dialog.FileName) + " (Occlusion)",
+            Vertices = vertices, ColorR = 150, ColorG = 255, ColorB = 150,
+            ScanType = DentalScanType.Other, IsVisible = true
+        };
+        meshVm.OnVisibilityChanged = RefreshCombinedModel;
+        meshVm.BuildModel();
+        LoadedOcclusions.Add(meshVm);
+
+        var node = new OcclusionNodeViewModel { Name = $"Occlusion {OcclusionNodes.Count + 1}", Occlusion = meshVm };
+        OcclusionNodes.Add(node);
+        SetActiveOcclusionNode(node);
+        IsLoading = false;
+
+        // Immediately open the manual alignment wizard for the new occlusion
+        await RealignOcclusionAsync(node);
+    }
+
+    /// <summary>Re-open the manual alignment wizard for an existing occlusion node (right-click → Realign).</summary>
+    [RelayCommand]
+    private async Task RealignOcclusionAsync(OcclusionNodeViewModel node)
+    {
+        var occlusion = node.Occlusion;
+        if (occlusion?.Vertices == null) return;
+
+        var maxilla = Segments.FirstOrDefault(s => s.Name != null && s.Name.Contains("Maxilla"));
+        var mandible = ResolveTeethBearingMandible();
+        if (maxilla == null || mandible == null || maxilla.Vertices == null || mandible.Vertices == null)
+        {
+            System.Windows.MessageBox.Show("Maxilla or Mandible segments not found. Please segment them first.",
+                "Missing Bones", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            return;
+        }
+
+        var wizard = new ManualOcclusionAlignmentWindow(maxilla, mandible, occlusion)
+        {
+            Owner = Application.Current.MainWindow
+        };
+
+        if (wizard.ShowDialog() == true && wizard.Accepted)
+        {
+            SaveStateForUndo();
+            if (wizard.FinalOcclusionTransform != System.Windows.Media.Media3D.Matrix3D.Identity)
+            {
+                var txArr = ToDoubleMatrix(wizard.FinalOcclusionTransform);
+                await Task.Run(() => OrthoPlanner.Core.Geometry.IcpAligner.TransformVertices(occlusion.Vertices, txArr));
+                occlusion.BuildModel();
+            }
+            occlusion.Transform = System.Windows.Media.Media3D.Transform3D.Identity;
+            occlusion.MaxillaOcclusionTransform  = wizard.MaxillaTransform;
+            occlusion.MandibleOcclusionTransform = wizard.MandibleTransform;
+            SetActiveOcclusionNode(node);
+            UpdateSurgeryTransform();
+            RefreshCombinedModel();
+            StatusText = $"'{node.Name}' realigned successfully.";
+        }
     }
 
     [RelayCommand]
@@ -390,10 +643,17 @@ public partial class MainViewModel : ObservableObject
 
         SaveStateForUndo();
         StatusText = "Computing automated occlusion alignment... (1/2: Aligning Occlusion to Maxilla)";
-        
-        try 
+
+        List<float[]>? maxillaVertsList = null;
+        List<float[]>? mandibleVertsList = null;
+        List<float[]>? occVertsList = null;
+        double[,]? occToMaxTransform = null;
+        double[,]? manToOccTransform = null;
+        double manRmsError = 0;
+
+        try
         {
-            await Task.Run(() => 
+            await Task.Run(() =>
             {
                 // 1. Center of combined Maxilla and Mandible
                 double mxMinX = double.MaxValue, mxMinY = double.MaxValue, mxMinZ = double.MaxValue;
@@ -422,7 +682,7 @@ public partial class MainViewModel : ObservableObject
                 }
                 var occCenter = new System.Windows.Media.Media3D.Point3D((oMinX + oMaxX) / 2, (oMinY + oMaxY) / 2, (oMinZ + oMaxZ) / 2);
 
-                // 3. Initial transform: move Occlusion to jawCenter
+                // 3. Initial transform: move Occlusion centroid to jaw centroid
                 double dX = jawCenter.X - occCenter.X;
                 double dY = jawCenter.Y - occCenter.Y;
                 double dZ = jawCenter.Z - occCenter.Z;
@@ -433,71 +693,107 @@ public partial class MainViewModel : ObservableObject
                     { 0, 0, 0, 1 }
                 };
 
-                var maxillaVertsList = MeshHelper.ToVertexList(maxilla.Vertices);
-                var mandibleVertsList = MeshHelper.ToVertexList(mandible.Vertices);
-                var occVertsList = MeshHelper.ToVertexList(occlusion.Vertices);
+                maxillaVertsList  = MeshHelper.ToVertexList(maxilla.Vertices);
+                mandibleVertsList = MeshHelper.ToVertexList(mandible.Vertices);
+                occVertsList      = MeshHelper.ToVertexList(occlusion.Vertices);
 
                 // 4. ICP 1: Pull Occlusion (source) to Maxilla (target)
-                // We use similar params as DentalAlignmentWindow
                 var resultOccToMax = OrthoPlanner.Core.Geometry.IcpAligner.AlignRobust(
                     occVertsList, maxillaVertsList, initialTx,
-                    targetCullRatio: 0.30,   // keep closest 30% of maxilla (teeth zone)
-                    sourceCullRatio: 0.50);  // reject farthest 50% of occlusion source
-                
-                // Keep maxilla at identity, since we pulled the occlusion to it.
-                var maxOccTxMat = System.Windows.Media.Media3D.Matrix3D.Identity;
-                
-                // Transform the internal occlusion points to their newly aligned position to prepare for stage 2
-                OrthoPlanner.Core.Geometry.IcpAligner.TransformVertices(occVertsList, resultOccToMax.Transform);
-                
-                System.Windows.Application.Current.Dispatcher.Invoke(() => StatusText = "Computing automated occlusion alignment... (2/2: Aligning Mandible to Occlusion)");
+                    maxIterations: 500,
+                    tolerance: 0,
+                    targetCullRatio: 0.40,
+                    sourceCullRatio: 0.50,
+                    sigmaEnd: 1.0);
 
-                // 5. ICP 2: Pull Mandible (source) to Occlusion (target)
-                // The occlusion is now "Maxilla-aligned". Pull the mandible to the lower teeth of the occlusion.
-                var initialManTx = new double[4, 4] { {1,0,0,0}, {0,1,0,0}, {0,0,1,0}, {0,0,0,1} };
+                occToMaxTransform = resultOccToMax.Transform;
+
+                // Transform the occlusion vertex copy to its maxilla-aligned position for stage 2
+                OrthoPlanner.Core.Geometry.IcpAligner.TransformVertices(occVertsList, occToMaxTransform);
+
+                System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                    StatusText = "Computing automated occlusion alignment... (2/2: Aligning Mandible to Occlusion)");
+
+                // 5. ICP 2: Pull Mandible (source) to the maxilla-aligned Occlusion (target)
+                // Compute bounding-box centroid translation as initial guess (mirrors step 1).
+                double manCx = 0, manCy = 0, manCz = 0;
+                double manMinX = double.MaxValue, manMinY = double.MaxValue, manMinZ = double.MaxValue;
+                double manMaxX = double.MinValue, manMaxY = double.MinValue, manMaxZ = double.MinValue;
+                double occCx = 0, occCy = 0, occCz = 0;
+                double occMinX2 = double.MaxValue, occMinY2 = double.MaxValue, occMinZ2 = double.MaxValue;
+                double occMaxX2 = double.MinValue, occMaxY2 = double.MinValue, occMaxZ2 = double.MinValue;
+                foreach (var v in mandibleVertsList)
+                {
+                    if (v[0] < manMinX) manMinX = v[0]; if (v[0] > manMaxX) manMaxX = v[0];
+                    if (v[1] < manMinY) manMinY = v[1]; if (v[1] > manMaxY) manMaxY = v[1];
+                    if (v[2] < manMinZ) manMinZ = v[2]; if (v[2] > manMaxZ) manMaxZ = v[2];
+                }
+                foreach (var v in occVertsList)
+                {
+                    if (v[0] < occMinX2) occMinX2 = v[0]; if (v[0] > occMaxX2) occMaxX2 = v[0];
+                    if (v[1] < occMinY2) occMinY2 = v[1]; if (v[1] > occMaxY2) occMaxY2 = v[1];
+                    if (v[2] < occMinZ2) occMinZ2 = v[2]; if (v[2] > occMaxZ2) occMaxZ2 = v[2];
+                }
+                manCx = (manMinX + manMaxX) / 2; manCy = (manMinY + manMaxY) / 2; manCz = (manMinZ + manMaxZ) / 2;
+                occCx = (occMinX2 + occMaxX2) / 2; occCy = (occMinY2 + occMaxY2) / 2; occCz = (occMinZ2 + occMaxZ2) / 2;
+                var initialManTx = new double[4, 4] {
+                    { 1, 0, 0, occCx - manCx },
+                    { 0, 1, 0, occCy - manCy },
+                    { 0, 0, 1, occCz - manCz },
+                    { 0, 0, 0, 1 }
+                };
                 var resultManToOcc = OrthoPlanner.Core.Geometry.IcpAligner.AlignRobust(
                     mandibleVertsList, occVertsList, initialManTx,
-                    targetCullRatio: 0.50,   // keep closest 50% of occlusion (target = all dental data)
-                    sourceCullRatio: 0.20);  // keep closest 20% of mandible (source = teeth zone only)
+                    maxIterations: 500,
+                    tolerance: 0,
+                    targetCullRatio: 0.50,   // keep closest 50% of occlusion (all dental data)
+                    sourceCullRatio: 0.20);  // keep closest 20% of mandible (teeth zone only)
 
-                var manOccTxMat = ConvertToMatrix3D(resultManToOcc.Transform);
-
-                System.Windows.Application.Current.Dispatcher.Invoke(() => {
-                    StatusText = "Review alignment in the Checker Window...";
-                    
-                    var wizard = new OcclusionCheckerWindow(
-                        maxillaVertsList, 
-                        mandibleVertsList, 
-                        occVertsList, 
-                        resultManToOcc.RmsError)
-                    {
-                        Owner = Application.Current.MainWindow
-                    };
-
-                    if (wizard.ShowDialog() == true && wizard.Accepted)
-                    {
-                        // Store the occlusion transforms
-                        occlusion.MaxillaOcclusionTransform = maxOccTxMat;
-                        occlusion.MandibleOcclusionTransform = manOccTxMat;
-
-                        // Apply transformations visually to the occlusion mesh to show where it landed
-                        var finalOccTx = ConvertToMatrix3D(resultOccToMax.Transform);
-                        occlusion.Transform = new System.Windows.Media.Media3D.MatrixTransform3D(finalOccTx);
-                        
-                        UpdateSurgeryTransform();
-                        StatusText = $"Successfully aligned Occlusion STL automatically. RMS=" + resultManToOcc.RmsError.ToString("0.000");
-                    }
-                    else
-                    {
-                        StatusText = "Automated occlusion alignment cancelled.";
-                    }
-                });
+                manToOccTransform = resultManToOcc.Transform;
+                manRmsError       = resultManToOcc.RmsError;
             });
+
+            if (occToMaxTransform == null || manToOccTransform == null ||
+                maxillaVertsList == null || mandibleVertsList == null || occVertsList == null)
+            {
+                StatusText = "Automated occlusion alignment failed (null result).";
+                return;
+            }
+
+            // Show the checker window on the UI thread — no nested Task.Run required
+            StatusText = "Review alignment in the Checker Window...";
+            var wizard = new OcclusionCheckerWindow(
+                maxillaVertsList,
+                mandibleVertsList,
+                occVertsList,
+                manRmsError)
+            {
+                Owner = Application.Current.MainWindow
+            };
+
+            if (wizard.ShowDialog() == true && wizard.Accepted)
+            {
+                // Maxilla stays fixed — the occlusion was pulled towards it.
+                occlusion.MaxillaOcclusionTransform  = System.Windows.Media.Media3D.Matrix3D.Identity;
+                occlusion.MandibleOcclusionTransform = ConvertToMatrix3D(manToOccTransform);
+
+                // Bake the occlusion-to-maxilla transform into the visual geometry
+                var finalOccTx = ConvertToMatrix3D(occToMaxTransform);
+                occlusion.Transform = new System.Windows.Media.Media3D.MatrixTransform3D(finalOccTx);
+
+                UpdateSurgeryTransform();
+                StatusText = $"Successfully aligned Occlusion STL automatically. RMS={manRmsError:0.000}";
+            }
+            else
+            {
+                StatusText = "Automated occlusion alignment cancelled.";
+            }
         }
         catch (Exception ex)
         {
             StatusText = "Error during automated occlusion alignment: " + ex.Message;
         }
+
     }
 
     [RelayCommand]
@@ -994,8 +1290,21 @@ public partial class MainViewModel : ObservableObject
         return g;
     }
 
+    /// <summary>Converts a WPF Matrix3D to a 16-element double[] (row-major, last row = OffsetX/Y/Z + M44).</summary>
+    private static double[] Matrix3DToArray(Matrix3D m) =>
+        new[] { m.M11, m.M12, m.M13, m.M14,
+                m.M21, m.M22, m.M23, m.M24,
+                m.M31, m.M32, m.M33, m.M34,
+                m.OffsetX, m.OffsetY, m.OffsetZ, m.M44 };
 
-    // ─── Viewport toggles ───
+    /// <summary>Reconstructs a WPF Matrix3D from a 16-element double[].</summary>
+    private static Matrix3D ArrayToMatrix3D(double[] a) =>
+        new Matrix3D(a[0], a[1], a[2], a[3],
+                     a[4], a[5], a[6], a[7],
+                     a[8], a[9], a[10], a[11],
+                     a[12], a[13], a[14], a[15]);
+
+
     [ObservableProperty] private bool _isOrthographic;
     [ObservableProperty] private bool _showGrid;
 
@@ -1113,9 +1422,29 @@ public partial class MainViewModel : ObservableObject
                     Segments = Segments.Select(s => new { s.Name, s.IsVisible, s.ColorR, s.ColorG, s.ColorB }).ToArray()
                 },
                 ImportedMeshes = ImportedMeshes.Select(m => new { m.Name, m.IsVisible, m.ColorR, m.ColorG, m.ColorB }).ToArray(),
+                LoadedOcclusions = LoadedOcclusions.Select(o => new
+                {
+                    o.Name, o.IsVisible, o.ColorR, o.ColorG, o.ColorB,
+                    MaxillaOcclusionTransform = Matrix3DToArray(o.MaxillaOcclusionTransform),
+                    MandibleOcclusionTransform = Matrix3DToArray(o.MandibleOcclusionTransform),
+                    VisualTransform = Matrix3DToArray(o.Transform.Value)
+                }).ToArray(),
                 Volume = Volume != null ? new { Volume.Width, Volume.Height, Volume.Depth, Volume.Spacing } : null,
                 WindowCenter,
-                WindowWidth
+                WindowWidth,
+                SurgicalMovements = new
+                {
+                    IsMaxillaBasedSurgery, IsMandibleBasedSurgery, IsKeepOcclusionSurgery,
+                    // Active (currently displayed) values
+                    SurgMaxillaLat, SurgMaxillaAnt, SurgMaxillaVert, SurgMaxillaRoll, SurgMaxillaPitch, SurgMaxillaYaw,
+                    SurgMandibleLat, SurgMandibleAnt, SurgMandibleVert, SurgMandibleRoll, SurgMandiblePitch, SurgMandibleYaw,
+                    SurgRightRamusLat, SurgRightRamusAnt, SurgRightRamusVert, SurgRightRamusRoll, SurgRightRamusPitch, SurgRightRamusYaw,
+                    SurgLeftRamusLat, SurgLeftRamusAnt, SurgLeftRamusVert, SurgLeftRamusRoll, SurgLeftRamusPitch, SurgLeftRamusYaw,
+                    SurgChinLat, SurgChinAnt, SurgChinVert, SurgChinRoll, SurgChinPitch, SurgChinYaw,
+                    // Saved (hidden) values for the inactive jaw
+                    SavedMaxilla = new { _savedMaxilla.Lat, _savedMaxilla.Ant, _savedMaxilla.Vert, _savedMaxilla.Roll, _savedMaxilla.Pitch, _savedMaxilla.Yaw },
+                    SavedMandible = new { _savedMandible.Lat, _savedMandible.Ant, _savedMandible.Vert, _savedMandible.Roll, _savedMandible.Pitch, _savedMandible.Yaw }
+                }
             };
             var jsonEntry = zip.CreateEntry("project.json");
             using (var sw = new StreamWriter(jsonEntry.Open()))
@@ -1158,6 +1487,19 @@ public partial class MainViewModel : ObservableObject
                 bw2.Write(seg.Vertices.Length / 3);
                 for (int vi = 0; vi < seg.Vertices.Length; vi += 3)
                     { bw2.Write(seg.Vertices[vi]); bw2.Write(seg.Vertices[vi + 1]); bw2.Write(seg.Vertices[vi + 2]); }
+            }
+
+            // 5. occlusions/*.bin — aligned occlusion STL vertex data
+            for (int i = 0; i < LoadedOcclusions.Count; i++)
+            {
+                var occ = LoadedOcclusions[i];
+                if (occ.Vertices == null) continue;
+                var occEntry = zip.CreateEntry($"occlusions/{i}_{occ.Name}.bin", System.IO.Compression.CompressionLevel.Fastest);
+                using var os = occEntry.Open();
+                using var bwo = new BinaryWriter(os);
+                bwo.Write(occ.Vertices.Length / 3);
+                for (int vi = 0; vi < occ.Vertices.Length; vi += 3)
+                    { bwo.Write(occ.Vertices[vi]); bwo.Write(occ.Vertices[vi + 1]); bwo.Write(occ.Vertices[vi + 2]); }
             }
 
             StatusText = $"Project saved: {Path.GetFileName(dialog.FileName)}";
@@ -1264,8 +1606,8 @@ public partial class MainViewModel : ObservableObject
                     vol.ComputeMinMax();
 
                     Volume = vol;
-                    OriginalVolume = null; // Reset starting position for new project
-                    CleanupTempFiles(); // Delete any temp files from previous session
+                    OriginalVolume = null;
+                    CleanupTempFiles();
                     IsVolumeLoaded = true;
                     IsoMin = Math.Max(-1000, (double)vol.MinValue);
                     IsoMax = vol.MaxValue;
@@ -1275,6 +1617,10 @@ public partial class MainViewModel : ObservableObject
                     AxialIndex = vol.Depth / 2;
                     CoronalIndex = vol.Height / 2;
                     SagittalIndex = vol.Width / 2;
+                    // Restore physically-correct MPR panel proportions (same formula as DICOM load)
+                    AxialDisplayHeight    = new System.Windows.GridLength(vol.Height * vol.Spacing[1], System.Windows.GridUnitType.Star);
+                    CoronalDisplayHeight  = new System.Windows.GridLength(vol.Depth  * vol.Spacing[2], System.Windows.GridUnitType.Star);
+                    SagittalDisplayHeight = new System.Windows.GridLength(vol.Depth  * vol.Spacing[2], System.Windows.GridUnitType.Star);
                     UpdateHistograms();
                     UpdateAllSlices();
                 }
@@ -1354,6 +1700,111 @@ public partial class MainViewModel : ObservableObject
             }
 
             RefreshCombinedModel();
+
+            // 5. Read loaded occlusions (backwards-compatible: key may be absent in older saves)
+            LoadedOcclusions.Clear();
+            OcclusionNodes.Clear();
+            _activeOcclusionNode = null;
+            if (root.TryGetProperty("LoadedOcclusions", out var occsArr))
+            {
+                int occIdx = 0;
+                foreach (var occMeta in occsArr.EnumerateArray())
+                {
+                    string occName = occMeta.TryGetProperty("Name", out var np) ? np.GetString() ?? $"Occ_{occIdx}" : $"Occ_{occIdx}";
+                    var occBinEntry = zip.Entries.FirstOrDefault(e => e.FullName.StartsWith($"occlusions/{occIdx}_"));
+                    if (occBinEntry != null)
+                    {
+                        using var os = occBinEntry.Open();
+                        using var br = new BinaryReader(os);
+                        int cnt = br.ReadInt32();
+                        var verts = new float[cnt * 3];
+                        for (int i = 0; i < cnt; i++)
+                        { verts[i*3] = br.ReadSingle(); verts[i*3+1] = br.ReadSingle(); verts[i*3+2] = br.ReadSingle(); }
+
+                        static Matrix3D ReadMat(System.Text.Json.JsonElement el) =>
+                            ArrayToMatrix3D(el.EnumerateArray().Select(x => x.GetDouble()).ToArray());
+
+                        var maxTx = occMeta.TryGetProperty("MaxillaOcclusionTransform",  out var mx) ? ReadMat(mx) : Matrix3D.Identity;
+                        var manTx = occMeta.TryGetProperty("MandibleOcclusionTransform", out var mn) ? ReadMat(mn) : Matrix3D.Identity;
+                        var visTx = occMeta.TryGetProperty("VisualTransform",            out var vt) ? ReadMat(vt) : Matrix3D.Identity;
+
+                        var occVm = new MeshViewModel
+                        {
+                            Name    = occName,
+                            Vertices = verts,
+                            ColorR  = occMeta.TryGetProperty("ColorR", out var cr) ? cr.GetByte() : (byte)245,
+                            ColorG  = occMeta.TryGetProperty("ColorG", out var cg) ? cg.GetByte() : (byte)215,
+                            ColorB  = occMeta.TryGetProperty("ColorB", out var cb) ? cb.GetByte() : (byte)160,
+                            IsVisible = occMeta.TryGetProperty("IsVisible", out var iv) ? iv.GetBoolean() : true,
+                            MaxillaOcclusionTransform  = maxTx,
+                            MandibleOcclusionTransform = manTx,
+                            Transform = new MatrixTransform3D(visTx)
+                        };
+                        occVm.OnVisibilityChanged = RefreshCombinedModel;
+                        occVm.BuildModel();
+                        LoadedOcclusions.Add(occVm);
+
+                        // Create matching tree node
+                        var occNode = new OcclusionNodeViewModel
+                        {
+                            Name      = $"Occlusion {OcclusionNodes.Count + 1}",
+                            Occlusion = occVm
+                        };
+                        OcclusionNodes.Add(occNode);
+                    }
+                    occIdx++;
+                }
+            }
+            // Auto-activate the first node
+            if (_activeOcclusionNode == null && OcclusionNodes.Count > 0)
+                SetActiveOcclusionNode(OcclusionNodes[0]);
+
+            // 6. Restore surgical movements (backwards-compatible)
+            if (root.TryGetProperty("SurgicalMovements", out var sm))
+            {
+                static double G(System.Text.Json.JsonElement e, string k, double def = 0) =>
+                    e.TryGetProperty(k, out var p) ? p.GetDouble() : def;
+                static bool B(System.Text.Json.JsonElement e, string k) =>
+                    e.TryGetProperty(k, out var p) && p.GetBoolean();
+
+                // Restore active values first (without triggering save/zero side-effects)
+                SurgMaxillaLat   = G(sm, "SurgMaxillaLat");   SurgMaxillaAnt   = G(sm, "SurgMaxillaAnt");
+                SurgMaxillaVert  = G(sm, "SurgMaxillaVert");  SurgMaxillaRoll  = G(sm, "SurgMaxillaRoll");
+                SurgMaxillaPitch = G(sm, "SurgMaxillaPitch"); SurgMaxillaYaw   = G(sm, "SurgMaxillaYaw");
+
+                SurgMandibleLat   = G(sm, "SurgMandibleLat");   SurgMandibleAnt   = G(sm, "SurgMandibleAnt");
+                SurgMandibleVert  = G(sm, "SurgMandibleVert");  SurgMandibleRoll  = G(sm, "SurgMandibleRoll");
+                SurgMandiblePitch = G(sm, "SurgMandiblePitch"); SurgMandibleYaw   = G(sm, "SurgMandibleYaw");
+
+                SurgRightRamusLat   = G(sm, "SurgRightRamusLat");   SurgRightRamusAnt   = G(sm, "SurgRightRamusAnt");
+                SurgRightRamusVert  = G(sm, "SurgRightRamusVert");  SurgRightRamusRoll  = G(sm, "SurgRightRamusRoll");
+                SurgRightRamusPitch = G(sm, "SurgRightRamusPitch"); SurgRightRamusYaw   = G(sm, "SurgRightRamusYaw");
+
+                SurgLeftRamusLat   = G(sm, "SurgLeftRamusLat");   SurgLeftRamusAnt   = G(sm, "SurgLeftRamusAnt");
+                SurgLeftRamusVert  = G(sm, "SurgLeftRamusVert");  SurgLeftRamusRoll  = G(sm, "SurgLeftRamusRoll");
+                SurgLeftRamusPitch = G(sm, "SurgLeftRamusPitch"); SurgLeftRamusYaw   = G(sm, "SurgLeftRamusYaw");
+
+                SurgChinLat   = G(sm, "SurgChinLat");   SurgChinAnt   = G(sm, "SurgChinAnt");
+                SurgChinVert  = G(sm, "SurgChinVert");  SurgChinRoll  = G(sm, "SurgChinRoll");
+                SurgChinPitch = G(sm, "SurgChinPitch"); SurgChinYaw   = G(sm, "SurgChinYaw");
+
+                // Restore saved backup tuples
+                if (sm.TryGetProperty("SavedMaxilla", out var smax))
+                    _savedMaxilla = (G(smax,"Lat"), G(smax,"Ant"), G(smax,"Vert"), G(smax,"Roll"), G(smax,"Pitch"), G(smax,"Yaw"));
+                if (sm.TryGetProperty("SavedMandible", out var sman))
+                    _savedMandible = (G(sman,"Lat"), G(sman,"Ant"), G(sman,"Vert"), G(sman,"Roll"), G(sman,"Pitch"), G(sman,"Yaw"));
+
+                // Restore mode flags via properties
+                IsMaxillaBasedSurgery  = B(sm, "IsMaxillaBasedSurgery");
+                IsMandibleBasedSurgery = B(sm, "IsMandibleBasedSurgery");
+                IsKeepOcclusionSurgery = B(sm, "IsKeepOcclusionSurgery");
+                OnPropertyChanged(nameof(IsMaxillaBasedSurgery));
+                OnPropertyChanged(nameof(IsMandibleBasedSurgery));
+                OnPropertyChanged(nameof(IsKeepOcclusionSurgery));
+                UpdateMoveableStates();
+            }
+
+            OnPropertyChanged(nameof(HasLeFort1Maxilla));
             StatusText = $"Project loaded: {Path.GetFileName(dialog.FileName)}";
         }
         catch (Exception ex)
@@ -2029,7 +2480,117 @@ public partial class MainViewModel : ObservableObject
             Segments.Add(lowerVm);
 
             RefreshCombinedModel();
+            OnPropertyChanged(nameof(HasLeFort1Maxilla));
             StatusText = "LeFort 1 Osteotomy applied successfully.";
+        }
+    }
+
+    /// <summary>True when a "Maxilla (LeFort 1 Separated)" segment exists — enables the sub-osteotomy wizards.</summary>
+    public bool HasLeFort1Maxilla =>
+        Segments.Any(s => s.Name?.Contains("Maxilla (LeFort 1 Separated)") == true && s.IsVisible);
+
+    [RelayCommand]
+    private void PlanLeFort1SagittalCut()
+    {
+        var maxSeg = Segments.LastOrDefault(s => s.Name?.Contains("Maxilla (LeFort 1 Separated)") == true && s.IsVisible);
+        if (maxSeg == null || maxSeg.Vertices == null)
+        {
+            System.Windows.MessageBox.Show(
+                "Please perform a LeFort 1 Osteotomy first to isolate the maxilla segment.",
+                "No LeFort 1 Maxilla", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            return;
+        }
+
+        var wizard = new LeFort1SagittalCutWindow(MeshHelper.ToVertexList(maxSeg.Vertices));
+        wizard.Owner = System.Windows.Application.Current.MainWindow;
+
+        if (wizard.ShowDialog() == true && wizard.Accepted)
+        {
+            SaveStateForUndo();
+            maxSeg.IsVisible = false;
+
+            var leftVm = new SegmentViewModel
+            {
+                Label = (byte)(Segments.Count + 1),
+                Name  = "Maxilla Left (2-Piece)",
+                Vertices = MeshHelper.ToFlatArray(wizard.LeftResult),
+                ColorR = 100, ColorG = 200, ColorB = 255, IsVisible = true  // blue
+            };
+            leftVm.OnVisibilityChanged = RefreshCombinedModel;
+            leftVm.BuildModel();
+            Segments.Add(leftVm);
+
+            var rightVm = new SegmentViewModel
+            {
+                Label = (byte)(Segments.Count + 1),
+                Name  = "Maxilla Right (2-Piece)",
+                Vertices = MeshHelper.ToFlatArray(wizard.RightResult),
+                ColorR = 120, ColorG = 220, ColorB = 210, IsVisible = true  // teal
+            };
+            rightVm.OnVisibilityChanged = RefreshCombinedModel;
+            rightVm.BuildModel();
+            Segments.Add(rightVm);
+
+            RefreshCombinedModel();
+            StatusText = "LeFort 1 2-Piece sagittal cut applied.";
+        }
+    }
+
+    [RelayCommand]
+    private void PlanLeFort1YCut()
+    {
+        var maxSeg = Segments.LastOrDefault(s => s.Name?.Contains("Maxilla (LeFort 1 Separated)") == true && s.IsVisible);
+        if (maxSeg == null || maxSeg.Vertices == null)
+        {
+            System.Windows.MessageBox.Show(
+                "Please perform a LeFort 1 Osteotomy first to isolate the maxilla segment.",
+                "No LeFort 1 Maxilla", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            return;
+        }
+
+        var wizard = new LeFort1YCutWindow(MeshHelper.ToVertexList(maxSeg.Vertices));
+        wizard.Owner = System.Windows.Application.Current.MainWindow;
+
+        if (wizard.ShowDialog() == true && wizard.Accepted)
+        {
+            SaveStateForUndo();
+            maxSeg.IsVisible = false;
+
+            var leftVm = new SegmentViewModel
+            {
+                Label = (byte)(Segments.Count + 1),
+                Name  = "Maxilla Left (3-Piece)",
+                Vertices = MeshHelper.ToFlatArray(wizard.LeftResult),
+                ColorR = 100, ColorG = 200, ColorB = 255, IsVisible = true  // blue
+            };
+            leftVm.OnVisibilityChanged = RefreshCombinedModel;
+            leftVm.BuildModel();
+            Segments.Add(leftVm);
+
+            var rightVm = new SegmentViewModel
+            {
+                Label = (byte)(Segments.Count + 1),
+                Name  = "Maxilla Right (3-Piece)",
+                Vertices = MeshHelper.ToFlatArray(wizard.RightResult),
+                ColorR = 120, ColorG = 220, ColorB = 210, IsVisible = true  // teal
+            };
+            rightVm.OnVisibilityChanged = RefreshCombinedModel;
+            rightVm.BuildModel();
+            Segments.Add(rightVm);
+
+            var centralVm = new SegmentViewModel
+            {
+                Label = (byte)(Segments.Count + 1),
+                Name  = "Maxilla Central / Premaxilla (3-Piece)",
+                Vertices = MeshHelper.ToFlatArray(wizard.CentralResult),
+                ColorR = 220, ColorG = 180, ColorB = 255, IsVisible = true  // lavender
+            };
+            centralVm.OnVisibilityChanged = RefreshCombinedModel;
+            centralVm.BuildModel();
+            Segments.Add(centralVm);
+
+            RefreshCombinedModel();
+            StatusText = "LeFort 1 3-Piece Y-cut applied.";
         }
     }
 
@@ -2451,6 +3012,7 @@ public partial class MainViewModel : ObservableObject
 
     private void RefreshCombinedModel()
     {
+        OnPropertyChanged(nameof(HasLeFort1Maxilla));
         Rect3D newBounds = Rect3D.Empty;
 
         // Force the camera frame to ALWAYS lock onto the overall global DICOM volume

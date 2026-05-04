@@ -165,7 +165,7 @@ public partial class CondyleSplitWindow : Window
         for (int i = 0; i < 5; i++)
         {
             _splitPoints[i] = null;
-            if (_splitMarkers[i] != null) MainGroup.Children.Remove(_splitMarkers[i]);
+            if (_splitMarkers[i] != null) MainGroup.Children.Remove(_splitMarkers[i]!);
             _splitMarkers[i] = null;
         }
 
@@ -876,7 +876,7 @@ public partial class CondyleSplitWindow : Window
                 if (_splitPoints[i] != null && (_splitPoints[i]!.Value - hit.Value).Length < 5)
                 {
                     _splitPoints[i] = null;
-                    if (_splitMarkers[i] != null) MainGroup.Children.Remove(_splitMarkers[i]);
+                    if (_splitMarkers[i] != null) MainGroup.Children.Remove(_splitMarkers[i]!);
                     _splitMarkers[i] = null;
                     
                     if (_planeTriangleVisual != null) { MainGroup.Children.Remove(_planeTriangleVisual); _planeTriangleVisual = null; }

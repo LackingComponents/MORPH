@@ -146,8 +146,9 @@ public static class IcpAligner
         double[,]? initialTransform = null,
         int maxIterations = 200,
         double tolerance = 0.0005,
-        double targetCullRatio = 0.30,   // fraction of target pts nearest to source to keep
-        double sourceCullRatio = 0.50,   // fraction of source pts nearest to cropped target to keep
+        double targetCullRatio = 0.30,
+        double sourceCullRatio = 0.50,
+        double sigmaEnd = 2.0,
         Action<double>? progress = null)
     {
         int totalSrcPts = sourceVerts.Length / 3;
@@ -220,12 +221,7 @@ public static class IcpAligner
         currentSrc = activeSrc;
         nSrc = nSrcActive;
 
-        // ── Gaussian-weighted ICP with sigma annealing ───────────────────────────
-        // After the pre-cull above, ALL surviving source points participate in every
-        // ICP iteration (no additional hard distance cap). The Gaussian weight
-        // exp(-d²/σ²) decays distant pairs smoothly so local dental contacts dominate.
-        const double SigmaStart = 20.0;   // wide early phase
-        const double SigmaEnd   =  2.0;   // tight late phase (~half a cusp width)
+        // Gaussian ICP with sigma annealing from 20mm → sigmaEnd over first 1/3 of iterations.
 
         var totalT = (double[,])initT.Clone();
         double prevRms = double.MaxValue;
@@ -235,8 +231,8 @@ public static class IcpAligner
         {
             progress?.Invoke((double)iter / maxIterations);
 
-            double t      = Math.Min(1.0, iter / 60.0);
-            double sigma  = SigmaStart + (SigmaEnd - SigmaStart) * t;
+            double t      = Math.Min(1.0, iter / Math.Max(1.0, maxIterations / 3.0));
+            double sigma  = 20.0 + (sigmaEnd - 20.0) * t;
             double sigSq  = sigma * sigma;
 
             double sumWDistSq = 0, sumW = 0;
@@ -345,7 +341,24 @@ public static class IcpAligner
             { h01-h10,      h20+h02,      h12+h21,      -h00-h11+h22 }
         };
 
-        // Power iteration to find dominant eigenvector of K (converges fast for 4×4)
+        // Gershgorin spectral shift: ensure K is positive-definite before power iteration.
+        // Power iteration converges to the largest-MAGNITUDE eigenvector, not the
+        // largest-positive one. For near-coplanar landmarks, K[3,3] can dominate in
+        // absolute value (it is negative), sending power iteration to the wrong eigenvector.
+        // Shifting K += |λ_min|·I (bounded via Gershgorin) makes all eigenvalues ≥ 0,
+        // so the dominant eigenvector is guaranteed to be the correct rotation quaternion.
+        double gershShift = 0;
+        for (int i = 0; i < 4; i++)
+        {
+            double offDiagSum = 0;
+            for (int j = 0; j < 4; j++) if (j != i) offDiagSum += Math.Abs(K[i, j]);
+            double lowerBound = K[i, i] - offDiagSum;
+            if (lowerBound < gershShift) gershShift = lowerBound;
+        }
+        if (gershShift < 0)
+            for (int i = 0; i < 4; i++) K[i, i] -= gershShift; // adds |gershShift|
+
+        // Power iteration to find dominant eigenvector of K
         double[] q = { 1, 0, 0, 0 };
         for (int iter = 0; iter < 200; iter++)
         {
@@ -421,6 +434,7 @@ public static class IcpAligner
         double tolerance = 0.0005,
         double targetCullRatio = 0.30,
         double sourceCullRatio = 0.50,
+        double sigmaEnd = 2.0,
         Action<double>? progress = null)
     {
         var srcFlat = new float[sourceVerts.Count * 3];
@@ -432,7 +446,7 @@ public static class IcpAligner
         { tgtFlat[i*3] = targetVerts[i][0]; tgtFlat[i*3+1] = targetVerts[i][1]; tgtFlat[i*3+2] = targetVerts[i][2]; }
 
         return AlignRobust(srcFlat, tgtFlat, initialTransform, maxIterations, tolerance,
-            targetCullRatio, sourceCullRatio, progress);
+            targetCullRatio, sourceCullRatio, sigmaEnd, progress);
     }
 
     public static void TransformVertices(List<float[]> vertices, double[,] transform)

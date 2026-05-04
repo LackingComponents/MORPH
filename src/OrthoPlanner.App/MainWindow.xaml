@@ -503,6 +503,14 @@
                                            Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6" />
                                 <Button Content="✂ Plan Le Fort 1" Command="{Binding PlanLeFort1Command}" Margin="0,0,0,4"
                                         Background="#FF1B98E0" Foreground="White" FontWeight="Bold" />
+                                <Button Content="✂ LeFort 1 — 2-Piece Sagittal" Command="{Binding PlanLeFort1SagittalCutCommand}"
+                                        Margin="0,0,0,4" IsEnabled="{Binding HasLeFort1Maxilla}"
+                                        Background="#FF1B6AB0" Foreground="White" FontWeight="Normal"
+                                        ToolTip="Splits the separated LeFort 1 maxilla with a sagittal midline cut (requires LeFort 1 to be performed first)"/>
+                                <Button Content="✂ LeFort 1 — 3-Piece Y-Cut" Command="{Binding PlanLeFort1YCutCommand}"
+                                        Margin="0,0,0,4" IsEnabled="{Binding HasLeFort1Maxilla}"
+                                        Background="#FF1B6AB0" Foreground="White" FontWeight="Normal"
+                                        ToolTip="Splits the separated LeFort 1 maxilla with a Y-shaped cut yielding Left, Right and Central segments (requires LeFort 1 to be performed first)"/>
                                 <Button Content="✂ Plan BSSO" Command="{Binding PlanBssoCommand}" Margin="0,0,0,4"
                                         Background="#FF1B98E0" Foreground="White" FontWeight="Bold" />
                                 <Button Content="✂ Plan Genioplasty" Command="{Binding PlanGenioplastyCommand}" Margin="0,0,0,4"
@@ -919,12 +927,12 @@
                                                     <ColumnDefinition Width="*"/>
                                                     <ColumnDefinition Width="*"/>
                                                 </Grid.ColumnDefinitions>
-                                                <RadioButton Grid.Column="0" Content="Maxilla-based" IsChecked="{Binding IsMaxillaBasedSurgery}" GroupName="BaseMode" Style="{StaticResource DarkToggleButtonStyle}" Height="22" FontSize="10" Margin="0,0,2,0" HorizontalContentAlignment="Center"/>
-                                                <RadioButton Grid.Column="1" Content="Mandible-based" IsChecked="{Binding IsMandibleBasedSurgery}" GroupName="BaseMode" Style="{StaticResource DarkToggleButtonStyle}" Height="22" FontSize="10" Margin="2,0,0,0" HorizontalContentAlignment="Center"/>
+                                                <ToggleButton Grid.Column="0" Content="Maxilla-based" IsChecked="{Binding IsMaxillaBasedSurgery}" Style="{StaticResource DarkToggleButtonStyle}" Height="22" FontSize="10" Margin="0,0,2,0" HorizontalContentAlignment="Center"/>
+                                                <ToggleButton Grid.Column="1" Content="Mandible-based" IsChecked="{Binding IsMandibleBasedSurgery}" Style="{StaticResource DarkToggleButtonStyle}" Height="22" FontSize="10" Margin="2,0,0,0" HorizontalContentAlignment="Center"/>
                                             </Grid>
                                             <StackPanel Orientation="Horizontal">
                                                 <CheckBox Content="Manual occlusion" IsChecked="{Binding IsManualOcclusionSurgery}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" Margin="0,0,12,0"/>
-                                                <CheckBox Content="Keep occlusion" IsChecked="{Binding IsKeepOcclusionSurgery}" IsEnabled="{Binding IsBaseSwitchEnabled}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" Margin="0,0,0,0"/>
+                                                <CheckBox Content="Original occlusion" IsChecked="{Binding IsKeepOcclusionSurgery}" IsEnabled="{Binding IsBaseSwitchEnabled}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" Margin="0,0,0,0"/>
                                             </StackPanel>
                                         </StackPanel>
                                     </Border>
@@ -1005,6 +1013,109 @@
                                                 <StackPanel Grid.Column="1"><TextBlock Text="Pitch (X)" FontSize="9" Foreground="#FFA0AAB5" HorizontalAlignment="Center"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><TextBox Text="{Binding SurgChinPitch, StringFormat={}{0:F1}}" Style="{StaticResource SurgeryTextBoxStyle}"/><StackPanel><RepeatButton Content="▲" Style="{StaticResource SurgeryStepperButtonStyle}" Command="{Binding AdjustSurgeryCommand}" CommandParameter="ChinPitch+" Margin="0,0,0,1"/><RepeatButton Content="▼" Style="{StaticResource SurgeryStepperButtonStyle}" Command="{Binding AdjustSurgeryCommand}" CommandParameter="ChinPitch-"/></StackPanel></StackPanel></StackPanel>
                                                 <StackPanel Grid.Column="2"><TextBlock Text="Yaw (Z)" FontSize="9" Foreground="#FFA0AAB5" HorizontalAlignment="Center"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><TextBox Text="{Binding SurgChinYaw, StringFormat={}{0:F1}}" Style="{StaticResource SurgeryTextBoxStyle}"/><StackPanel><RepeatButton Content="▲" Style="{StaticResource SurgeryStepperButtonStyle}" Command="{Binding AdjustSurgeryCommand}" CommandParameter="ChinYaw+" Margin="0,0,0,1"/><RepeatButton Content="▼" Style="{StaticResource SurgeryStepperButtonStyle}" Command="{Binding AdjustSurgeryCommand}" CommandParameter="ChinYaw-"/></StackPanel></StackPanel></StackPanel>
                                             </Grid>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <!-- ═══ OCCLUSION PLANS TREE ═══ -->
+                                    <Border Background="#FF1E222A" BorderBrush="#FF30343D" BorderThickness="1" CornerRadius="4"
+                                            Padding="8" Margin="0,0,0,8">
+                                        <StackPanel>
+                                            <TextBlock Text="OCCLUSION PLANS" Foreground="White" FontSize="11" FontWeight="Bold" Margin="0,0,0,6"/>
+
+                                            <ItemsControl ItemsSource="{Binding OcclusionNodes}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <!-- HorizontalContentAlignment=Stretch allows the header DockPanel to fill the full width -->
+                                                        <Expander IsExpanded="{Binding IsExpanded}" Margin="0,0,0,4"
+                                                                  Foreground="{StaticResource TextPrimaryBrush}" FontSize="11"
+                                                                  HorizontalContentAlignment="Stretch">
+                                                            <Expander.Header>
+                                                                <!-- Tag = MainViewModel so ContextMenu can reach commands -->
+                                                                <DockPanel LastChildFill="True"
+                                                                           Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
+                                                                    <DockPanel.ContextMenu>
+                                                                        <ContextMenu Background="#FF1E222A" BorderBrush="#FF30343D" Foreground="White">
+                                                                            <MenuItem Header="🔄  Realign..."
+                                                                                      Command="{Binding PlacementTarget.Tag.RealignOcclusionCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                                                        </ContextMenu>
+                                                                    </DockPanel.ContextMenu>
+                                                                    <!-- "＋ Plan" button on the right — saves current movements as a new plan -->
+                                                                    <Button DockPanel.Dock="Right" Content="＋ Plan"
+                                                                            Height="16" FontSize="9" Padding="5,0"
+                                                                            Background="#30FFFFFF" BorderThickness="0"
+                                                                            Foreground="{StaticResource TextSecondaryBrush}"
+                                                                            VerticalAlignment="Center" Cursor="Hand"
+                                                                            Command="{Binding Tag.AddPlanCommand, RelativeSource={RelativeSource AncestorType=DockPanel}}"
+                                                                            CommandParameter="{Binding}"/>
+                                                                    <!-- Active indicator + name -->
+                                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                                        <Ellipse Width="7" Height="7" Margin="0,0,5,0" VerticalAlignment="Center">
+                                                                            <Ellipse.Style>
+                                                                                <Style TargetType="Ellipse">
+                                                                                    <Setter Property="Fill" Value="#FF505060"/>
+                                                                                    <Style.Triggers>
+                                                                                        <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                                                                            <Setter Property="Fill" Value="#FF1B98E0"/>
+                                                                                        </DataTrigger>
+                                                                                    </Style.Triggers>
+                                                                                </Style>
+                                                                            </Ellipse.Style>
+                                                                        </Ellipse>
+                                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                                                    </StackPanel>
+                                                                </DockPanel>
+                                                            </Expander.Header>
+
+                                                            <!-- Plan rows inside the expander -->
+                                                            <StackPanel Margin="8,4,0,0">
+                                                                <ItemsControl ItemsSource="{Binding Plans}"
+                                                                              Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate>
+                                                                            <Border Margin="0,1" CornerRadius="3" Padding="4,3" Cursor="Hand">
+                                                                                <Border.Style>
+                                                                                    <Style TargetType="Border">
+                                                                                        <Setter Property="Background" Value="#10FFFFFF"/>
+                                                                                        <Style.Triggers>
+                                                                                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                                                                <Setter Property="Background" Value="#35268BBD"/>
+                                                                                            </DataTrigger>
+                                                                                        </Style.Triggers>
+                                                                                    </Style>
+                                                                                </Border.Style>
+                                                                                <DockPanel Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
+                                                                                    <!-- 💾 overwrites this plan with current movements -->
+                                                                                    <Button DockPanel.Dock="Right" Content="💾"
+                                                                                            ToolTip="Overwrite with current movements"
+                                                                                            Background="Transparent" BorderThickness="0"
+                                                                                            Foreground="#80FFFFFF" FontSize="10" Padding="4,0" Cursor="Hand"
+                                                                                            Command="{Binding Tag.SavePlanCommand, RelativeSource={RelativeSource AncestorType=DockPanel}}"
+                                                                                            CommandParameter="{Binding}"/>
+                                                                                    <!-- Click row to select and apply plan -->
+                                                                                    <Button Background="Transparent" BorderThickness="0"
+                                                                                            HorizontalContentAlignment="Left" Padding="0"
+                                                                                            Foreground="{StaticResource TextPrimaryBrush}" FontSize="10"
+                                                                                            Command="{Binding Tag.SelectPlanCommand, RelativeSource={RelativeSource AncestorType=DockPanel}}"
+                                                                                            CommandParameter="{Binding}">
+                                                                                        <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
+                                                                                    </Button>
+                                                                                </DockPanel>
+                                                                            </Border>
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
+                                                            </StackPanel>
+                                                        </Expander>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+
+                                            <!-- Add Occlusion: load new STL + open alignment wizard -->
+                                            <Button Margin="0,6,0,0" Height="22" FontSize="10" FontWeight="SemiBold"
+                                                    Content="＋  Add Occlusion"
+                                                    Background="#FF1B98E0" BorderThickness="0" Foreground="White"
+                                                    Command="{Binding AddOcclusionNodeCommand}"/>
                                         </StackPanel>
                                     </Border>
 
