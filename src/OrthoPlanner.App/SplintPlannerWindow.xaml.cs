@@ -282,10 +282,10 @@ public partial class SplintPlannerWindow : Window
     //  SLIDERS
     // ═══════════════════════════════════════════════════════════
     private void ThicknessSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
-        => ThicknessLabel.Text = $"{e.NewValue:F1} mm";
+    { if (ThicknessLabel != null) ThicknessLabel.Text = $"{e.NewValue:F1} mm"; }
 
     private void PenetrationSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
-        => PenetrationLabel.Text = $"{e.NewValue:F1} mm";
+    { if (PenetrationLabel != null) PenetrationLabel.Text = $"{e.NewValue:F1} mm"; }
 
     // ═══════════════════════════════════════════════════════════
     //  CLEAR
