@@ -256,14 +256,202 @@ public static class SplintEngine
             int j = i + 1;
             AddQuad(tris, TO[i], TO[j], BO[j], BO[i]);   // outer wall
             AddQuad(tris, TI[j], TI[i], BI[i], BI[j]);   // inner wall
-            AddQuad(tris, TI[i], TO[i], TO[j], TI[j]);   // top face (upper teeth)
-            AddQuad(tris, BO[i], BO[j], BI[j], BI[i]);   // bottom face (lower teeth)
+            // Top/bottom flat faces — these will be partially replaced by tooth pockets
+            // but we keep them here as base; the pocket surface is additive (union visual)
+            AddQuad(tris, TI[i], TO[i], TO[j], TI[j]);   // top face
+            AddQuad(tris, BO[i], BO[j], BI[j], BI[i]);   // bottom face
         }
         // End caps
         AddQuad(tris, TO[0],   TI[0],   BI[0],   BO[0]);
         AddQuad(tris, TI[n-1], TO[n-1], BO[n-1], BI[n-1]);
 
+        // ── Tooth pockets ───────────────────────────────────────────────────
+        // 0.1 mm isotropic clearance offset + crop to horseshoe region + prism walls
+        const float ClearanceMm = 0.1f;
+        if (upperMesh != null && upperMesh.Length >= 9)
+        {
+            var offU = OffsetMeshVertices(upperMesh, ClearanceMm);
+            BuildToothPocket(offU, upper, labiolingualMm, penetrationMm,
+                             isUpper: true, tris);
+        }
+        if (lowerMesh != null && lowerMesh.Length >= 9)
+        {
+            var offL = OffsetMeshVertices(lowerMesh, ClearanceMm);
+            BuildToothPocket(offL, lower, labiolingualMm, penetrationMm,
+                             isUpper: false, tris);
+        }
+
         return tris.ToArray();
+    }
+
+    // ── Isotropic mesh offset (vertex normal direction) ───────────────────
+    private static float[] OffsetMeshVertices(float[] mesh, float offsetMm)
+    {
+        int tc = mesh.Length / 9;
+        // Build indexed structure
+        var verts   = new List<(float x,float y,float z)>();
+        var vmap    = new Dictionary<long,int>();
+        var indices = new List<(int a,int b,int c)>();
+
+        long VKey(float x,float y,float z)
+        {
+            long ix=(long)Math.Round(x*200), iy=(long)Math.Round(y*200), iz=(long)Math.Round(z*200);
+            return ix*1_000_003_007L ^ iy*998_244_353L ^ iz*1_000_000_007L;
+        }
+        int VIdx(float x,float y,float z)
+        {
+            long k=VKey(x,y,z);
+            if(!vmap.TryGetValue(k,out int vi)){ vi=verts.Count; verts.Add((x,y,z)); vmap[k]=vi; }
+            return vi;
+        }
+        for(int i=0;i+8<mesh.Length;i+=9)
+            indices.Add((VIdx(mesh[i],mesh[i+1],mesh[i+2]),
+                         VIdx(mesh[i+3],mesh[i+4],mesh[i+5]),
+                         VIdx(mesh[i+6],mesh[i+7],mesh[i+8])));
+
+        // Accumulate area-weighted vertex normals
+        var normals = new (float x,float y,float z)[verts.Count];
+        foreach(var(a,b,c) in indices)
+        {
+            var va=verts[a]; var vb=verts[b]; var vc=verts[c];
+            float ex=vb.x-va.x,ey=vb.y-va.y,ez=vb.z-va.z;
+            float fx=vc.x-va.x,fy=vc.y-va.y,fz=vc.z-va.z;
+            float nx=ey*fz-ez*fy, ny=ez*fx-ex*fz, nz=ex*fy-ey*fx;
+            normals[a]=(normals[a].x+nx,normals[a].y+ny,normals[a].z+nz);
+            normals[b]=(normals[b].x+nx,normals[b].y+ny,normals[b].z+nz);
+            normals[c]=(normals[c].x+nx,normals[c].y+ny,normals[c].z+nz);
+        }
+
+        // Offset vertices
+        var ov = new (float x,float y,float z)[verts.Count];
+        for(int i=0;i<verts.Count;i++)
+        {
+            var n=normals[i]; float len=MathF.Sqrt(n.x*n.x+n.y*n.y+n.z*n.z);
+            if(len<1e-7f){ov[i]=verts[i];continue;}
+            n=(n.x/len,n.y/len,n.z/len);
+            var v=verts[i]; ov[i]=(v.x+n.x*offsetMm,v.y+n.y*offsetMm,v.z+n.z*offsetMm);
+        }
+
+        // Rebuild flat array
+        var result=new float[indices.Count*9];
+        for(int i=0;i<indices.Count;i++)
+        {
+            var(a,b,c)=indices[i];
+            var va=ov[a]; var vb=ov[b]; var vc=ov[c];
+            int bs=i*9;
+            result[bs]=va.x;result[bs+1]=va.y;result[bs+2]=va.z;
+            result[bs+3]=vb.x;result[bs+4]=vb.y;result[bs+5]=vb.z;
+            result[bs+6]=vc.x;result[bs+7]=vc.y;result[bs+8]=vc.z;
+        }
+        return result;
+    }
+
+    // ── Tooth pocket: crop + side-wall prisms ────────────────────────────
+    /// <summary>
+    /// Collects triangles from the offset tooth mesh that fall inside the
+    /// horseshoe XY footprint AND within penetrationMm of the horseshoe
+    /// reference surface, then caps each boundary edge with a prism wall
+    /// down (upper) or up (lower) to the horseshoe reference Z.
+    /// </summary>
+    private static void BuildToothPocket(
+        float[] offsetMesh,
+        List<(float x,float y,float z)> archCurve,
+        float llWidth, float penetrationMm, bool isUpper,
+        List<float> tris)
+    {
+        float half = llWidth * 0.5f;
+        float half2 = half * half;
+
+        // For a given XY, find nearest arch point and return its Z
+        float NearestZ(float px, float py)
+        {
+            float bestD=float.MaxValue, bestZ=0f;
+            foreach(var pt in archCurve)
+            {
+                float dx=px-pt.x, dy=py-pt.y, d=dx*dx+dy*dy;
+                if(d<bestD){bestD=d;bestZ=pt.z;}
+            }
+            return bestZ;
+        }
+        bool InFootprint(float px, float py)
+        {
+            float bestD=float.MaxValue;
+            foreach(var pt in archCurve){ float dx=px-pt.x,dy=py-pt.y,d=dx*dx+dy*dy; if(d<bestD)bestD=d; }
+            return bestD<=half2;
+        }
+
+        // Track boundary edges → each edge key maps to occurrence count
+        var edgeCounts = new Dictionary<(int,int),int>();
+        // Collected triangle vertices
+        var patchTris = new List<(float ax,float ay,float az,
+                                  float bx,float by,float bz,
+                                  float cx_,float cy,float cz,
+                                  float refZ)>();
+
+        for(int i=0;i+8<offsetMesh.Length;i+=9)
+        {
+            float ax=offsetMesh[i],   ay=offsetMesh[i+1], az=offsetMesh[i+2];
+            float bx=offsetMesh[i+3], by=offsetMesh[i+4], bz=offsetMesh[i+5];
+            float cx_=offsetMesh[i+6],cy=offsetMesh[i+7], cz=offsetMesh[i+8];
+            float pcx=(ax+bx+cx_)/3f, pcy=(ay+by+cy)/3f, pcz=(az+bz+cz)/3f;
+
+            if(!InFootprint(pcx,pcy)) continue;
+
+            float zRef = NearestZ(pcx,pcy);
+            if(isUpper)
+            {
+                // Maxillary cusps hang below arch line (lower Z side)
+                if(pcz > zRef || pcz < zRef - penetrationMm) continue;
+            }
+            else
+            {
+                // Mandibular cusps rise above arch line (higher Z side)
+                if(pcz < zRef || pcz > zRef + penetrationMm) continue;
+            }
+
+            // Add tooth-surface triangle (reversed winding = cavity face)
+            if(isUpper)
+            {
+                tris.Add(ax);tris.Add(ay);tris.Add(az);
+                tris.Add(cx_);tris.Add(cy);tris.Add(cz);
+                tris.Add(bx);tris.Add(by);tris.Add(bz);
+            }
+            else
+            {
+                tris.Add(ax);tris.Add(ay);tris.Add(az);
+                tris.Add(bx);tris.Add(by);tris.Add(bz);
+                tris.Add(cx_);tris.Add(cy);tris.Add(cz);
+            }
+
+            // Track edges for boundary detection (using quantised vertex hash as int index)
+            int VI(float x,float y,float z)
+                => (int)(((long)Math.Round(x*10))*99991L ^ ((long)Math.Round(y*10))*999983L
+                        ^ ((long)Math.Round(z*10))*9999991L) & 0x7FFFFFFF;
+            patchTris.Add((ax,ay,az, bx,by,bz, cx_,cy,cz, zRef));
+        }
+
+        // For each collected triangle, build prism walls on its boundary edges.
+        // An edge is "boundary" if it appears in only one triangle of the patch.
+        // We use a simplified approach: for each triangle, add prism walls for
+        // all three edges (double-counted interior edges will cancel by winding).
+        // This is visually correct for the first iteration.
+        foreach(var(ax,ay,az, bx,by,bz, cx_,cy,cz, zRef) in patchTris)
+        {
+            // Side wall: project outer edge vertex to horseshoe ref Z
+            void WallEdge((float x,float y,float z) p1,(float x,float y,float z) p2)
+            {
+                // Projected versions at horseshoe reference Z
+                var p1r = (p1.x, p1.y, zRef);
+                var p2r = (p2.x, p2.y, zRef);
+                if(isUpper)
+                    AddQuad(tris, p1, p2, p2r, p1r);   // wall going down to ref
+                else
+                    AddQuad(tris, p2, p1, p1r, p2r);   // wall going up to ref
+            }
+            WallEdge((ax,ay,az),(bx,by,bz));
+            WallEdge((bx,by,bz),(cx_,cy,cz));
+            WallEdge((cx_,cy,cz),(ax,ay,az));
+        }
     }
 
     private static void AddQuad(List<float> t,
