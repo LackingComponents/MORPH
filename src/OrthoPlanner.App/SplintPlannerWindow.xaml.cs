@@ -30,6 +30,10 @@ public partial class SplintPlannerWindow : Window
     private LineGeometryModel3D? _upperCurveLine;
     private LineGeometryModel3D? _lowerCurveLine;
 
+    // ── Ribbon preview (labio-lingual width footprint) ────────────────────
+    private MeshGeometryModel3D? _upperRibbon;
+    private MeshGeometryModel3D? _lowerRibbon;
+
     // ── Splint preview ────────────────────────────────────────────────────
     private MeshGeometryModel3D? _splintUpperPreview;
     private MeshGeometryModel3D? _splintLowerPreview;
@@ -253,18 +257,44 @@ public partial class SplintPlannerWindow : Window
     {
         if (_upperCurveLine != null) { UpperGroup.Children.Remove(_upperCurveLine); _upperCurveLine = null; }
         if (_upperArch.ControlPointCount < 2) return;
-        _upperCurveLine = BuildCurveLine(_upperArch.Sample(120),
-            System.Windows.Media.Color.FromRgb(0, 188, 212));   // teal
+        var sampled = _upperArch.Sample(120);
+        _upperCurveLine = BuildCurveLine(sampled, System.Windows.Media.Color.FromRgb(0, 188, 212));
         UpperGroup.Children.Add(_upperCurveLine);
+        RefreshUpperRibbon(sampled);
     }
 
     private void RefreshLowerCurve()
     {
         if (_lowerCurveLine != null) { LowerGroup.Children.Remove(_lowerCurveLine); _lowerCurveLine = null; }
         if (_lowerArch.ControlPointCount < 2) return;
-        _lowerCurveLine = BuildCurveLine(_lowerArch.Sample(120),
-            System.Windows.Media.Color.FromRgb(0, 188, 212));   // teal
+        var sampled = _lowerArch.Sample(120);
+        _lowerCurveLine = BuildCurveLine(sampled, System.Windows.Media.Color.FromRgb(0, 188, 212));
         LowerGroup.Children.Add(_lowerCurveLine);
+        RefreshLowerRibbon(sampled);
+    }
+
+    private void RefreshUpperRibbon(List<(float x,float y,float z)>? sampled = null)
+    {
+        if (_upperRibbon != null) { UpperGroup.Children.Remove(_upperRibbon); _upperRibbon = null; }
+        if (_upperArch.ControlPointCount < 2) return;
+        var pts = sampled ?? _upperArch.Sample(120);
+        float w = (float)ThicknessSlider.Value;
+        var ribbonMesh = SplintEngine.GenerateRibbonMesh(pts, w);
+        if (ribbonMesh.Length < 9) return;
+        _upperRibbon = MeshHelper.BuildModel3D(ribbonMesh, 0, 188, 212, 100);
+        UpperGroup.Children.Add(_upperRibbon);
+    }
+
+    private void RefreshLowerRibbon(List<(float x,float y,float z)>? sampled = null)
+    {
+        if (_lowerRibbon != null) { LowerGroup.Children.Remove(_lowerRibbon); _lowerRibbon = null; }
+        if (_lowerArch.ControlPointCount < 2) return;
+        var pts = sampled ?? _lowerArch.Sample(120);
+        float w = (float)ThicknessSlider.Value;
+        var ribbonMesh = SplintEngine.GenerateRibbonMesh(pts, w);
+        if (ribbonMesh.Length < 9) return;
+        _lowerRibbon = MeshHelper.BuildModel3D(ribbonMesh, 0, 188, 212, 100);
+        LowerGroup.Children.Add(_lowerRibbon);
     }
 
     private static LineGeometryModel3D BuildCurveLine(
@@ -282,7 +312,12 @@ public partial class SplintPlannerWindow : Window
     //  SLIDERS
     // ═══════════════════════════════════════════════════════════
     private void ThicknessSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
-    { if (ThicknessLabel != null) ThicknessLabel.Text = $"{e.NewValue:F1} mm"; }
+    {
+        if (ThicknessLabel != null) ThicknessLabel.Text = $"{e.NewValue:F1} mm";
+        // Live ribbon update when slider moves
+        if (_upperArch?.ControlPointCount >= 2) RefreshUpperRibbon();
+        if (_lowerArch?.ControlPointCount >= 2) RefreshLowerRibbon();
+    }
 
     private void PenetrationSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
     { if (PenetrationLabel != null) PenetrationLabel.Text = $"{e.NewValue:F1} mm"; }
@@ -367,18 +402,30 @@ public partial class SplintPlannerWindow : Window
 
         SplintVertices = splint;
 
-        // Show translucent preview in both viewports
-        void ShowPreview(GroupModel3D group, ref MeshGeometryModel3D? prev)
+        // Build splint model
+        var splintModel = MeshHelper.BuildModel3D(splint, 80, 160, 255, 140);
+
+        // Combined view: show BOTH meshes + splint in BOTH viewports
+        // Upper viewport: upper mesh (already there) + lower mesh (translucent) + splint
+        // Lower viewport: lower mesh (already there) + upper mesh (translucent) + splint
+        void AddIfNotNull(GroupModel3D grp, float[]? mesh, byte r, byte g, byte b, byte a,
+            ref MeshGeometryModel3D? slot)
         {
-            if (prev != null) group.Children.Remove(prev);
-            prev = MeshHelper.BuildModel3D(splint, 80, 160, 255, 130);
-            group.Children.Add(prev);
+            if (slot != null) grp.Children.Remove(slot);
+            if (mesh == null || mesh.Length < 9) { slot = null; return; }
+            slot = MeshHelper.BuildModel3D(mesh, r, g, b, a);
+            grp.Children.Add(slot);
         }
-        ShowPreview(UpperGroup, ref _splintUpperPreview);
-        ShowPreview(LowerGroup, ref _splintLowerPreview);
+        AddIfNotNull(UpperGroup, splint, 80, 160, 255, 140, ref _splintUpperPreview);
+        AddIfNotNull(LowerGroup, splint, 80, 160, 255, 140, ref _splintLowerPreview);
+
+        // Add opposing arch to each viewport (translucent, grey)
+        MeshGeometryModel3D? _lowerInUpper = null, _upperInLower = null;
+        AddIfNotNull(UpperGroup, _lowerMesh, 200, 200, 195, 120, ref _lowerInUpper);
+        AddIfNotNull(LowerGroup, _upperMesh, 200, 200, 195, 120, ref _upperInLower);
 
         StepTitle.Text = "Step 2: Review Splint";
-        StepInstructions.Text = "Blue = splint solid (translucent). Rotate to inspect. Click Accept to add to the model list.";
+        StepInstructions.Text = "Teal ribbon = splint footprint. Blue solid = splint. Grey = opposing arch. Rotate to inspect. Click Accept.";
         StatusText.Text = $"{splint.Length / 9:N0} triangles";
         AcceptBtn.Visibility  = Visibility.Visible;
         GenerateBtn.IsEnabled = true;
