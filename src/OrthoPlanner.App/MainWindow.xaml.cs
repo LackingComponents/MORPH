@@ -19,6 +19,8 @@ public partial class MainWindow : Window
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19;
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 
+    public HelixToolkit.Wpf.SharpDX.Viewport3DX MainViewport => Viewport3D;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -89,6 +91,11 @@ public partial class MainWindow : Window
                     case nameof(ViewModels.MainViewModel.IsVolumeLoaded):
                         // Use ApplicationIdle so MPR canvas has time to layout
                         Dispatcher.InvokeAsync(UpdateCrosshairs, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                        break;
+
+                    case nameof(ViewModels.MainViewModel.IsCephalometryOpen):
+                        if (VM!.IsCephalometryOpen && VM.Volume != null)
+                            CephalometryPanel.SetVolume(VM.Volume);
                         break;
                 }
             };

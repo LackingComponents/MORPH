@@ -1,0 +1,376 @@
+﻿<UserControl x:Class="OrthoPlanner.App.CephalometryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:hx="http://helix-toolkit.org/wpf/SharpDX"
+        xmlns:ctrl="clr-namespace:OrthoPlanner.App.Controls"
+        Background="#FF0D1117"
+        Foreground="#FFD0D8E0"
+        FontFamily="Segoe UI"
+        FontSize="12"
+        Focusable="True">
+
+    <UserControl.Resources>
+        <Style x:Key="DarkComboBox" TargetType="ComboBox">
+            <Setter Property="Background" Value="#FF1E2D3D"/>
+            <Setter Property="Foreground" Value="#FFFFFFFF"/>
+            <Setter Property="BorderBrush" Value="#FF3A5A7A"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="6,3"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton x:Name="ToggleBtn"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                          ClickMode="Press" Focusable="False">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="{TemplateBinding Background}"
+                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                BorderThickness="1" CornerRadius="3">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="18"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Path Grid.Column="1" Data="M0,0 L4,4 L8,0" Stroke="#FFD0D8E0"
+                                                      StrokeThickness="1.5" HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center" Margin="0,1,0,0"/>
+                                            </Grid>
+                                        </Border>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                                <ToggleButton.Background>
+                                    <SolidColorBrush Color="#1E2D3D"/>
+                                </ToggleButton.Background>
+                                <ToggleButton.BorderBrush>
+                                    <SolidColorBrush Color="#3A5A7A"/>
+                                </ToggleButton.BorderBrush>
+                            </ToggleButton>
+                            <ContentPresenter x:Name="ContentSite"
+                                              Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              Margin="8,3,24,3" VerticalAlignment="Center"
+                                              HorizontalAlignment="Left" IsHitTestVisible="False"/>
+                            <Popup x:Name="Popup" Placement="Bottom"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   AllowsTransparency="True" Focusable="False"
+                                   PopupAnimation="Slide">
+                                <Border Background="#FF1E2D3D" BorderBrush="#FF3A5A7A"
+                                        BorderThickness="1" CornerRadius="0,0,3,3"
+                                        MinWidth="{TemplateBinding ActualWidth}"
+                                        MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                    <ScrollViewer>
+                                        <StackPanel IsItemsHost="True"/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="DarkComboBoxItem" TargetType="ComboBoxItem">
+            <Setter Property="Background" Value="#FF1E2D3D"/>
+            <Setter Property="Foreground" Value="#FFFFFFFF"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#FF2A4A6B"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#FF2A4A6B"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="DarkToggleButton" TargetType="ToggleButton">
+            <Setter Property="Background" Value="#FF1E2D3D"/>
+            <Setter Property="Foreground" Value="#FFD0D8E0"/>
+            <Setter Property="BorderBrush" Value="#FF3A5A7A"/>
+            <Setter Property="Padding" Value="8,3"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="3"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#FF2A4A6B"/>
+                                <Setter Property="Foreground" Value="#FF00E5FF"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#FF253A50"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="260"/>
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- == Toolbars == -->
+        <StackPanel Grid.Row="0" Grid.ColumnSpan="2">
+            <!-- Row 1: View controls -->
+            <Border Background="#FF151B23" Height="34"
+                    BorderThickness="0,0,0,1" BorderBrush="#FF232E3A">
+                <DockPanel VerticalAlignment="Center" Margin="8,0">
+                    <ToggleButton DockPanel.Dock="Right" x:Name="Btn3DToggle"
+                                  Content="3D" Style="{StaticResource DarkToggleButton}"
+                                  Margin="4,0,0,0"
+                                  Checked="Toggle3D_Changed" Unchecked="Toggle3D_Changed"/>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Projection:" Foreground="#FF6E7F90" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11"/>
+                        <ComboBox x:Name="CmbProjection" Width="100" SelectedIndex="0"
+                                  Style="{StaticResource DarkComboBox}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItem}"
+                                  SelectionChanged="CmbProjection_SelectionChanged"/>
+                        <Rectangle Width="1" Fill="#FF232E3A" Margin="10,6"/>
+                        <CheckBox x:Name="ChkInvert" Content="Invert (I)" IsChecked="True"
+                                  Foreground="#FFD0D8E0" VerticalAlignment="Center"
+                                  Checked="ChkInvert_Changed" Unchecked="ChkInvert_Changed"/>
+                        <Rectangle Width="1" Fill="#FF232E3A" Margin="10,6"/>
+                        <Button Content="Reset (R)" Padding="8,3" Margin="2,0" Click="ResetView_Click"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+            <!-- Row 2: Measurement tools -->
+            <Border Background="#FF131920" Height="30"
+                    BorderThickness="0,0,0,1" BorderBrush="#FF232E3A">
+                <StackPanel x:Name="ToolButtonPanel" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0">
+                    <Button x:Name="BtnToolSelect"   Content="Select"    Padding="6,2" Margin="1,0" FontSize="10" Click="ToolBtn_Click" Tag="Select"/>
+                    <Button x:Name="BtnToolPoint"    Content="Point"     Padding="6,2" Margin="1,0" FontSize="10" Click="ToolBtn_Click" Tag="CustomPoint"/>
+                    <Button x:Name="BtnToolLine"     Content="Line"      Padding="6,2" Margin="1,0" FontSize="10" Click="ToolBtn_Click" Tag="Line"/>
+                    <Button x:Name="BtnToolPlane"    Content="Plane"     Padding="6,2" Margin="1,0" FontSize="10" Click="ToolBtn_Click" Tag="InfinitePlane"/>
+                    <Rectangle Width="1" Fill="#FF232E3A" Margin="4,4"/>
+                    <Button x:Name="BtnToolAngPlane" Content="&#x2220; Planes" Padding="6,2" Margin="1,0" FontSize="10" Click="ToolBtn_Click" Tag="AnglePlanes"/>
+                    <Button x:Name="BtnToolAng3"     Content="&#x2220; 3pts"   Padding="6,2" Margin="1,0" FontSize="10" Click="ToolBtn_Click" Tag="Angle3Points"/>
+                    <Rectangle Width="1" Fill="#FF232E3A" Margin="4,4"/>
+                    <Button x:Name="BtnToolDistPts"  Content="&#x2194; mm"     Padding="6,2" Margin="1,0" FontSize="10" Click="ToolBtn_Click" Tag="DistancePoints"/>
+                    <Button x:Name="BtnToolDistPln"  Content="&#x22A5; dist"   Padding="6,2" Margin="1,0" FontSize="10" Click="ToolBtn_Click" Tag="DistancePointPlane"/>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+
+        <!-- == Viewport Area: DRR 2D / 3D Swap == -->
+        <Grid Grid.Row="1" Grid.Column="0" x:Name="ViewportGrid">
+            <!-- DRR 2D Panel -->
+            <Border x:Name="ViewportBorder" Background="#FF000000" ClipToBounds="True">
+                <Grid>
+                    <Canvas x:Name="ImageCanvas"
+                            MouseWheel="ImageCanvas_MouseWheel"
+                            MouseLeftButtonDown="ImageCanvas_MouseLeftButtonDown"
+                            MouseLeftButtonUp="ImageCanvas_MouseLeftButtonUp"
+                            MouseRightButtonDown="ImageCanvas_MouseRightButtonDown"
+                            MouseRightButtonUp="ImageCanvas_MouseRightButtonUp"
+                            MouseDown="ImageCanvas_MouseDown"
+                            MouseUp="ImageCanvas_MouseUp"
+                            MouseMove="ImageCanvas_MouseMove"
+                            Background="Transparent">
+                        <Image x:Name="DrrImageControl"
+                               RenderOptions.BitmapScalingMode="HighQuality"
+                               Stretch="None"/>
+                        <Canvas x:Name="MeasurementsCanvas"/>
+                        <Canvas x:Name="LandmarkCanvas"/>
+                    </Canvas>
+
+                    <!-- W/L Live HUD - always visible, updates during right-drag -->
+                    <Border x:Name="WlHud"
+                            HorizontalAlignment="Right" VerticalAlignment="Top"
+                            Background="#BB000C18" CornerRadius="6"
+                            Padding="12,8" Margin="0,8,8,0"
+                            IsHitTestVisible="False">
+                        <StackPanel>
+                            <TextBlock x:Name="WlHudW" Text="W  1.140"
+                                       Foreground="#00E5FF" FontFamily="Consolas"
+                                       FontSize="13" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="WlHudL" Text="L  0.584"
+                                       Foreground="#00E5FF" FontFamily="Consolas"
+                                       FontSize="13" FontWeight="SemiBold" Margin="0,2,0,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Magnifier Loupe - top-left, 2x zoom of area under cursor -->
+                    <Border x:Name="LoupePanel"
+                            HorizontalAlignment="Left" VerticalAlignment="Top"
+                            Width="380" Height="300"
+                            Background="#CC000C18" CornerRadius="6"
+                            BorderBrush="#FF3A5A7A" BorderThickness="1"
+                            Margin="8,8,0,0"
+                            IsHitTestVisible="False"
+                            Visibility="Collapsed">
+                        <Grid>
+                            <Rectangle x:Name="LoupeRect" RadiusX="5" RadiusY="5"/>
+                            <!-- Thin white X crosshair -->
+                            <Canvas HorizontalAlignment="Center" VerticalAlignment="Center" Width="20" Height="20">
+                                <Line X1="0" Y1="0" X2="20" Y2="20" Stroke="White" StrokeThickness="1" Opacity="0.8"/>
+                                <Line X1="20" Y1="0" X2="0" Y2="20" Stroke="White" StrokeThickness="1" Opacity="0.8"/>
+                            </Canvas>
+                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                    Background="#AA1E4A8A" CornerRadius="3"
+                                    Padding="5,2" Margin="0,0,5,5">
+                                <TextBlock Text="2├ù" Foreground="#FFD0D8E0"
+                                           FontSize="10" FontWeight="SemiBold"
+                                           FontFamily="Consolas"/>
+                            </Border>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <!-- 3D Panel -->
+            <Border x:Name="Viewport3DBorder"
+                    Background="{StaticResource BgMediumBrush}"
+                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="0" CornerRadius="0"
+                    Visibility="Collapsed">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <hx:Viewport3DX x:Name="CephViewport3D" Grid.Row="1"
+                                    BackgroundColor="#FF0C1018"
+                                    ShowCoordinateSystem="True"
+                                    CoordinateSystemLabelForeground="#80AABBCC"
+                                    ZoomExtentsWhenLoaded="False"
+                                    IsRotationEnabled="True"
+                                    IsPanEnabled="True"
+                                    IsZoomEnabled="True"
+                                    RotateAroundMouseDownPoint="False"
+                                    CameraRotationMode="Turnball"
+                                    ModelUpDirection="0,0,1"
+                                    ShowViewCube="False"
+                                    IsViewCubeEdgeClicksEnabled="True"
+                                    IsInertiaEnabled="False"
+                                    PreviewMouseLeftButtonDown="Viewport3D_PreviewMouseLeftButtonDown">
+                        <hx:Viewport3DX.InputBindings>
+                            <MouseBinding Gesture="MiddleClick" Command="hx:ViewportCommands.Pan" />
+                        </hx:Viewport3DX.InputBindings>
+                        <hx:Viewport3DX.Camera>
+                            <hx:PerspectiveCamera x:Name="CephCamera"
+                                                  Position="0,-300,0" LookDirection="0,1,0"
+                                                  UpDirection="0,0,1" FieldOfView="45"
+                                                  NearPlaneDistance="0.1" FarPlaneDistance="10000" />
+                        </hx:Viewport3DX.Camera>
+
+                        <hx:AmbientLight3D Color="#505050" />
+                        <hx:DirectionalLight3D Direction="0,-1,0" Color="#D0D0D0" />
+                        <hx:DirectionalLight3D Direction="0,1,0" Color="#A0A0A0" />
+
+                        <!-- Segments -->
+                        <hx:ItemsModel3D ItemsSource="{Binding Segments}">
+                            <hx:ItemsModel3D.ItemTemplate>
+                                <DataTemplate>
+                                    <hx:MeshGeometryModel3D Geometry="{Binding Geometry}" Material="{Binding Material}" IsRendering="{Binding IsVisible}" Transform="{Binding Transform}" IsHitTestVisible="True" />
+                                </DataTemplate>
+                            </hx:ItemsModel3D.ItemTemplate>
+                        </hx:ItemsModel3D>
+                        
+                        <!-- ImportedMeshes -->
+                        <hx:ItemsModel3D ItemsSource="{Binding ImportedMeshes}">
+                            <hx:ItemsModel3D.ItemTemplate>
+                                <DataTemplate>
+                                    <hx:MeshGeometryModel3D Geometry="{Binding Geometry}" Material="{Binding Material}" IsRendering="{Binding IsVisible}" Transform="{Binding Transform}" IsHitTestVisible="True" />
+                                </DataTemplate>
+                            </hx:ItemsModel3D.ItemTemplate>
+                        </hx:ItemsModel3D>
+                    </hx:Viewport3DX>
+
+                    <ctrl:NavCubeControl Grid.Row="1"
+                                         HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                         Margin="0,0,8,8" Opacity="0.92"
+                                         Visibility="Visible" />
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- == Sidebar (Landmarks + Measurements) == -->
+        <Border Grid.Row="1" Grid.Column="1" Background="#FF151B23"
+                BorderThickness="1,0,0,0" BorderBrush="#FF232E3A">
+            <DockPanel>
+                <!-- Measurements panel docked at bottom -->
+                <Border DockPanel.Dock="Bottom" BorderThickness="0,1,0,0" BorderBrush="#FF232E3A">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto" MaxHeight="220"/>
+                        </Grid.RowDefinitions>
+                        <Border Grid.Row="0" Background="#FF1E2730" Padding="10,7"
+                                BorderThickness="0,0,0,1" BorderBrush="#FF232E3A">
+                            <TextBlock Text="MEASUREMENTS" Foreground="#FF6E7F90" FontSize="10" FontWeight="SemiBold"/>
+                        </Border>
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" MaxHeight="200" Padding="4">
+                            <StackPanel x:Name="MeasurementListPanel" Margin="0,4"/>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+
+                <!-- Landmarks header -->
+                <Border DockPanel.Dock="Top" Background="#FF1E2730" Padding="10,7"
+                        BorderThickness="0,0,0,1" BorderBrush="#FF232E3A">
+                    <TextBlock Text="LANDMARKS" Foreground="#FF6E7F90" FontSize="10" FontWeight="SemiBold"/>
+                </Border>
+
+                <!-- Landmark list fills remaining space -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
+                    <StackPanel x:Name="LandmarkListPanel" Margin="0,4"/>
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
+
+        <!-- == Status Bar == -->
+        <Border Grid.Row="2" Grid.ColumnSpan="2" Background="#FF151B23" Height="22"
+                BorderThickness="0,1,0,0" BorderBrush="#FF232E3A">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="StatusLeft" Grid.Column="0" Text="Ready"
+                           Foreground="#FFD0D8E0" VerticalAlignment="Center" Margin="10,0" FontSize="10"/>
+                <TextBlock x:Name="StatusCenter" Grid.Column="1" Foreground="#FF6E7F90"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10"/>
+                <TextBlock x:Name="StatusRight" Grid.Column="2" Foreground="#FF6E7F90"
+                           VerticalAlignment="Center" Margin="10,0" FontSize="10"/>
+            </Grid>
+        </Border>
+
+        <!-- == Loading overlay == -->
+        <Grid x:Name="LoadingOverlay" Grid.Row="1" Grid.ColumnSpan="2"
+              Visibility="Collapsed" Background="#CC000000">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                <ProgressBar x:Name="LoadingProgress" Width="280" Height="4"
+                             IsIndeterminate="True" Foreground="#FF6B8DAF" Background="#FF232E3A"/>
+                <TextBlock x:Name="LoadingText" Text="Generating DRR..."
+                           Foreground="#FFD0D8E0" FontSize="12"
+                           HorizontalAlignment="Center" Margin="0,10,0,0"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</UserControl>

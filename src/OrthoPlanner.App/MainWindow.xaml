@@ -5,6 +5,7 @@
         xmlns:vm="clr-namespace:OrthoPlanner.App.ViewModels"
         xmlns:ctrl="clr-namespace:OrthoPlanner.App.Controls"
         xmlns:v="clr-namespace:OrthoPlanner.App.Views"
+        xmlns:local="clr-namespace:OrthoPlanner.App"
         xmlns:cv="clr-namespace:OrthoPlanner.App.Converters"
         Title="OrthoPlanner — Orthognathic Surgery Planning"
         WindowState="Maximized"
@@ -485,12 +486,12 @@
                         </Expander>
 
                         <!-- 4. CEPHALOMETRY -->
-                        <Expander Header="📐  Cephalometry" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                        <Expander Header="📐  Cephalometry" IsExpanded="{Binding IsCephalometryOpen, Mode=TwoWay}" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
                                   Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
                             <StackPanel Margin="4,6,4,4">
-                                <TextBlock Text="Place landmarks, trace cephalometric planes, and compute angular and linear measurements."
+                                <TextBlock Text="Generate a lateral DRR from the CT volume and place cephalometric landmarks."
                                            TextWrapping="Wrap" FontSize="10" FontWeight="Normal"
-                                           Foreground="{StaticResource TextSecondaryBrush}" />
+                                           Foreground="{StaticResource TextSecondaryBrush}"/>
                             </StackPanel>
                         </Expander>
 
@@ -1131,6 +1132,13 @@
                     Visibility="{Binding IsPhotogrammetryOpen, Converter={StaticResource BoolToVisibility}}"
                     Margin="-4,0,0,0">
                 <v:PhotogrammetryView DataContext="{Binding PhotogrammetrySpace}" />
+            </Border>
+
+            <!-- ═══ FULLSCREEN CEPHALOMETRY OVERLAY ═══ -->
+            <Border Grid.Column="2" Grid.ColumnSpan="3" Background="#E50C1018"
+                    Visibility="{Binding IsCephalometryOpen, Converter={StaticResource BoolToVisibility}}"
+                    Margin="-4,0,0,0">
+                <local:CephalometryWindow x:Name="CephalometryPanel" />
             </Border>
         </Grid>
 
