@@ -13,24 +13,26 @@ public partial class MainViewModel
     /// </summary>
     private (float[]? upper, float[]? lower) ResolveDentalMeshes()
     {
-        // 1. Prefer dental STL casts classified as Upper/Lower
-        float[]? upper = ImportedMeshes
-            .FirstOrDefault(m => m.ScanType == DentalScanType.Upper && m.Vertices != null)?.Vertices;
-        float[]? lower = ImportedMeshes
-            .FirstOrDefault(m => m.ScanType == DentalScanType.Lower && m.Vertices != null)?.Vertices;
+        // ── UPPER (maxilla / upper dental cast) ─────────────────────────────
+        // Priority:
+        //   1. Dental cast STL classified as Upper
+        //   2. "Maxilla (LeFort 1 Separated)" — after LeFort1 osteotomy
+        //   3. Any segment whose name contains "Maxilla"
+        //   4. "Cranium (Split)" — condyle-split result (NOT "Cranium (LeFort Upper)")
+        float[]? upper =
+            ImportedMeshes.FirstOrDefault(m => m.ScanType == DentalScanType.Upper && m.Vertices != null)?.Vertices
+            ?? Segments.FirstOrDefault(s => s.IsVisible && s.Name.Contains("Maxilla (LeFort 1 Separated)"))?.Vertices
+            ?? Segments.FirstOrDefault(s => s.IsVisible && s.Name.Contains("Maxilla"))?.Vertices
+            ?? Segments.FirstOrDefault(s => s.IsVisible && s.Name == "Cranium (Split)")?.Vertices;
 
-        // 2. Fall back to named segments — specific anatomical names only, never the full cranium
-        if (upper == null)
-            upper = Segments.FirstOrDefault(s =>
-                s.IsVisible && (s.Name.Contains("Maxilla") ||
-                                s.Name.Contains("Cranium (LeFort Upper)")))?.Vertices;
+        // ── LOWER (mandible / lower dental cast) ────────────────────────────
+        // Priority:
+        //   1. Dental cast STL classified as Lower
+        //   2. Any segment whose name contains "Mandible"
+        float[]? lower =
+            ImportedMeshes.FirstOrDefault(m => m.ScanType == DentalScanType.Lower && m.Vertices != null)?.Vertices
+            ?? Segments.FirstOrDefault(s => s.IsVisible && s.Name.Contains("Mandible"))?.Vertices;
 
-        if (lower == null)
-            lower = Segments.FirstOrDefault(s =>
-                s.IsVisible && s.Name.Contains("Mandible"))?.Vertices;
-
-        // NOTE: deliberately NOT falling back to HardTissueModel —
-        // that would show the entire cranium as the upper arch.
         return (upper, lower);
     }
 
