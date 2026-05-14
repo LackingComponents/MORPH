@@ -523,9 +523,12 @@
                         <Expander Header="🔧  Splint Generation" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
                                   Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
                             <StackPanel Margin="4,6,4,4">
-                                <TextBlock Text="Generate surgical splints from planned movements."
+                                <TextBlock Text="Design surgical occlusal splints from arch curves fitted to the dental models."
                                            TextWrapping="Wrap" FontSize="10" FontWeight="Normal"
-                                           Foreground="{StaticResource TextSecondaryBrush}" />
+                                           Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8"/>
+                                <Button Content="⚙  Final Occlusion Splint"
+                                        Command="{Binding OpenSplintPlannerCommand}"
+                                        Style="{StaticResource SidebarButton}" Margin="0,0,0,4"/>
                             </StackPanel>
                         </Expander>
 

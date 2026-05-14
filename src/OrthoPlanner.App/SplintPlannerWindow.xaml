@@ -1,0 +1,176 @@
+<Window x:Class="OrthoPlanner.App.SplintPlannerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:hx="http://helix-toolkit.org/wpf/SharpDX"
+        Title="Splint Planner — Final Occlusion"
+        Height="780" Width="1180"
+        WindowStartupLocation="CenterOwner"
+        Background="#FF0D0D0D" Foreground="#FFE0E0E0"
+        FontFamily="Segoe UI" FontSize="12">
+
+    <Window.Resources>
+        <Style x:Key="SideLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#FFB0B8C8"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="Margin" Value="0,4,0,1"/>
+        </Style>
+        <Style x:Key="AccentBtn" TargetType="Button">
+            <Setter Property="Background" Value="#FF1565C0"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style x:Key="DangerBtn" TargetType="Button">
+            <Setter Property="Background" Value="#FFC62828"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="210"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- LEFT PANEL -->
+        <Border Grid.Column="0" Background="#FF111620" BorderBrush="#FF1E2840" BorderThickness="0,0,1,0">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="10,12">
+
+                    <TextBlock Text="SPLINT PLANNER" FontSize="11" FontWeight="Bold"
+                               Foreground="#FF4FC3F7" Margin="0,0,0,10"/>
+
+                    <Border Background="#FF1A2035" CornerRadius="4" Padding="8" Margin="0,0,0,10">
+                        <TextBlock x:Name="InstructionText"
+                                   Text="Click ≥ 3 points on the UPPER arch (top viewport) to define the arch curve."
+                                   TextWrapping="Wrap" FontSize="10" Foreground="#FFB0C4DE"/>
+                    </Border>
+
+                    <TextBlock Text="UPPER ARCH POINTS" Style="{StaticResource SideLabel}" FontWeight="SemiBold"/>
+                    <ListBox x:Name="UpperPointsList" Background="#FF0D1525" Foreground="#FFB0C4DE"
+                             FontSize="10" BorderBrush="#FF1E2840" MaxHeight="80" Margin="0,2,0,4"/>
+                    <Button Content="Clear Upper" Style="{StaticResource DangerBtn}" Margin="0,0,0,8"
+                            Click="ClearUpper_Click"/>
+
+                    <TextBlock Text="LOWER ARCH POINTS" Style="{StaticResource SideLabel}" FontWeight="SemiBold"/>
+                    <ListBox x:Name="LowerPointsList" Background="#FF0D1525" Foreground="#FFB0C4DE"
+                             FontSize="10" BorderBrush="#FF1E2840" MaxHeight="80" Margin="0,2,0,4"/>
+                    <Button Content="Clear Lower" Style="{StaticResource DangerBtn}" Margin="0,0,0,10"
+                            Click="ClearLower_Click"/>
+
+                    <Separator Background="#FF1E2840" Margin="0,2,0,8"/>
+
+                    <TextBlock Style="{StaticResource SideLabel}">
+                        Labio-lingual width: <Run x:Name="ThicknessLabel" Text="8.0"/> mm
+                    </TextBlock>
+                    <Slider x:Name="ThicknessSlider" Minimum="2" Maximum="20" Value="8"
+                            SmallChange="0.5" LargeChange="2" Margin="0,0,0,8"
+                            ValueChanged="ThicknessSlider_ValueChanged"/>
+
+                    <TextBlock Style="{StaticResource SideLabel}">
+                        Tooth penetration: <Run x:Name="PenetrationLabel" Text="3.0"/> mm
+                    </TextBlock>
+                    <Slider x:Name="PenetrationSlider" Minimum="0.5" Maximum="10" Value="3"
+                            SmallChange="0.5" LargeChange="1" Margin="0,0,0,10"
+                            ValueChanged="PenetrationSlider_ValueChanged"/>
+
+                    <Separator Background="#FF1E2840" Margin="0,2,0,8"/>
+
+                    <Border Background="#FF0D1525" CornerRadius="4" Padding="6" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="MESH QUALITY" Style="{StaticResource SideLabel}" FontWeight="Bold"/>
+                            <TextBlock x:Name="UpperQualityText" FontSize="10" Text="Upper: —"
+                                       Foreground="#FF80CBC4" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="LowerQualityText" FontSize="10" Text="Lower: —"
+                                       Foreground="#FF80CBC4" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Button x:Name="GenerateBtn" Content="Generate Splint" IsEnabled="False"
+                            Style="{StaticResource AccentBtn}" Margin="0,0,0,6"
+                            Click="GenerateBtn_Click"/>
+
+                    <TextBlock x:Name="StatusText" Text="Ready." FontSize="10"
+                               Foreground="#FF90A4AE" TextWrapping="Wrap" Margin="0,4,0,10"/>
+
+                    <Separator Background="#FF1E2840" Margin="0,2,0,8"/>
+
+                    <Button x:Name="AcceptBtn" Content="Accept Splint" IsEnabled="False"
+                            Style="{StaticResource AccentBtn}" Margin="0,0,0,6"
+                            Click="AcceptBtn_Click"/>
+                    <Button Content="Cancel" Background="#FF37474F" Foreground="White"
+                            BorderThickness="0" Padding="8,5" Cursor="Hand"
+                            Click="CancelBtn_Click"/>
+
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <!-- RIGHT PANEL — two stacked viewports -->
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="4"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- UPPER viewport: maxilla, camera from below (Z+) looking up (+Z) -->
+            <Grid Grid.Row="0">
+                <hx:Viewport3DX x:Name="UpperViewport"
+                                BackgroundColor="#FF0A0F1A"
+                                EnableSwapChainRendering="True"
+                                CameraRotationMode="Turnball"
+                                ModelUpDirection="0,0,1"
+                                PreviewMouseLeftButtonDown="UpperViewport_MouseDown">
+                    <hx:Viewport3DX.Camera>
+                        <hx:PerspectiveCamera x:Name="UpperCamera"
+                                              Position="0,0,-200"
+                                              LookDirection="0,0,1"
+                                              UpDirection="0,-1,0"
+                                              FieldOfView="35"/>
+                    </hx:Viewport3DX.Camera>
+                    <hx:DirectionalLight3D Direction="-0.3,-0.5,-1" Color="White"/>
+                    <hx:AmbientLight3D Color="#FF505050"/>
+                    <hx:GroupModel3D x:Name="UpperGroup"/>
+                </hx:Viewport3DX>
+                <Border HorizontalAlignment="Left" VerticalAlignment="Top"
+                        Background="#AA111620" Padding="6,3" Margin="4" IsHitTestVisible="False">
+                    <TextBlock Text="UPPER ARCH — Occlusal View (from below)"
+                               FontSize="10" Foreground="#FF4FC3F7" FontWeight="SemiBold"/>
+                </Border>
+            </Grid>
+
+            <Border Grid.Row="1" Background="#FF1E2840"/>
+
+            <!-- LOWER viewport: mandible, camera from above (Z-) looking down (-Z) -->
+            <Grid Grid.Row="2">
+                <hx:Viewport3DX x:Name="LowerViewport"
+                                BackgroundColor="#FF0A0F1A"
+                                EnableSwapChainRendering="True"
+                                CameraRotationMode="Turnball"
+                                ModelUpDirection="0,0,1"
+                                PreviewMouseLeftButtonDown="LowerViewport_MouseDown">
+                    <hx:Viewport3DX.Camera>
+                        <hx:PerspectiveCamera x:Name="LowerCamera"
+                                              Position="0,0,200"
+                                              LookDirection="0,0,-1"
+                                              UpDirection="0,-1,0"
+                                              FieldOfView="35"/>
+                    </hx:Viewport3DX.Camera>
+                    <hx:DirectionalLight3D Direction="-0.3,-0.5,1" Color="White"/>
+                    <hx:AmbientLight3D Color="#FF505050"/>
+                    <hx:GroupModel3D x:Name="LowerGroup"/>
+                </hx:Viewport3DX>
+                <Border HorizontalAlignment="Left" VerticalAlignment="Top"
+                        Background="#AA111620" Padding="6,3" Margin="4" IsHitTestVisible="False">
+                    <TextBlock Text="LOWER ARCH — Occlusal View (from above)"
+                               FontSize="10" Foreground="#FFFFB74D" FontWeight="SemiBold"/>
+                </Border>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>
