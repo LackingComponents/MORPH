@@ -22,14 +22,10 @@ public partial class LeFort1YCutWindow : Window
     private readonly List<Point3D>             _ctrl    = new();
     private readonly List<MeshGeometryModel3D> _ctrlVis = new();
 
-    // Each handle stores its OWN independent XY; Z comes from _zTop or _zBot.
-    // (double X, double Y) tuples for each of 8 handle XY positions:
-    // [0]rFT [1]rFB [2]lFT [3]lFB  [4]jT [5]jB(junction,XY fixed)  [6]sBT [7]sBB
-    private (double X,double Y) _rFT,_rFB,_lFT,_lFB,_sBT,_sBB;
-    private Point3D _junc;
-    private double  _zTop,_zBot;
-    private bool    _yVis;
-
+    // 8 handles: [0]rFT [1]rFB [2]lFT [3]lFB [4]jT [5]jB [6]sBT [7]sBB
+    // All stored as full 3D points. Init places all 8 inside the flat plane through placed points.
+    private Point3D _rFT,_rFB,_lFT,_lFB,_jT,_jB,_sBT,_sBB;
+    private bool _yVis;
     private const int NH=8;
     private readonly MeshGeometryModel3D[] _hm=new MeshGeometryModel3D[NH];
     private readonly Point3D[]             _hp=new Point3D[NH];
@@ -44,10 +40,106 @@ public partial class LeFort1YCutWindow : Window
         CompositionTarget.Rendering+=_rh;
         _maxillaVerts=v;
         _boneMesh=MkMesh(v,Color.FromRgb(120,220,210),1.0);
-        MainGroup.Children.Add(_boneMesh);
-        MainGroup.Children.Add(_pg);MainGroup.Children.Add(_lg);MainGroup.Children.Add(_hg);
+        MainGroup.Children.Add(_boneMesh);MainGroup.Children.Add(_pg);MainGroup.Children.Add(_lg);MainGroup.Children.Add(_hg);
         Loaded+=(_,_)=>FitCam(v);
-        Closed+=(_,_)=>{if(_rh!=null){CompositionTarget.Rendering-=_rh;_rh=null;}MainGroup.Children.Clear();if(MainViewport.EffectsManager is IDisposable d)d.Dispose();MainViewport.EffectsManager=null;};
+        Closed+=(_,_)=>{if(_rh!=null){CompositionTarget.Rendering-=_rh;_rh=null;}MainGroup.Children.Clear();if(MainViewport.EffectsManager is IDisposable d2)d2.Dispose();MainViewport.EffectsManager=null;};
+    }
+
+    // ── 3D math helpers ─────────────────────────────────────────────────────
+    static Point3D   Add(Point3D a,Vector3D b)=>new(a.X+b.X,a.Y+b.Y,a.Z+b.Z);
+    static Vector3D  Sub(Point3D a,Point3D b)=>new(a.X-b.X,a.Y-b.Y,a.Z-b.Z);
+    static Vector3D  Cross(Vector3D a,Vector3D b)=>new(a.Y*b.Z-a.Z*b.Y,a.Z*b.X-a.X*b.Z,a.X*b.Y-a.Y*b.X);
+    static double    Dot(Vector3D a,Vector3D b)=>a.X*b.X+a.Y*b.Y+a.Z*b.Z;
+    static Vector3D  Norm(Vector3D v){double l=v.Length;return l<1e-9?v:new(v.X/l,v.Y/l,v.Z/l);}
+    static Point3D   Lerp(Point3D a,Point3D b,double t)=>new(a.X+t*(b.X-a.X),a.Y+t*(b.Y-a.Y),a.Z+t*(b.Z-a.Z));
+
+    // Project point P onto plane through origin 'o' with normal 'n'
+    static Point3D ProjectToPlane(Point3D p,Point3D o,Vector3D n)
+    { var d=Dot(Sub(p,o),n); return new(p.X-d*n.X,p.Y-d*n.Y,p.Z-d*n.Z); }
+
+    // Compute 4 handles lying in the flat plane through p0,p1,pivot.
+    // Returns: front-top, front-bottom, back-top, back-bottom — all in the plane.
+    static (Point3D ft,Point3D fb,Point3D bt,Point3D bb)
+        FlatArmHandles(Point3D p0,Point3D p1,Point3D pivot,double vestExt=15,double backExt=5)
+    {
+        var e01=Sub(p1,p0); var ep=Sub(pivot,p0);
+        var n=Norm(Cross(e01,ep));
+        if(n.Length<1e-9) n=new(0,0,1); // degenerate: default to vertical
+        // In-plane outward direction (vestibular): away from pivot projected in-plane
+        var toPivot=Norm(ep-Dot(ep,n)*n); // in-plane toward pivot
+        var outward=-toPivot; // in-plane away from pivot (vestibular)
+        // In-plane vertical direction: closest in-plane to world Z-up
+        var zUp=new Vector3D(0,0,1);
+        var ipUp=Norm(zUp-Dot(zUp,n)*n);
+        if(ipUp.Length<1e-9) ipUp=Norm(e01); // fallback
+
+        // Height: span from p0 and p1 in the in-plane-up direction
+        double h0=Dot(Sub(p0,p0),ipUp); // =0 by definition
+        double h1=Dot(Sub(p1,p0),ipUp);
+        double hPiv=Dot(ep,ipUp);
+        double hTop=Math.Max(h0,Math.Max(h1,hPiv))+15;
+        double hBot=Math.Min(h0,Math.Min(h1,hPiv))-15;
+
+        // Back edge: project pivot into plane (it IS in the plane) + backExt outward
+        var backBase=Add(pivot,backExt*outward); // slightly past pivot in junction direction... wait: outward is AWAY from pivot
+        // Actually back = pivot side, so we go backExt in toPivot direction past pivot
+        var backT=Add(Add(p0,hTop*ipUp),backExt*toPivot+Dot(ep,outward)*outward);
+        var backB=Add(Add(p0,hBot*ipUp),backExt*toPivot+Dot(ep,outward)*outward);
+
+        // Simpler: back handles = project (pivot ± ipUp*20) to remain in plane (they already are)
+        var bt=Add(pivot,15*ipUp);
+        var bb=Add(pivot,-15*ipUp);
+        // Front handles: p0/p1 extended vestibularly, clamped to top/bottom
+        var ft=Add(Add(p0,hTop*ipUp),vestExt*outward);
+        var fb=Add(Add(p0,hBot*ipUp),vestExt*outward);
+
+        // Verify all 4 in plane (project to enforce)
+        ft=ProjectToPlane(ft,p0,n);fb=ProjectToPlane(fb,p0,n);
+        bt=ProjectToPlane(bt,p0,n);bb=ProjectToPlane(bb,p0,n);
+        return(ft,fb,bt,bb);
+    }
+
+    private void Init()
+    {
+        var r0=_ctrl[0];var r1=_ctrl[1];var l0=_ctrl[2];var l1=_ctrl[3];
+        double jX=(r0.X+r1.X+l0.X+l1.X)/4, jY=(r0.Y+r1.Y+l0.Y+l1.Y)/4+20, jZ=(r0.Z+r1.Z+l0.Z+l1.Z)/4;
+        var junc=new Point3D(jX,jY,jZ);
+
+        var (rft,rfb,rjt,rjb)=FlatArmHandles(r0,r1,junc);
+        var (lft,lfb,ljt,ljb)=FlatArmHandles(l0,l1,junc);
+        _rFT=rft;_rFB=rfb;_jT=rjt;_jB=rjb;
+        _lFT=lft;_lFB=lfb;
+        // Stem
+        _sBT=Add(junc, new Vector3D(0, 30, 15));
+        _sBB=Add(junc, new Vector3D(0, 30,-15));
+        _yVis=true;Rebuild();
+    }
+
+    private void Rebuild()
+    {
+        _pg.Children.Clear();_lg.Children.Clear();_hg.Children.Clear();
+        var mat=new PhongMaterial{DiffuseColor=new(0f,.9f,1f,.18f),EmissiveColor=new(0f,.8f,1f,.12f)};
+        var lb=new HelixToolkit.SharpDX.LineBuilder();
+
+        void DrawQuad(Point3D a,Point3D b,Point3D c,Point3D d)
+        {
+            var mb=new HelixToolkit.Geometry.MeshBuilder();
+            mb.AddTriangle(N3(a),N3(b),N3(c));mb.AddTriangle(N3(a),N3(c),N3(d));
+            mb.AddTriangle(N3(c),N3(b),N3(a));mb.AddTriangle(N3(d),N3(c),N3(a));
+            _pg.Children.Add(new MeshGeometryModel3D{Geometry=HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(mb.ToMesh()),Material=mat,CullMode=SharpDX.Direct3D11.CullMode.None});
+            lb.AddLine(N3(a),N3(b));lb.AddLine(N3(b),N3(c));lb.AddLine(N3(c),N3(d));lb.AddLine(N3(d),N3(a));lb.AddLine(N3(a),N3(c));
+        }
+
+        DrawQuad(_rFT,_jT,_jB,_rFB);
+        DrawQuad(_lFT,_jT,_jB,_lFB);
+        DrawQuad(_jT,_sBT,_sBB,_jB);
+        lb.AddLine(N3(_jT),N3(_jB));
+        _lg.Children.Add(new LineGeometryModel3D{Geometry=lb.ToLineGeometry3D(),Color=Colors.Cyan,Thickness=2});
+
+        _hp[0]=_rFT;_hp[1]=_rFB;_hp[2]=_lFT;_hp[3]=_lFB;
+        _hp[4]=_jT; _hp[5]=_jB; _hp[6]=_sBT;_hp[7]=_sBB;
+        var hc=new HelixToolkit.Maths.Color4(0f,1f,1f,1f);
+        for(int i=0;i<NH;i++){_hm[i]=Sph(_hp[i],1.0f,hc);_hg.Children.Add(_hm[i]);}
     }
 
     private void Viewport_PreviewMouseLeftButtonDown(object s,MouseButtonEventArgs e)
@@ -65,22 +157,13 @@ public partial class LeFort1YCutWindow : Window
         var pos=e.GetPosition(MainViewport);
         if(_dragH>=0)
         {
-            var pt=CamPlane(pos,_hp[_dragH]);
-            if(!pt.HasValue)return;
-            double nx=pt.Value.X,ny=pt.Value.Y,nz=pt.Value.Z;
-            switch(_dragH)
-            {
-                case 0: _rFT=(nx,ny); _zTop=nz; break;
-                case 1: _rFB=(nx,ny); _zBot=nz; break;
-                case 2: _lFT=(nx,ny); _zTop=nz; break;
-                case 3: _lFB=(nx,ny); _zBot=nz; break;
-                // Junction: XY movable + adjusts Z
-                case 4: _junc=new(nx,ny,_junc.Z); _zTop=nz; break;
-                case 5: _junc=new(nx,ny,_junc.Z); _zBot=nz; break;
-                case 6: _sBT=(nx,ny); _zTop=nz; break;
-                case 7: _sBB=(nx,ny); _zBot=nz; break;
+            var pt=CamPlane(pos,_hp[_dragH]);if(!pt.HasValue)return;
+            switch(_dragH){
+                case 0:_rFT=pt.Value;break;case 1:_rFB=pt.Value;break;
+                case 2:_lFT=pt.Value;break;case 3:_lFB=pt.Value;break;
+                case 4:_jT=pt.Value;break; case 5:_jB=pt.Value;break;
+                case 6:_sBT=pt.Value;break;case 7:_sBB=pt.Value;break;
             }
-            if(_zBot>_zTop-3){if(_dragH%2==0)_zTop=_zBot+3;else _zBot=_zTop-3;}
             Rebuild();
         }
         else if(_dragC>=0)
@@ -103,81 +186,34 @@ public partial class LeFort1YCutWindow : Window
         if(n==4){NextBtn.IsEnabled=true;Init();}
     }
 
-    private static (double X,double Y) ExtXY(double px,double py,double pivX,double pivY,double dist)
-    {double dx=px-pivX,dy=py-pivY,l=Math.Sqrt(dx*dx+dy*dy);return l<.001?(px,py):(px+dx/l*dist,py+dy/l*dist);}
+    private void Next_Click(object s,RoutedEventArgs e){StepTitle.Text="LeFort 1 — 3-Piece: Adjust Y & Cut";StepInstructions.Text="Drag any handle to adjust. Each handle moves independently in all 3D directions. Click Perform Cut when ready.";NextBtn.Visibility=Visibility.Collapsed;CutBtn.Visibility=Visibility.Visible;CutBtn.IsEnabled=true;}
 
-    private void Init()
+    // Orient plane normal of triangle (a,b,c) to point AWAY from 'away'
+    static Vector3D TriNorm(Point3D a,Point3D b,Point3D c,Point3D away)
     {
-        var r0=_ctrl[0];var r1=_ctrl[1];var l0=_ctrl[2];var l1=_ctrl[3];
-        double rX=(r0.X+r1.X)/2,rY=(r0.Y+r1.Y)/2;
-        double lX=(l0.X+l1.X)/2,lY=(l0.Y+l1.Y)/2;
-        double jX=(rX+lX)/2,jY=(rY+lY)/2+20,jZ=(r0.Z+r1.Z+l0.Z+l1.Z)/4;
-        _junc=new(jX,jY,jZ);
-        _zTop=new[]{r0.Z,r1.Z,l0.Z,l1.Z}.Max()+20;
-        _zBot=new[]{r0.Z,r1.Z,l0.Z,l1.Z}.Min()-20;
-        _rFT=_rFB=ExtXY(rX,rY,jX,jY,15);
-        _lFT=_lFB=ExtXY(lX,lY,jX,jY,15);
-        _sBT=_sBB=(jX,jY+30);
-        _yVis=true;Rebuild();
+        var n=Norm(Cross(Sub(b,a),Sub(c,a)));
+        if(Dot(n,Sub(away,a))>0)n=new(-n.X,-n.Y,-n.Z);
+        return n;
     }
 
-    private void Rebuild()
+    // Signed distance from point P to plane through 'o' with normal 'n'
+    static double PlaneD(Point3D p,Point3D o,Vector3D n)=>Dot(Sub(p,o),n);
+
+    // Returns true if point P, projected orthogonally onto the plane of triangle (a,b,c), lands inside it.
+    static bool InsideTri(Point3D P,Point3D a,Point3D b,Point3D c,Vector3D n)
     {
-        _pg.Children.Clear();_lg.Children.Clear();_hg.Children.Clear();
-        float zt=(float)_zTop,zb=(float)_zBot;
-        float jx=(float)_junc.X,jy=(float)_junc.Y;
-        var mat=new PhongMaterial{DiffuseColor=new(0f,.9f,1f,.18f),EmissiveColor=new(0f,.8f,1f,.12f)};
-        var lb=new HelixToolkit.SharpDX.LineBuilder();
-
-
-
-        void ArmQuad(float atx,float aty,float abx,float aby)
-        {
-            // corners: (atx,aty,zt) frontTop, (jx,jy,zt) juncTop, (jx,jy,zb) juncBot, (abx,aby,zb) frontBot
-            var mb=new HelixToolkit.Geometry.MeshBuilder();
-            mb.AddTriangle(N(atx,aty,zt),N(jx,jy,zt),N(jx,jy,zb));
-            mb.AddTriangle(N(atx,aty,zt),N(jx,jy,zb),N(abx,aby,zb));
-            mb.AddTriangle(N(jx,jy,zb),N(jx,jy,zt),N(atx,aty,zt)); // back
-            mb.AddTriangle(N(abx,aby,zb),N(jx,jy,zb),N(atx,aty,zt)); // back
-            _pg.Children.Add(new MeshGeometryModel3D{Geometry=HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(mb.ToMesh()),Material=mat,CullMode=SharpDX.Direct3D11.CullMode.None});
-            // Outline: only 4 edges of the quad
-            lb.AddLine(N(atx,aty,zt),N(jx,jy,zt));   // top edge
-            lb.AddLine(N(abx,aby,zb),N(jx,jy,zb));   // bot edge
-            lb.AddLine(N(atx,aty,zt),N(abx,aby,zb)); // front vertical
-        }
-
-        // Stem: independent top/bot XY at back
-        void StemQuad(float stx,float sty,float sbx,float sby)
-        {
-            var mb=new HelixToolkit.Geometry.MeshBuilder();
-            mb.AddTriangle(N(jx,jy,zt),N(stx,sty,zt),N(sbx,sby,zb));
-            mb.AddTriangle(N(jx,jy,zt),N(sbx,sby,zb),N(jx,jy,zb));
-            mb.AddTriangle(N(sbx,sby,zb),N(stx,sty,zt),N(jx,jy,zt)); // back
-            mb.AddTriangle(N(jx,jy,zb),N(sbx,sby,zb),N(jx,jy,zt)); // back
-            _pg.Children.Add(new MeshGeometryModel3D{Geometry=HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(mb.ToMesh()),Material=mat,CullMode=SharpDX.Direct3D11.CullMode.None});
-            lb.AddLine(N(jx,jy,zt),N(stx,sty,zt));   // top
-            lb.AddLine(N(jx,jy,zb),N(sbx,sby,zb));   // bot
-            lb.AddLine(N(stx,sty,zt),N(sbx,sby,zb)); // back vertical
-        }
-
-        ArmQuad((float)_rFT.X,(float)_rFT.Y,(float)_rFB.X,(float)_rFB.Y);
-        ArmQuad((float)_lFT.X,(float)_lFT.Y,(float)_lFB.X,(float)_lFB.Y);
-        StemQuad((float)_sBT.X,(float)_sBT.Y,(float)_sBB.X,(float)_sBB.Y);
-
-        // Junction vertical (shared edge of all 3 planes)
-        lb.AddLine(N(jx,jy,zt),N(jx,jy,zb));
-        _lg.Children.Add(new LineGeometryModel3D{Geometry=lb.ToLineGeometry3D(),Color=Colors.Cyan,Thickness=2});
-
-        // Handles
-        _hp[0]=new(_rFT.X,_rFT.Y,_zTop); _hp[1]=new(_rFB.X,_rFB.Y,_zBot);
-        _hp[2]=new(_lFT.X,_lFT.Y,_zTop); _hp[3]=new(_lFB.X,_lFB.Y,_zBot);
-        _hp[4]=new(_junc.X,_junc.Y,_zTop);_hp[5]=new(_junc.X,_junc.Y,_zBot);
-        _hp[6]=new(_sBT.X,_sBT.Y,_zTop); _hp[7]=new(_sBB.X,_sBB.Y,_zBot);
-        var hc=new HelixToolkit.Maths.Color4(0f,1f,1f,1f);
-        for(int i=0;i<NH;i++){_hm[i]=Sph(_hp[i],1.0f,hc);_hg.Children.Add(_hm[i]);}
+        // Project P onto triangle plane
+        double dist=Dot(Sub(P,a),n);
+        var Pp=new Point3D(P.X-dist*n.X,P.Y-dist*n.Y,P.Z-dist*n.Z);
+        // Barycentric test via cross products (same-side method)
+        var ab=Sub(b,a);var bc=Sub(c,b);var ca=Sub(a,c);
+        var ap=Sub(Pp,a);var bp=Sub(Pp,b);var cp=Sub(Pp,c);
+        double d0=Dot(n,Cross(ab,ap));
+        double d1=Dot(n,Cross(bc,bp));
+        double d2=Dot(n,Cross(ca,cp));
+        return (d0>=0&&d1>=0&&d2>=0)||(d0<=0&&d1<=0&&d2<=0);
     }
 
-    private void Next_Click(object s,RoutedEventArgs e){StepTitle.Text="LeFort 1 — 3-Piece: Adjust Y & Cut";StepInstructions.Text="Drag handles to adjust planes. Each top/bottom handle moves independently. Click Perform Cut when ready.";NextBtn.Visibility=Visibility.Collapsed;CutBtn.Visibility=Visibility.Visible;CutBtn.IsEnabled=true;}
 
     private void Cut_Click(object s,RoutedEventArgs e)
     {
@@ -186,57 +222,53 @@ public partial class LeFort1YCutWindow : Window
         {
             int nT=_maxillaVerts.Count/3;
             var L=new List<float[]>();var R=new List<float[]>();var C=new List<float[]>();
-            double jX=_junc.X,jY=_junc.Y;
-            double rAx=(_rFT.X+_rFB.X)/2, rAy=(_rFT.Y+_rFB.Y)/2;
-            double lAx=(_lFT.X+_lFB.X)/2, lAy=(_lFT.Y+_lFB.Y)/2;
 
-            // Arm direction vectors from junction outward
-            double jToRx=rAx-jX, jToRy=rAy-jY;
-            double jToLx=lAx-jX, jToLy=lAy-jY;
+            var lMid=Lerp(_lFT,_lFB,0.5); var rMid=Lerp(_rFT,_rFB,0.5);
 
-            // Outward normal for RIGHT arm: perpendicular to jToR, pointing AWAY from left arm.
-            // Two perpendicular candidates: (jToRy, -jToRx) and (-jToRy, jToRx)
-            // Choose the one where dot with (jToL) < 0 (points away from left arm)
-            double nRx, nRy;
-            if ( jToRy*(jToLx) + (-jToRx)*(jToLy) < 0 ) { nRx= jToRy; nRy=-jToRx; }
-            else                                          { nRx=-jToRy; nRy= jToRx; }
+            // Right arm triangles (T1, T2) and their normals
+            var nR1=TriNorm(_rFT,_jT,_jB,lMid); var nR2=TriNorm(_rFT,_jB,_rFB,lMid);
+            // Left arm triangles
+            var nL1=TriNorm(_lFT,_jT,_jB,rMid); var nL2=TriNorm(_lFT,_jB,_lFB,rMid);
+            // Stem triangles (oriented toward right arm)
+            var nS1=TriNorm(_jT,_sBT,_sBB,lMid); var nS2=TriNorm(_jT,_sBB,_jB,lMid);
 
-            // Outward normal for LEFT arm: perpendicular to jToL, pointing AWAY from right arm.
-            double nLx, nLy;
-            if ( jToLy*(jToRx) + (-jToLx)*(jToRy) < 0 ) { nLx= jToLy; nLy=-jToLx; }
-            else                                          { nLx=-jToLy; nLy= jToLx; }
+            var juncMid=Lerp(_jT,_jB,0.5);
+            var stemFwd=Sub(Lerp(_sBT,_sBB,0.5),juncMid);
 
-            // Stem direction: from junction toward stem back (the posterior midline cut direction)
-            double sDx=(_sBT.X+_sBB.X)/2-jX, sDy=(_sBT.Y+_sBB.Y)/2-jY;
-
-            // Stem outward normal (for R/L split of posterior region): perpendicular to stem,
-            // pointing toward the same side as the RIGHT arm front.
-            double nSx, nSy;
-            if ( sDy*(jToRx) + (-sDx)*(jToRy) > 0 ) { nSx= sDy; nSy=-sDx; }
-            else                                      { nSx=-sDy; nSy= sDx; }
+            // Classify P against one arm: returns signed distance using FINITE plane logic.
+            // Only uses a triangle's plane if P projects inside it; otherwise uses nearest.
+            static double ArmDist(Point3D P,
+                Point3D ft,Point3D jt,Point3D jb,Point3D fb,
+                Vector3D n1,Vector3D n2)
+            {
+                bool in1=InsideTri(P,ft,jt,jb,n1);
+                bool in2=InsideTri(P,ft,jb,fb,n2);
+                if(in1&&!in2) return PlaneD(P,ft,n1);
+                if(in2&&!in1) return PlaneD(P,ft,n2);
+                // Inside both or neither: use average of both planes weighted by inverse distance
+                double d1=PlaneD(P,ft,n1), d2=PlaneD(P,ft,n2);
+                return (d1+d2)*0.5;
+            }
 
             for(int i=0;i<nT;i++)
             {
                 double cx=(_maxillaVerts[i*3][0]+(double)_maxillaVerts[i*3+1][0]+_maxillaVerts[i*3+2][0])/3;
                 double cy=(_maxillaVerts[i*3][1]+(double)_maxillaVerts[i*3+1][1]+_maxillaVerts[i*3+2][1])/3;
-                double dx=cx-jX, dy=cy-jY;
+                double cz=(_maxillaVerts[i*3][2]+(double)_maxillaVerts[i*3+1][2]+_maxillaVerts[i*3+2][2])/3;
+                var P=new Point3D(cx,cy,cz);
                 List<float[]> t;
 
-                // Determine which side of the junction this centroid is on (stem direction test)
-                bool isPosterior = dx*sDx + dy*sDy > 0;
-
-                if (isPosterior)
+                bool isPosterior=Dot(Sub(P,juncMid),stemFwd)>0;
+                if(isPosterior)
                 {
-                    // Posterior to junction: stem splits into R or L (no central)
-                    double dS = dx*nSx + dy*nSy;
-                    t = dS > 0 ? R : L;
+                    double dS=ArmDist(P,_jT,_sBT,_sBB,_jB,nS1,nS2);
+                    t=dS>0?R:L;
                 }
                 else
                 {
-                    // Anterior to junction: arm normals → R, L, or C
-                    double dR=dx*nRx+dy*nRy;
-                    double dL=dx*nLx+dy*nLy;
-                    t = dR>0 ? R : dL>0 ? L : C;
+                    double dR=ArmDist(P,_rFT,_jT,_jB,_rFB,nR1,nR2);
+                    double dL=ArmDist(P,_lFT,_jT,_jB,_lFB,nL1,nL2);
+                    t=dR>0?R:dL>0?L:C;
                 }
                 t.Add(_maxillaVerts[i*3]);t.Add(_maxillaVerts[i*3+1]);t.Add(_maxillaVerts[i*3+2]);
             }
@@ -251,11 +283,12 @@ public partial class LeFort1YCutWindow : Window
         finally{Cursor=Cursors.Arrow;}
     }
 
+
     private void Clear_Click(object s,RoutedEventArgs e)
     {
         _ctrl.Clear();foreach(var v in _ctrlVis)MainGroup.Children.Remove(v);_ctrlVis.Clear();
         _yVis=false;_pg.Children.Clear();_lg.Children.Clear();_hg.Children.Clear();
-        StepTitle.Text="LeFort 1 — 3-Piece: Place 2 Right Points";
+        StepTitle.Text="LeFort 1 — 3-Piece: Place 4 Points";
         StepInstructions.Text="Step 1: 2 points on RIGHT vestibular surface, then 2 on LEFT.";
         NextBtn.Visibility=Visibility.Visible;NextBtn.IsEnabled=false;
         CutBtn.Visibility=Visibility.Collapsed;CutBtn.IsEnabled=false;
@@ -265,7 +298,7 @@ public partial class LeFort1YCutWindow : Window
     private void Accept_Click(object s,RoutedEventArgs e){Accepted=true;DialogResult=true;Close();}
     private void Cancel_Click(object s,RoutedEventArgs e){DialogResult=false;Close();}
 
-    private bool Hit(Point pos,Point3D c,double r)=>MainViewport.FindHits(pos).Any(h=>h.ModelHit is MeshGeometryModel3D&&D(new(h.PointHit.X,h.PointHit.Y,h.PointHit.Z),c)<r+2);
+    private bool Hit(Point pos,Point3D c,double r)=>MainViewport.FindHits(pos).Any(h=>h.ModelHit is MeshGeometryModel3D&&Dist(new(h.PointHit.X,h.PointHit.Y,h.PointHit.Z),c)<r+2);
     private Point3D? HitBone(Point pos){var h=MainViewport.FindHits(pos).FirstOrDefault(x=>x.ModelHit==_boneMesh);return h==null?null:new(h.PointHit.X,h.PointHit.Y,h.PointHit.Z);}
 
     private Point3D? CamPlane(Point pos,Point3D anchor)
@@ -293,7 +326,7 @@ public partial class LeFort1YCutWindow : Window
     private MeshGeometryModel3D MkMesh(List<float[]> verts,Color col,double op)
     {
         var b=new HelixToolkit.Geometry.MeshBuilder();
-        for(int i=0;i<verts.Count;i+=3)if(i+2<verts.Count)b.AddTriangle(F(verts[i]),F(verts[i+1]),F(verts[i+2]));
+        for(int i=0;i<verts.Count;i+=3)if(i+2<verts.Count)b.AddTriangle(N3f(verts[i]),N3f(verts[i+1]),N3f(verts[i+2]));
         return new MeshGeometryModel3D{Geometry=HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(b.ToMesh()),Material=new PhongMaterial{DiffuseColor=new(col.R/255f,col.G/255f,col.B/255f,(float)op)}};
     }
 
@@ -303,7 +336,7 @@ public partial class LeFort1YCutWindow : Window
         return new MeshGeometryModel3D{Geometry=HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(b.ToMesh()),Material=new PhongMaterial{DiffuseColor=col,SpecularShininess=32f},Transform=new TranslateTransform3D(pt.X,pt.Y,pt.Z)};
     }
 
-    private static double D(Point3D a,Point3D b){double dx=a.X-b.X,dy=a.Y-b.Y,dz=a.Z-b.Z;return Math.Sqrt(dx*dx+dy*dy+dz*dz);}
-    private static System.Numerics.Vector3 N(float x,float y,float z)=>new(x,y,z);
-    private static System.Numerics.Vector3 F(float[] v)=>new(v[0],v[1],v[2]);
+    static double Dist(Point3D a,Point3D b){var d=Sub(a,b);return Math.Sqrt(d.X*d.X+d.Y*d.Y+d.Z*d.Z);}
+    static System.Numerics.Vector3 N3(Point3D p)=>new((float)p.X,(float)p.Y,(float)p.Z);
+    static System.Numerics.Vector3 N3f(float[] v)=>new(v[0],v[1],v[2]);
 }
