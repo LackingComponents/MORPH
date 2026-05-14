@@ -15,7 +15,8 @@ public class ArchCurve
     public void AddPoint(float x, float y, float z)
     {
         _ctrl.Add((x, y, z));
-        SortByAngle();
+        // Points are kept in click order — dental arches are open curves,
+        // NOT closed loops. Do NOT sort by angle.
     }
 
     public void RemoveLast()
@@ -24,18 +25,6 @@ public class ArchCurve
     }
 
     public void Clear() => _ctrl.Clear();
-
-    /// <summary>Sort control points around their centroid by azimuth (XY plane) so
-    /// the spline always sweeps the arch in a consistent left→right direction.</summary>
-    private void SortByAngle()
-    {
-        if (_ctrl.Count < 2) return;
-        float cx = 0, cy = 0;
-        foreach (var p in _ctrl) { cx += p.x; cy += p.y; }
-        cx /= _ctrl.Count; cy /= _ctrl.Count;
-        _ctrl.Sort((a, b) => MathF.Atan2(a.y - cy, a.x - cx)
-                            .CompareTo(MathF.Atan2(b.y - cy, b.x - cx)));
-    }
 
     /// <summary>Sample the Catmull-Rom spline at <paramref name="n"/> evenly-spaced
     /// parameter values. Requires ≥ 2 control points.</summary>

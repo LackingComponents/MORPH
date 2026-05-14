@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using HelixToolkit.Wpf.SharpDX;
 using OrthoPlanner.Core.Geometry;
@@ -13,16 +14,15 @@ namespace OrthoPlanner.App;
 
 public partial class SplintPlannerWindow : Window
 {
-    // ── Input meshes ──────────────────────────────────────────────────────
-    private readonly float[] _upperMesh;
-    private readonly float[] _lowerMesh;
-    private readonly MainViewModel _vm;
+    // ── Input ─────────────────────────────────────────────────────────────
+    private readonly float[] _upperMesh;  // maxilla / upper dental cast
+    private readonly float[] _lowerMesh;  // mandible / lower dental cast
 
     // ── Arch curves ───────────────────────────────────────────────────────
     private readonly ArchCurve _upperArch = new();
     private readonly ArchCurve _lowerArch = new();
 
-    // ── Marker models ─────────────────────────────────────────────────────
+    // ── Marker 3D models ─────────────────────────────────────────────────
     private readonly List<MeshGeometryModel3D> _upperMarkers = new();
     private readonly List<MeshGeometryModel3D> _lowerMarkers = new();
 
@@ -30,88 +30,106 @@ public partial class SplintPlannerWindow : Window
     private LineGeometryModel3D? _upperCurveLine;
     private LineGeometryModel3D? _lowerCurveLine;
 
-    // ── Generated splint preview (shown in both viewports) ────────────────
+    // ── Splint preview ────────────────────────────────────────────────────
     private MeshGeometryModel3D? _splintUpperPreview;
     private MeshGeometryModel3D? _splintLowerPreview;
 
-    // ── Result ─────────────────────────────────────────────────────────────
-    public bool Accepted { get; private set; }
+    // ── Headlamp handler ─────────────────────────────────────────────────
+    private EventHandler? _renderingHandler;
+
+    // ── Result ────────────────────────────────────────────────────────────
+    public bool   Accepted       { get; private set; }
     public float[]? SplintVertices { get; private set; }
 
     // ─────────────────────────────────────────────────────────────────────
-    public SplintPlannerWindow(float[] upperMesh, float[] lowerMesh, MainViewModel vm)
+    public SplintPlannerWindow(float[] upperMesh, float[] lowerMesh, MainViewModel _)
     {
-        DataContext = this;
         InitializeComponent();
 
         _upperMesh = upperMesh;
         _lowerMesh = lowerMesh;
-        _vm        = vm;
+
+        // EffectsManagers — set directly, not via binding
+        UpperViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
+        LowerViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
+
+        // Headlamp tracking (coaxial with camera, both viewports)
+        _renderingHandler = (s, _) =>
+        {
+            UpdateHeadlamp(UpperCamera, UpperHeadlamp, UpperBacklamp);
+            UpdateHeadlamp(LowerCamera, LowerHeadlamp, LowerBacklamp);
+        };
+        CompositionTarget.Rendering += _renderingHandler;
 
         Loaded += OnLoaded;
         Closed += OnClosed;
     }
 
+    private static void UpdateHeadlamp(
+        HelixToolkit.Wpf.SharpDX.PerspectiveCamera cam,
+        DirectionalLight3D front, DirectionalLight3D back)
+    {
+        if (cam == null) return;
+        var dir = cam.LookDirection;
+        if (dir.Length < 0.001) return;
+        dir.Normalize();
+        var f = new Vector3D(-dir.X, -dir.Y, -dir.Z);
+        var b = new Vector3D( dir.X,  dir.Y,  dir.Z);
+        if (Math.Abs(front.Direction.X - f.X) > 1e-4 ||
+            Math.Abs(front.Direction.Y - f.Y) > 1e-4 ||
+            Math.Abs(front.Direction.Z - f.Z) > 1e-4)
+        {
+            front.Direction = f;
+            back.Direction  = b;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  LOAD / CLOSE
+    // ═══════════════════════════════════════════════════════════
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        UpperViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
-        LowerViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
+        // Load meshes into viewports
+        UpperGroup.Children.Add(MeshHelper.BuildModel3D(_upperMesh, 240, 230, 210));
+        LowerGroup.Children.Add(MeshHelper.BuildModel3D(_lowerMesh, 240, 230, 210));
 
-        LoadMeshIntoViewport(UpperGroup, _upperMesh, 220, 200, 170);
-        LoadMeshIntoViewport(LowerGroup, _lowerMesh, 220, 140, 120);
+        // Camera: upper arch is viewed from BELOW (camera on -Z side, looking +Z)
+        // i.e. the occlusal face of the maxilla faces downward; we look up at it.
+        CenterCamera(UpperViewport, _upperMesh, lookFromBelow: true);
+        CenterCamera(LowerViewport, _lowerMesh, lookFromBelow: false);
 
-        CenterCamera(UpperViewport, UpperCamera, _upperMesh, lookFromBelow: true);
-        CenterCamera(LowerViewport, LowerCamera, _lowerMesh, lookFromBelow: false);
+        // Watertight score
+        float us = SplintEngine.WatertightScore(_upperMesh);
+        float ls = SplintEngine.WatertightScore(_lowerMesh);
+        if (us > 0.02f || ls > 0.02f)
+            QualityText.Text = $"⚠ Mesh quality: Upper {us:P0} open | Lower {ls:P0} open — tooth imprint may vary";
 
-        // Report mesh quality
-        float upperScore = SplintEngine.WatertightScore(_upperMesh);
-        float lowerScore = SplintEngine.WatertightScore(_lowerMesh);
-        UpperQualityText.Text = upperScore < 0.02f
-            ? $"Upper: ✔ Watertight ({upperScore:P1} open)"
-            : $"Upper: ⚠ {upperScore:P1} open edges";
-        LowerQualityText.Text = lowerScore < 0.02f
-            ? $"Lower: ✔ Watertight ({lowerScore:P1} open)"
-            : $"Lower: ⚠ {lowerScore:P1} open edges";
-
-        UpperQualityText.Foreground = upperScore < 0.02f
-            ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(128, 203, 196))
-            : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(255, 183, 77));
-        LowerQualityText.Foreground = lowerScore < 0.02f
-            ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(128, 203, 196))
-            : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(255, 183, 77));
+        UpdateUI();
     }
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        if (_renderingHandler != null)
+        {
+            CompositionTarget.Rendering -= _renderingHandler;
+            _renderingHandler = null;
+        }
         UpperGroup.Children.Clear();
         LowerGroup.Children.Clear();
-        if (UpperViewport.EffectsManager is IDisposable ud) { ud.Dispose(); UpperViewport.EffectsManager = null!; }
-        if (LowerViewport.EffectsManager is IDisposable ld) { ld.Dispose(); LowerViewport.EffectsManager = null!; }
+        if (UpperViewport.EffectsManager is IDisposable u) { u.Dispose(); UpperViewport.EffectsManager = null!; }
+        if (LowerViewport.EffectsManager is IDisposable l) { l.Dispose(); LowerViewport.EffectsManager = null!; }
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  MESH LOADING
+    //  CAMERA
     // ═══════════════════════════════════════════════════════════
-    private static void LoadMeshIntoViewport(GroupModel3D group, float[] mesh,
-        byte r, byte g, byte b)
+    private static void CenterCamera(Viewport3DX vp, float[] mesh, bool lookFromBelow)
     {
-        group.Children.Clear();
-        var model = MeshHelper.BuildModel3D(mesh, r, g, b, 200);
-        group.Children.Add(model);
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    //  CAMERA SETUP
-    // ═══════════════════════════════════════════════════════════
-    private static void CenterCamera(Viewport3DX vp, HelixToolkit.Wpf.SharpDX.PerspectiveCamera cam,
-        float[] mesh, bool lookFromBelow)
-    {
-        if (mesh.Length < 3) return;
+        if (mesh.Length < 3 || vp.Camera is not HelixToolkit.Wpf.SharpDX.PerspectiveCamera cam) return;
 
         float minX = float.MaxValue, maxX = float.MinValue;
         float minY = float.MaxValue, maxY = float.MinValue;
         float minZ = float.MaxValue, maxZ = float.MinValue;
-
         for (int i = 0; i + 2 < mesh.Length; i += 3)
         {
             float x = mesh[i], y = mesh[i+1], z = mesh[i+2];
@@ -123,52 +141,73 @@ public partial class SplintPlannerWindow : Window
         double cx = (minX + maxX) / 2.0;
         double cy = (minY + maxY) / 2.0;
         double cz = (minZ + maxZ) / 2.0;
-        double diag = Math.Sqrt(
-            Math.Pow(maxX - minX, 2) +
-            Math.Pow(maxY - minY, 2)) * 0.8;
-        double dist = Math.Max(diag, 20);
+        // Use XY diagonal for distance since we're looking along Z
+        double diag = Math.Sqrt(Math.Pow(maxX - minX, 2) + Math.Pow(maxY - minY, 2));
+        double dist = Math.Max(diag * 0.85, 30);
 
-        // Upper: look from below (+Z away), down → LookDirection 0,0,+1
-        // Lower: look from above (-Z away), down → LookDirection 0,0,-1
+        // Upper: camera below model looking up (+Z). Lower: camera above looking down (-Z).
         double zOffset = lookFromBelow ? (cz - dist) : (cz + dist);
         double lookZ   = lookFromBelow ? 1.0 : -1.0;
 
         cam.Position      = new Point3D(cx, cy, zOffset);
-        cam.LookDirection = new Vector3D(0, 0, lookZ);
-        cam.UpDirection   = new Vector3D(0, -1, 0);
+        cam.LookDirection = new Vector3D(0, 0, lookZ * dist);
+        cam.UpDirection   = new Vector3D(0, -1, 0);  // -Y up so arch faces correct way
 
         vp.FixedRotationPointEnabled = true;
         vp.FixedRotationPoint = new Point3D(cx, cy, cz);
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  MOUSE — POINT PLACEMENT (raycasting)
+    //  MOUSE — LEFT CLICK (add point)
     // ═══════════════════════════════════════════════════════════
-    private void UpperViewport_MouseDown(object sender, MouseButtonEventArgs e)
+    private void UpperViewport_MouseLeft(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left) return;
-        var pos = e.GetPosition(UpperViewport);
-        var hit = UpperViewport.FindHits(pos).FirstOrDefault(h => h.ModelHit is Element3D);
-        if (hit == null) return;
-
-        float x = (float)hit.PointHit.X, y = (float)hit.PointHit.Y, z = (float)hit.PointHit.Z;
-        _upperArch.AddPoint(x, y, z);
-        AddMarker(UpperGroup, _upperMarkers, x, y, z, isUpper: true);
+        if (Keyboard.Modifiers != ModifierKeys.None) return;
+        var hits = UpperViewport.FindHits(e.GetPosition(UpperViewport));
+        if (hits == null || hits.Count == 0) return;
+        var pt = hits[0].PointHit;
+        _upperArch.AddPoint((float)pt.X, (float)pt.Y, (float)pt.Z);
+        AddMarker(UpperGroup, _upperMarkers, pt, isUpper: true);
         RefreshUpperCurve();
         UpdateUI();
         e.Handled = true;
     }
 
-    private void LowerViewport_MouseDown(object sender, MouseButtonEventArgs e)
+    private void LowerViewport_MouseLeft(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left) return;
-        var pos = e.GetPosition(LowerViewport);
-        var hit = LowerViewport.FindHits(pos).FirstOrDefault(h => h.ModelHit is Element3D);
-        if (hit == null) return;
+        if (Keyboard.Modifiers != ModifierKeys.None) return;
+        var hits = LowerViewport.FindHits(e.GetPosition(LowerViewport));
+        if (hits == null || hits.Count == 0) return;
+        var pt = hits[0].PointHit;
+        _lowerArch.AddPoint((float)pt.X, (float)pt.Y, (float)pt.Z);
+        AddMarker(LowerGroup, _lowerMarkers, pt, isUpper: false);
+        RefreshLowerCurve();
+        UpdateUI();
+        e.Handled = true;
+    }
 
-        float x = (float)hit.PointHit.X, y = (float)hit.PointHit.Y, z = (float)hit.PointHit.Z;
-        _lowerArch.AddPoint(x, y, z);
-        AddMarker(LowerGroup, _lowerMarkers, x, y, z, isUpper: false);
+    // ═══════════════════════════════════════════════════════════
+    //  MOUSE — RIGHT CLICK (remove last point)
+    // ═══════════════════════════════════════════════════════════
+    private void UpperViewport_MouseRight(object sender, MouseButtonEventArgs e)
+    {
+        if (_upperMarkers.Count == 0) return;
+        var last = _upperMarkers[^1];
+        UpperGroup.Children.Remove(last);
+        _upperMarkers.RemoveAt(_upperMarkers.Count - 1);
+        _upperArch.RemoveLast();
+        RefreshUpperCurve();
+        UpdateUI();
+        e.Handled = true;
+    }
+
+    private void LowerViewport_MouseRight(object sender, MouseButtonEventArgs e)
+    {
+        if (_lowerMarkers.Count == 0) return;
+        var last = _lowerMarkers[^1];
+        LowerGroup.Children.Remove(last);
+        _lowerMarkers.RemoveAt(_lowerMarkers.Count - 1);
+        _lowerArch.RemoveLast();
         RefreshLowerCurve();
         UpdateUI();
         e.Handled = true;
@@ -177,109 +216,79 @@ public partial class SplintPlannerWindow : Window
     // ═══════════════════════════════════════════════════════════
     //  MARKERS
     // ═══════════════════════════════════════════════════════════
-    private static void AddMarker(GroupModel3D group, List<MeshGeometryModel3D> list,
-        float x, float y, float z, bool isUpper)
+    private static MeshGeometryModel3D CreateSphere(System.Numerics.Vector3 pos,
+        System.Windows.Media.Color color)
     {
         var builder = new HelixToolkit.Geometry.MeshBuilder();
-        builder.AddSphere(new System.Numerics.Vector3(0, 0, 0), 1f);
+        builder.AddSphere(System.Numerics.Vector3.Zero, 1.5f);
         var mat = new PhongMaterial
         {
-            DiffuseColor = isUpper
-                ? new HelixToolkit.Maths.Color4(0.3f, 0.9f, 1f, 1f)    // cyan-blue
-                : new HelixToolkit.Maths.Color4(1f,   0.7f, 0.2f, 1f)  // amber
+            DiffuseColor     = new HelixToolkit.Maths.Color4(color.R/255f, color.G/255f, color.B/255f, 1f),
+            SpecularColor    = new HelixToolkit.Maths.Color4(0.8f, 0.8f, 0.8f, 1f),
+            SpecularShininess = 32f
         };
-        var model = new MeshGeometryModel3D
+        return new MeshGeometryModel3D
         {
             Geometry  = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh()),
             Material  = mat,
-            Transform = new TranslateTransform3D(x, y, z)
+            Transform = new TranslateTransform3D(pos.X, pos.Y, pos.Z)
         };
-        list.Add(model);
-        group.Children.Add(model);
+    }
+
+    private static void AddMarker(GroupModel3D group, List<MeshGeometryModel3D> list,
+        System.Numerics.Vector3 pt, bool isUpper)
+    {
+        var color = isUpper
+            ? System.Windows.Media.Color.FromRgb(100, 220, 255)  // cyan-blue for upper
+            : System.Windows.Media.Color.FromRgb(255, 160, 60);  // amber for lower
+        var sphere = CreateSphere(pt, color);
+        list.Add(sphere);
+        group.Children.Add(sphere);
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  CURVE PREVIEW LINES
+    //  CURVE PREVIEW
     // ═══════════════════════════════════════════════════════════
     private void RefreshUpperCurve()
     {
-        if (_upperCurveLine != null) UpperGroup.Children.Remove(_upperCurveLine);
-        _upperCurveLine = null;
+        if (_upperCurveLine != null) { UpperGroup.Children.Remove(_upperCurveLine); _upperCurveLine = null; }
         if (_upperArch.ControlPointCount < 2) return;
-
-        var pts = _upperArch.Sample(100);
-        _upperCurveLine = BuildCurveLine(SplintEngine.CurveToLineStrip(pts),
-            new HelixToolkit.Maths.Color4(0.3f, 0.9f, 1f, 1f));
+        _upperCurveLine = BuildCurveLine(_upperArch.Sample(120),
+            System.Windows.Media.Color.FromRgb(100, 220, 255));
         UpperGroup.Children.Add(_upperCurveLine);
     }
 
     private void RefreshLowerCurve()
     {
-        if (_lowerCurveLine != null) LowerGroup.Children.Remove(_lowerCurveLine);
-        _lowerCurveLine = null;
+        if (_lowerCurveLine != null) { LowerGroup.Children.Remove(_lowerCurveLine); _lowerCurveLine = null; }
         if (_lowerArch.ControlPointCount < 2) return;
-
-        var pts = _lowerArch.Sample(100);
-        _lowerCurveLine = BuildCurveLine(SplintEngine.CurveToLineStrip(pts),
-            new HelixToolkit.Maths.Color4(1f, 0.7f, 0.2f, 1f));
+        _lowerCurveLine = BuildCurveLine(_lowerArch.Sample(120),
+            System.Windows.Media.Color.FromRgb(255, 160, 60));
         LowerGroup.Children.Add(_lowerCurveLine);
     }
 
-    private static LineGeometryModel3D BuildCurveLine(float[] lineStrip,
-        HelixToolkit.Maths.Color4 color)
+    private static LineGeometryModel3D BuildCurveLine(
+        List<(float x, float y, float z)> pts, System.Windows.Media.Color color)
     {
         var lb = new HelixToolkit.SharpDX.LineBuilder();
-        for (int i = 0; i + 5 < lineStrip.Length; i += 6)
+        for (int i = 0; i < pts.Count - 1; i++)
             lb.AddLine(
-                new System.Numerics.Vector3(lineStrip[i],   lineStrip[i+1], lineStrip[i+2]),
-                new System.Numerics.Vector3(lineStrip[i+3], lineStrip[i+4], lineStrip[i+5]));
-        return new LineGeometryModel3D
-        {
-            Geometry  = lb.ToLineGeometry3D(),
-            Color     = System.Windows.Media.Color.FromArgb(
-                (byte)(color.Alpha * 255), (byte)(color.Red * 255),
-                (byte)(color.Green * 255), (byte)(color.Blue * 255)),
-            Thickness = 2.5
-        };
+                new System.Numerics.Vector3(pts[i].x,   pts[i].y,   pts[i].z),
+                new System.Numerics.Vector3(pts[i+1].x, pts[i+1].y, pts[i+1].z));
+        return new LineGeometryModel3D { Geometry = lb.ToLineGeometry3D(), Color = color, Thickness = 2.5 };
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  UI STATE
-    // ═══════════════════════════════════════════════════════════
-    private void UpdateUI()
-    {
-        // Refresh point lists
-        UpperPointsList.Items.Clear();
-        var uSample = _upperArch.Sample(1000);  // just count; reuse sampled pts
-        for (int i = 0; i < _upperMarkers.Count; i++)
-            UpperPointsList.Items.Add($"U{i+1}");
-
-        LowerPointsList.Items.Clear();
-        for (int i = 0; i < _lowerMarkers.Count; i++)
-            LowerPointsList.Items.Add($"L{i+1}");
-
-        bool ready = _upperArch.ControlPointCount >= 3 && _lowerArch.ControlPointCount >= 3;
-        GenerateBtn.IsEnabled = ready;
-
-        if (_upperArch.ControlPointCount < 3)
-            InstructionText.Text = $"Place ≥ 3 points on UPPER arch. ({_upperArch.ControlPointCount} placed)";
-        else if (_lowerArch.ControlPointCount < 3)
-            InstructionText.Text = $"Place ≥ 3 points on LOWER arch. ({_lowerArch.ControlPointCount} placed)";
-        else
-            InstructionText.Text = $"Both arches defined ({_upperArch.ControlPointCount}U / {_lowerArch.ControlPointCount}L). Click Generate.";
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    //  SLIDER CALLBACKS
+    //  SLIDERS
     // ═══════════════════════════════════════════════════════════
     private void ThicknessSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
-        => ThicknessLabel.Text = e.NewValue.ToString("F1");
+        => ThicknessLabel.Text = $"{e.NewValue:F1} mm";
 
     private void PenetrationSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
-        => PenetrationLabel.Text = e.NewValue.ToString("F1");
+        => PenetrationLabel.Text = $"{e.NewValue:F1} mm";
 
     // ═══════════════════════════════════════════════════════════
-    //  CLEAR BUTTONS
+    //  CLEAR
     // ═══════════════════════════════════════════════════════════
     private void ClearUpper_Click(object s, RoutedEventArgs e)
     {
@@ -300,21 +309,37 @@ public partial class SplintPlannerWindow : Window
     }
 
     // ═══════════════════════════════════════════════════════════
+    //  UI STATE
+    // ═══════════════════════════════════════════════════════════
+    private void UpdateUI()
+    {
+        int u = _upperArch.ControlPointCount;
+        int l = _lowerArch.ControlPointCount;
+        PointCountText.Text = $"Upper: {u} pts  |  Lower: {l} pts";
+        GenerateBtn.IsEnabled = u >= 3 && l >= 3;
+
+        if (u < 3)
+            StepInstructions.Text = $"Place ≥ 3 points on the UPPER arch ({u} placed). Click from molar to molar, front of arch.";
+        else if (l < 3)
+            StepInstructions.Text = $"Place ≥ 3 points on the LOWER arch ({l} placed). Click from molar to molar, front of arch.";
+        else
+            StepInstructions.Text = $"Both arches defined ({u} upper / {l} lower). Adjust sliders then click Generate.";
+    }
+
+    // ═══════════════════════════════════════════════════════════
     //  GENERATE
     // ═══════════════════════════════════════════════════════════
     private async void GenerateBtn_Click(object s, RoutedEventArgs e)
     {
         GenerateBtn.IsEnabled = false;
-        AcceptBtn.IsEnabled   = false;
-        StatusText.Text = "Generating splint geometry…";
+        AcceptBtn.Visibility  = Visibility.Collapsed;
+        StatusText.Text = "Generating…";
 
         float thickness   = (float)ThicknessSlider.Value;
         float penetration = (float)PenetrationSlider.Value;
-
-        var upperSampled = _upperArch.Sample(160);
-        var lowerSampled = _lowerArch.Sample(160);
-        float[] uMesh = _upperMesh;
-        float[] lMesh = _lowerMesh;
+        var upperSampled  = _upperArch.Sample(160);
+        var lowerSampled  = _lowerArch.Sample(160);
+        float[] uMesh = _upperMesh, lMesh = _lowerMesh;
 
         float[]? splint = null;
         try
@@ -323,8 +348,7 @@ public partial class SplintPlannerWindow : Window
                 upperSampled, lowerSampled,
                 labiolingualMm: thickness,
                 penetrationMm:  penetration,
-                upperMesh: uMesh,
-                lowerMesh: lMesh,
+                upperMesh: uMesh, lowerMesh: lMesh,
                 sampleCount: 160));
         }
         catch (Exception ex)
@@ -336,7 +360,7 @@ public partial class SplintPlannerWindow : Window
 
         if (splint == null || splint.Length < 9)
         {
-            StatusText.Text = "Generation failed — no geometry produced.";
+            StatusText.Text = "No geometry produced.";
             GenerateBtn.IsEnabled = true;
             return;
         }
@@ -347,16 +371,16 @@ public partial class SplintPlannerWindow : Window
         void ShowPreview(GroupModel3D group, ref MeshGeometryModel3D? prev)
         {
             if (prev != null) group.Children.Remove(prev);
-            prev = MeshHelper.BuildModel3D(splint, 150, 200, 255, 140);
+            prev = MeshHelper.BuildModel3D(splint, 80, 160, 255, 130);
             group.Children.Add(prev);
         }
-
         ShowPreview(UpperGroup, ref _splintUpperPreview);
         ShowPreview(LowerGroup, ref _splintLowerPreview);
 
-        int triCount = splint.Length / 9;
-        StatusText.Text = $"Splint generated: {triCount:N0} triangles.\nReview and click Accept.";
-        AcceptBtn.IsEnabled   = true;
+        StepTitle.Text = "Step 2: Review Splint";
+        StepInstructions.Text = "Blue = splint solid (translucent). Rotate to inspect. Click Accept to add to the model list.";
+        StatusText.Text = $"{splint.Length / 9:N0} triangles";
+        AcceptBtn.Visibility  = Visibility.Visible;
         GenerateBtn.IsEnabled = true;
     }
 
@@ -366,13 +390,25 @@ public partial class SplintPlannerWindow : Window
     private void AcceptBtn_Click(object s, RoutedEventArgs e)
     {
         Accepted = true;
+        DialogResult = true;
         Close();
     }
 
     private void CancelBtn_Click(object s, RoutedEventArgs e)
     {
+        if (AcceptBtn.Visibility == Visibility.Visible)
+        {
+            // Step back: remove preview, let user tweak
+            if (_splintUpperPreview != null) { UpperGroup.Children.Remove(_splintUpperPreview); _splintUpperPreview = null; }
+            if (_splintLowerPreview != null) { LowerGroup.Children.Remove(_splintLowerPreview); _splintLowerPreview = null; }
+            SplintVertices = null;
+            AcceptBtn.Visibility = Visibility.Collapsed;
+            StepTitle.Text = "Step 1: Place ≥ 3 points on each arch";
+            StepInstructions.Text = "Adjust points or sliders then click Generate again.";
+            return;
+        }
         Accepted = false;
-        SplintVertices = null;
+        DialogResult = false;
         Close();
     }
 }
