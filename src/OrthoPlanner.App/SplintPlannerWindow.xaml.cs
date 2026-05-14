@@ -38,8 +38,12 @@ public partial class SplintPlannerWindow : Window
     private MeshGeometryModel3D? _splintUpperPreview;
     private MeshGeometryModel3D? _splintLowerPreview;
 
-    // ── Headlamp handler ─────────────────────────────────────────────────
+    // ── Headlamp handler ────────────────────────────────────────────────────
     private EventHandler? _renderingHandler;
+
+    // ── Drag state ────────────────────────────────────────────────────────
+    private bool _draggingUpper, _draggingLower;
+    private int  _dragIdxUpper = -1, _dragIdxLower = -1;
 
     // ── Result ────────────────────────────────────────────────────────────
     public bool   Accepted       { get; private set; }
@@ -162,13 +166,22 @@ public partial class SplintPlannerWindow : Window
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  MOUSE — LEFT CLICK (add point)
+    //  MOUSE — LEFT CLICK (add point) / DRAG (move point)
     // ═══════════════════════════════════════════════════════════
     private void UpperViewport_MouseLeft(object sender, MouseButtonEventArgs e)
     {
         if (Keyboard.Modifiers != ModifierKeys.None) return;
         var hits = UpperViewport.FindHits(e.GetPosition(UpperViewport));
         if (hits == null || hits.Count == 0) return;
+
+        // Clicked on an existing marker? → start drag
+        foreach (var hit in hits)
+        {
+            int idx = _upperMarkers.IndexOf(hit.ModelHit as MeshGeometryModel3D);
+            if (idx >= 0) { _draggingUpper = true; _dragIdxUpper = idx; e.Handled = true; return; }
+        }
+
+        // Clicked on the mesh → add new point
         var pt = hits[0].PointHit;
         _upperArch.AddPoint((float)pt.X, (float)pt.Y, (float)pt.Z);
         AddMarker(UpperGroup, _upperMarkers, pt, isUpper: true);
@@ -182,6 +195,13 @@ public partial class SplintPlannerWindow : Window
         if (Keyboard.Modifiers != ModifierKeys.None) return;
         var hits = LowerViewport.FindHits(e.GetPosition(LowerViewport));
         if (hits == null || hits.Count == 0) return;
+
+        foreach (var hit in hits)
+        {
+            int idx = _lowerMarkers.IndexOf(hit.ModelHit as MeshGeometryModel3D);
+            if (idx >= 0) { _draggingLower = true; _dragIdxLower = idx; e.Handled = true; return; }
+        }
+
         var pt = hits[0].PointHit;
         _lowerArch.AddPoint((float)pt.X, (float)pt.Y, (float)pt.Z);
         AddMarker(LowerGroup, _lowerMarkers, pt, isUpper: false);
@@ -191,15 +211,59 @@ public partial class SplintPlannerWindow : Window
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  MOUSE — RIGHT CLICK (remove last point)
+    //  MOUSE — DRAG (move existing point)
+    // ═══════════════════════════════════════════════════════════
+    private void UpperViewport_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_draggingUpper || _dragIdxUpper < 0) return;
+        var hits = UpperViewport.FindHits(e.GetPosition(UpperViewport));
+        if (hits == null) return;
+        // Skip hits on markers
+        foreach (var hit in hits)
+        {
+            if (_upperMarkers.Contains(hit.ModelHit as MeshGeometryModel3D)) continue;
+            var pt = hit.PointHit;
+            _upperArch.UpdatePoint(_dragIdxUpper, (float)pt.X, (float)pt.Y, (float)pt.Z);
+            _upperMarkers[_dragIdxUpper].Transform = new TranslateTransform3D(pt.X, pt.Y, pt.Z);
+            RefreshUpperCurve();
+            e.Handled = true;
+            break;
+        }
+    }
+
+    private void LowerViewport_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_draggingLower || _dragIdxLower < 0) return;
+        var hits = LowerViewport.FindHits(e.GetPosition(LowerViewport));
+        if (hits == null) return;
+        foreach (var hit in hits)
+        {
+            if (_lowerMarkers.Contains(hit.ModelHit as MeshGeometryModel3D)) continue;
+            var pt = hit.PointHit;
+            _lowerArch.UpdatePoint(_dragIdxLower, (float)pt.X, (float)pt.Y, (float)pt.Z);
+            _lowerMarkers[_dragIdxLower].Transform = new TranslateTransform3D(pt.X, pt.Y, pt.Z);
+            RefreshLowerCurve();
+            e.Handled = true;
+            break;
+        }
+    }
+
+    private void UpperViewport_MouseLeftUp(object sender, MouseButtonEventArgs e)
+    { _draggingUpper = false; _dragIdxUpper = -1; }
+
+    private void LowerViewport_MouseLeftUp(object sender, MouseButtonEventArgs e)
+    { _draggingLower = false; _dragIdxLower = -1; }
+
+    // ═══════════════════════════════════════════════════════════
+    //  MOUSE — RIGHT CLICK (remove nearest point)
     // ═══════════════════════════════════════════════════════════
     private void UpperViewport_MouseRight(object sender, MouseButtonEventArgs e)
     {
-        if (_upperMarkers.Count == 0) return;
-        var last = _upperMarkers[^1];
-        UpperGroup.Children.Remove(last);
-        _upperMarkers.RemoveAt(_upperMarkers.Count - 1);
-        _upperArch.RemoveLast();
+        int idx = FindNearestMarker(_upperArch, e.GetPosition(UpperViewport), UpperViewport);
+        if (idx < 0) return;
+        UpperGroup.Children.Remove(_upperMarkers[idx]);
+        _upperMarkers.RemoveAt(idx);
+        _upperArch.RemoveAt(idx);
         RefreshUpperCurve();
         UpdateUI();
         e.Handled = true;
@@ -207,14 +271,33 @@ public partial class SplintPlannerWindow : Window
 
     private void LowerViewport_MouseRight(object sender, MouseButtonEventArgs e)
     {
-        if (_lowerMarkers.Count == 0) return;
-        var last = _lowerMarkers[^1];
-        LowerGroup.Children.Remove(last);
-        _lowerMarkers.RemoveAt(_lowerMarkers.Count - 1);
-        _lowerArch.RemoveLast();
+        int idx = FindNearestMarker(_lowerArch, e.GetPosition(LowerViewport), LowerViewport);
+        if (idx < 0) return;
+        LowerGroup.Children.Remove(_lowerMarkers[idx]);
+        _lowerMarkers.RemoveAt(idx);
+        _lowerArch.RemoveAt(idx);
         RefreshLowerCurve();
         UpdateUI();
         e.Handled = true;
+    }
+
+    /// <summary>Returns the index of the control point nearest to the clicked screen position.</summary>
+    private static int FindNearestMarker(ArchCurve arch, System.Windows.Point screenPt, Viewport3DX vp)
+    {
+        int best = -1;
+        float bestDist = float.MaxValue;
+        // Use nearest in 3D to any hit point
+        var hits = vp.FindHits(screenPt);
+        if (hits == null || hits.Count == 0) return -1;
+        var clickPt3 = hits[0].PointHit;
+        for (int i = 0; i < arch.ControlPointCount; i++)
+        {
+            var p = arch.GetPoint(i);
+            float dx=(float)(p.x-clickPt3.X), dy=(float)(p.y-clickPt3.Y), dz=(float)(p.z-clickPt3.Z);
+            float d = dx*dx+dy*dy+dz*dz;
+            if (d < bestDist) { bestDist=d; best=i; }
+        }
+        return best;
     }
 
     // ═══════════════════════════════════════════════════════════

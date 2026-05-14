@@ -11,8 +11,14 @@ public class ArchCurve
     public int ControlPointCount => _ctrl.Count;
 
     public void AddPoint(float x, float y, float z) => _ctrl.Add((x, y, z));
-    public void RemoveLast() { if (_ctrl.Count > 0) _ctrl.RemoveAt(_ctrl.Count - 1); }
+    public void RemoveLast()  { if (_ctrl.Count > 0) _ctrl.RemoveAt(_ctrl.Count - 1); }
+    public void RemoveAt(int i) { if (i >= 0 && i < _ctrl.Count) _ctrl.RemoveAt(i); }
     public void Clear() => _ctrl.Clear();
+    public (float x,float y,float z) GetPoint(int i) => _ctrl[i];
+    public void UpdatePoint(int i, float x, float y, float z)
+    {
+        if (i >= 0 && i < _ctrl.Count) _ctrl[i] = (x, y, z);
+    }
 
     public List<(float x, float y, float z)> Sample(int n = 200)
     {
@@ -79,17 +85,29 @@ public static class SplintEngine
     private static (float x,float y,float z)[] ComputeNormals(
         List<(float x,float y,float z)> curve, int n)
     {
-        var nor = new (float x,float y,float z)[n];
+        // Arch centroid in XY — used to ensure normals point AWAY from the arch center
+        float cx = 0, cy = 0;
+        foreach (var p in curve) { cx += p.x; cy += p.y; }
+        cx /= curve.Count; cy /= curve.Count;
+
+        var result = new (float x,float y,float z)[n];
         for (int i = 0; i < n; i++)
         {
             int prev=Math.Max(0,i-1), next=Math.Min(n-1,i+1);
             float tx=curve[next].x-curve[prev].x, ty=curve[next].y-curve[prev].y;
             float len=MathF.Sqrt(tx*tx+ty*ty);
             if (len<1e-6f){tx=1;ty=0;} else {tx/=len;ty/=len;}
-            // N = T × Z  →  (ty, -tx, 0)
-            nor[i]=(ty,-tx,0f);
+
+            // N = T × Z = (ty, -tx, 0)
+            float nx=ty, ny=-tx;
+
+            // Flip if pointing toward centroid instead of away
+            float dcx=curve[i].x-cx, dcy=curve[i].y-cy;
+            if (nx*dcx + ny*dcy < 0) { nx=-nx; ny=-ny; }
+
+            result[i]=(nx,ny,0f);
         }
-        return nor;
+        return result;
     }
 
     // ── Flat ribbon mesh — shows labio-lingual footprint on arch surface ──

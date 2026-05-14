@@ -42,7 +42,9 @@
                                     CameraRotationMode="Turnball" ModelUpDirection="0,0,1"
                                     ShowViewCube="False" IsInertiaEnabled="False"
                                     PreviewMouseLeftButtonDown="UpperViewport_MouseLeft"
-                                    PreviewMouseRightButtonDown="UpperViewport_MouseRight">
+                                    PreviewMouseRightButtonDown="UpperViewport_MouseRight"
+                                    PreviewMouseMove="UpperViewport_MouseMove"
+                                    PreviewMouseLeftButtonUp="UpperViewport_MouseLeftUp">
                         <hx:Viewport3DX.Camera>
                             <hx:PerspectiveCamera x:Name="UpperCamera"
                                                   Position="0,0,-250" LookDirection="0,0,1"
@@ -79,7 +81,9 @@
                                     CameraRotationMode="Turnball" ModelUpDirection="0,0,1"
                                     ShowViewCube="False" IsInertiaEnabled="False"
                                     PreviewMouseLeftButtonDown="LowerViewport_MouseLeft"
-                                    PreviewMouseRightButtonDown="LowerViewport_MouseRight">
+                                    PreviewMouseRightButtonDown="LowerViewport_MouseRight"
+                                    PreviewMouseMove="LowerViewport_MouseMove"
+                                    PreviewMouseLeftButtonUp="LowerViewport_MouseLeftUp">
                         <hx:Viewport3DX.Camera>
                             <hx:PerspectiveCamera x:Name="LowerCamera"
                                                   Position="0,0,250" LookDirection="0,0,-1"
