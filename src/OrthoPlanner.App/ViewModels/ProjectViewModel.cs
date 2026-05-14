@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Windows;
 using CommunityToolkit.Mvvm.Input;
 using OrthoPlanner.Core.Imaging;
@@ -203,6 +203,12 @@ public partial class MainViewModel
                     AxialIndex = vol.Depth / 2;
                     CoronalIndex = vol.Height / 2;
                     SagittalIndex = vol.Width / 2;
+
+                    // Restore physical aspect ratios so MPR views are not stretched
+                    AxialDisplayHeight    = new System.Windows.GridLength(vol.Height * vol.Spacing[1], System.Windows.GridUnitType.Star);
+                    CoronalDisplayHeight  = new System.Windows.GridLength(vol.Depth  * vol.Spacing[2], System.Windows.GridUnitType.Star);
+                    SagittalDisplayHeight = new System.Windows.GridLength(vol.Depth  * vol.Spacing[2], System.Windows.GridUnitType.Star);
+
                     UpdateHistograms();
                     UpdateAllSlices();
                 }
