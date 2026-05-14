@@ -205,6 +205,24 @@ public static class SplintEngine
         int n = upper.Count;
         if (n < 2) return Array.Empty<float>();
 
+        // ── Direction alignment ──────────────────────────────────────────────
+        // The upper arch is viewed from BELOW (camera flipped), so the user
+        // traverses it in the opposite anatomical direction to the lower arch.
+        // Compare endpoint distances to detect and correct the inversion.
+        {
+            var u0=upper[0]; var u1=upper[n-1];
+            var l0=lower[0]; var l1=lower[n-1];
+            float dxS=(u0.x-l0.x), dyS=(u0.y-l0.y);  // start-to-start
+            float dxE=(u1.x-l1.x), dyE=(u1.y-l1.y);  // end-to-end
+            float distSame = dxS*dxS+dyS*dyS + dxE*dxE+dyE*dyE;
+
+            float dxSR=(u0.x-l1.x), dySR=(u0.y-l1.y); // start-to-end
+            float dxER=(u1.x-l0.x), dyER=(u1.y-l0.y); // end-to-start
+            float distRev  = dxSR*dxSR+dySR*dySR + dxER*dxER+dyER*dyER;
+
+            if (distRev < distSame) lower.Reverse();
+        }
+
         float half = labiolingualMm * 0.5f;
 
         // Per-ring outward normals from each curve
