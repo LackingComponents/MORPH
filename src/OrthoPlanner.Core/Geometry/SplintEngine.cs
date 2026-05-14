@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace OrthoPlanner.Core.Geometry;
 
@@ -129,51 +130,102 @@ public static class SplintEngine
     /// The bottom surface is offset downward by thicknessMm.
     /// Width is labiolingualMm.
     /// </summary>
+
+    /// <summary>
+    /// Re-samples a curve at <paramref name="n"/> uniformly-spaced arc-length positions.
+    /// This ensures upper[i] and lower[i] correspond to the same fractional position
+    /// along the arch, regardless of where the user placed control points.
+    /// </summary>
+    private static List<(float x,float y,float z)> ResampleByArcLength(
+        List<(float x,float y,float z)> curve, int n)
+    {
+        int m = curve.Count;
+        if (m == 0) return new();
+        if (m == 1) return Enumerable.Repeat(curve[0], n).ToList();
+
+        // Build cumulative arc-length table
+        var lens = new float[m];
+        for (int i = 1; i < m; i++)
+        {
+            float dx=curve[i].x-curve[i-1].x, dy=curve[i].y-curve[i-1].y, dz=curve[i].z-curve[i-1].z;
+            lens[i] = lens[i-1] + MathF.Sqrt(dx*dx + dy*dy + dz*dz);
+        }
+        float total = lens[m-1];
+        if (total < 1e-6f) return Enumerable.Repeat(curve[0], n).ToList();
+        for (int i = 0; i < m; i++) lens[i] /= total;  // normalize to [0,1]
+
+        var result = new List<(float,float,float)>(n);
+        int seg = 0;
+        for (int i = 0; i < n; i++)
+        {
+            float t = (float)i / Math.Max(n-1, 1);
+            while (seg < m-2 && lens[seg+1] < t) seg++;
+            float span = lens[seg+1] - lens[seg];
+            float u = span < 1e-8f ? 0f : Math.Clamp((t - lens[seg]) / span, 0f, 1f);
+            var a=curve[seg]; var b=curve[Math.Min(seg+1,m-1)];
+            result.Add((a.x+u*(b.x-a.x), a.y+u*(b.y-a.y), a.z+u*(b.z-a.z)));
+        }
+        return result;
+    }
+
     public static float[] GenerateSplint(
         List<(float x,float y,float z)> upperCurve,
-        List<(float x,float y,float z)> lowerCurve,   // reserved for future imprint
+        List<(float x,float y,float z)> lowerCurve,
         float labiolingualMm = 8f,
-        float penetrationMm  = 3f,     // used as splint thickness here
+        float penetrationMm  = 3f,
         float[]? upperMesh   = null,
         float[]? lowerMesh   = null,
         int sampleCount      = 160)
     {
-        int n = Math.Min(sampleCount, upperCurve.Count);
+        if (upperCurve.Count < 2 || lowerCurve.Count < 2) return Array.Empty<float>();
+
+        // Re-sample both curves at the SAME arc-length positions so
+        // upper[i] and lower[i] correspond to the same fractional position
+        // along the arch — this is what makes the horseshoe connect cleanly.
+        var upper = ResampleByArcLength(upperCurve, sampleCount);
+        var lower = ResampleByArcLength(lowerCurve, sampleCount);
+        int n = upper.Count;
         if (n < 2) return Array.Empty<float>();
 
         float half = labiolingualMm * 0.5f;
-        float thick = penetrationMm;  // slider value = vertical thickness
 
-        var nor = ComputeNormals(upperCurve, n);
+        // Per-ring outward normals from each curve
+        var norU = ComputeNormals(upper, n);
+        var norL = ComputeNormals(lower, n);
 
-        // 4 strips: top-outer, top-inner, bot-outer, bot-inner
-        var to_ = new (float x,float y,float z)[n]; // top outer
-        var ti_ = new (float x,float y,float z)[n]; // top inner
-        var bo_ = new (float x,float y,float z)[n]; // bot outer
-        var bi_ = new (float x,float y,float z)[n]; // bot inner
+        // 4 corner strips:
+        //   TO = top-outer  (upper arch, labial/buccal side)
+        //   TI = top-inner  (upper arch, lingual/palatal side)
+        //   BO = bot-outer  (lower arch, labial/buccal side)
+        //   BI = bot-inner  (lower arch, lingual/palatal side)
+        var TO = new (float x,float y,float z)[n];
+        var TI = new (float x,float y,float z)[n];
+        var BO = new (float x,float y,float z)[n];
+        var BI = new (float x,float y,float z)[n];
 
-        for (int i=0; i<n; i++)
+        for (int i = 0; i < n; i++)
         {
-            var p = upperCurve[i]; var N = nor[i];
-            to_[i] = (p.x+N.x*half, p.y+N.y*half, p.z);
-            ti_[i] = (p.x-N.x*half, p.y-N.y*half, p.z);
-            bo_[i] = (p.x+N.x*half, p.y+N.y*half, p.z-thick);
-            bi_[i] = (p.x-N.x*half, p.y-N.y*half, p.z-thick);
+            var u = upper[i]; var nu = norU[i];
+            var l = lower[i]; var nl = norL[i];
+            TO[i] = (u.x + nu.x*half, u.y + nu.y*half, u.z);
+            TI[i] = (u.x - nu.x*half, u.y - nu.y*half, u.z);
+            BO[i] = (l.x + nl.x*half, l.y + nl.y*half, l.z);
+            BI[i] = (l.x - nl.x*half, l.y - nl.y*half, l.z);
         }
 
-        var tris = new List<float>(n*24*3);
+        var tris = new List<float>(n * 6 * 2 * 9);
 
-        for (int i=0; i<n-1; i++)
+        for (int i = 0; i < n - 1; i++)
         {
-            int j=i+1;
-            AddQuad(tris, to_[i],to_[j],bo_[j],bo_[i]);            // outer wall
-            AddQuad(tris, ti_[j],ti_[i],bi_[i],bi_[j]);            // inner wall
-            AddQuad(tris, ti_[i],to_[i],to_[j],ti_[j]);            // top face
-            AddQuad(tris, bo_[i],bo_[j],bi_[j],bi_[i]);            // bottom face
+            int j = i + 1;
+            AddQuad(tris, TO[i], TO[j], BO[j], BO[i]);   // outer wall
+            AddQuad(tris, TI[j], TI[i], BI[i], BI[j]);   // inner wall
+            AddQuad(tris, TI[i], TO[i], TO[j], TI[j]);   // top face (upper teeth)
+            AddQuad(tris, BO[i], BO[j], BI[j], BI[i]);   // bottom face (lower teeth)
         }
         // End caps
-        AddQuad(tris, to_[0],ti_[0],bi_[0],bo_[0]);
-        AddQuad(tris, ti_[n-1],to_[n-1],bo_[n-1],bi_[n-1]);
+        AddQuad(tris, TO[0],   TI[0],   BI[0],   BO[0]);
+        AddQuad(tris, TI[n-1], TO[n-1], BO[n-1], BI[n-1]);
 
         return tris.ToArray();
     }
