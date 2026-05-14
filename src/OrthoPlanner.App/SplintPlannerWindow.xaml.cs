@@ -254,7 +254,7 @@ public partial class SplintPlannerWindow : Window
         if (_upperCurveLine != null) { UpperGroup.Children.Remove(_upperCurveLine); _upperCurveLine = null; }
         if (_upperArch.ControlPointCount < 2) return;
         _upperCurveLine = BuildCurveLine(_upperArch.Sample(120),
-            System.Windows.Media.Color.FromRgb(100, 220, 255));
+            System.Windows.Media.Color.FromRgb(0, 188, 212));   // teal
         UpperGroup.Children.Add(_upperCurveLine);
     }
 
@@ -263,7 +263,7 @@ public partial class SplintPlannerWindow : Window
         if (_lowerCurveLine != null) { LowerGroup.Children.Remove(_lowerCurveLine); _lowerCurveLine = null; }
         if (_lowerArch.ControlPointCount < 2) return;
         _lowerCurveLine = BuildCurveLine(_lowerArch.Sample(120),
-            System.Windows.Media.Color.FromRgb(255, 160, 60));
+            System.Windows.Media.Color.FromRgb(0, 188, 212));   // teal
         LowerGroup.Children.Add(_lowerCurveLine);
     }
 

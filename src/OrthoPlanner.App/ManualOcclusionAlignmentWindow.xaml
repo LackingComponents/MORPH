@@ -32,7 +32,7 @@
             <Border Grid.Column="0" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4">
                 <Grid>
                     <hx:Viewport3DX x:Name="BoneViewport" BackgroundColor="#FF0E1420"
-                                    ShowCoordinateSystem="True" CoordinateSystemLabelForeground="White"
+                                    ShowCoordinateSystem="True" CoordinateSystemLabelForeground="#00000000"
                                     ZoomExtentsWhenLoaded="False"
                                     IsRotationEnabled="True" IsPanEnabled="True" IsZoomEnabled="True"
                                     RotateAroundMouseDownPoint="False"
@@ -65,7 +65,7 @@
             <Border Grid.Column="2" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4">
                 <Grid>
                     <hx:Viewport3DX x:Name="OccViewport" BackgroundColor="#FF0E1420"
-                                    ShowCoordinateSystem="True" CoordinateSystemLabelForeground="White"
+                                    ShowCoordinateSystem="True" CoordinateSystemLabelForeground="#00000000"
                                     ZoomExtentsWhenLoaded="False"
                                     IsRotationEnabled="True" IsPanEnabled="True" IsZoomEnabled="True"
                                     RotateAroundMouseDownPoint="False"

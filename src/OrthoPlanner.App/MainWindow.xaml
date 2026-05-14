@@ -642,7 +642,7 @@
                     <hx:Viewport3DX x:Name="Viewport3D" Grid.Row="1"
                                     BackgroundColor="#FF0C1018"
                                     ShowCoordinateSystem="True"
-                                    CoordinateSystemLabelForeground="#80AABBCC"
+                                    CoordinateSystemLabelForeground="#00000000"
                                     ZoomExtentsWhenLoaded="False"
                                     IsRotationEnabled="True"
                                     IsPanEnabled="True"

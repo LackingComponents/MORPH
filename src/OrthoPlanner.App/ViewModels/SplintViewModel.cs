@@ -13,22 +13,24 @@ public partial class MainViewModel
     /// </summary>
     private (float[]? upper, float[]? lower) ResolveDentalMeshes()
     {
+        // 1. Prefer dental STL casts classified as Upper/Lower
         float[]? upper = ImportedMeshes
             .FirstOrDefault(m => m.ScanType == DentalScanType.Upper && m.Vertices != null)?.Vertices;
         float[]? lower = ImportedMeshes
             .FirstOrDefault(m => m.ScanType == DentalScanType.Lower && m.Vertices != null)?.Vertices;
 
-        // Fall back to split cranium (maxilla) and mandible bone segments
+        // 2. Fall back to named segments — specific anatomical names only, never the full cranium
         if (upper == null)
             upper = Segments.FirstOrDefault(s =>
-                s.IsVisible && (s.Name.Contains("Maxilla") || s.Name.Contains("Cranium (LeFort Upper)")))?.Vertices
-                ?? HardTissueModel?.Vertices;
+                s.IsVisible && (s.Name.Contains("Maxilla") ||
+                                s.Name.Contains("Cranium (LeFort Upper)")))?.Vertices;
 
         if (lower == null)
             lower = Segments.FirstOrDefault(s =>
-                s.IsVisible && s.Name.Contains("Mandible"))?.Vertices
-                ?? HardTissueModel?.Vertices;
+                s.IsVisible && s.Name.Contains("Mandible"))?.Vertices;
 
+        // NOTE: deliberately NOT falling back to HardTissueModel —
+        // that would show the entire cranium as the upper arch.
         return (upper, lower);
     }
 
@@ -41,10 +43,14 @@ public partial class MainViewModel
 
             if (upper == null || lower == null)
             {
+                var missing = new System.Text.StringBuilder();
+                if (upper == null) missing.AppendLine("• Upper arch: no dental cast classified as 'Upper', and no 'Maxilla' segment found.");
+                if (lower == null) missing.AppendLine("• Lower arch: no dental cast classified as 'Lower', and no 'Mandible' segment found.");
                 MessageBox.Show(
-                    "Splint generation requires at least an upper and a lower dental model.\n\n" +
-                    "Please import and classify dental STL casts (Upper / Lower) first, " +
-                    "or run segmentation and split the cranium from the mandible.",
+                    "Splint generation requires classified dental models:\n\n" +
+                    missing.ToString() +
+                    "\nTo fix: Import your dental STL casts and classify them as Upper / Lower " +
+                    "using the STL import dialog. The full CT bone (cranium) cannot be used as the upper arch.",
                     "Missing Dental Models",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
