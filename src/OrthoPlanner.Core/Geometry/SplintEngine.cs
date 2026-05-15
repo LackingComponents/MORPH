@@ -364,7 +364,9 @@ public static class SplintEngine
                     tris[i*3+1] = (uint)(i*3+1);
                     tris[i*3+2] = (uint)(i*3+2);
                 }
-                var meshGL = new MeshGL(verts, tris, 3, Array.Empty<float>());
+                // Use MeshGLData wrapper — passes numProp as uint, tangents as null (no smoothing)
+                var data   = new MeshGLData(verts, tris, 3u, null!);
+                var meshGL = new MeshGL(data);
                 return Manifold.Create(meshGL);
             }
 
