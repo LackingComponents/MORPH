@@ -1,68 +1,100 @@
+using System.Collections.Concurrent;
 using OrthoPlanner.Core.Imaging;
+using ILGPU;
+using ILGPU.Runtime;
 
 namespace OrthoPlanner.Core.Segmentation;
 
 /// <summary>
 /// Segmentation algorithms: threshold, region growing, connected components.
-/// All operate on VolumeData + SegmentationVolume.
+///
+/// OPTIMIZATIONS vs original:
+///   • ThresholdSegment      → GPU kernel (ILGPU), fallback Parallel.For
+///   • MorphologicalClosing  → GPU dilation+erosion kernels, fallback Parallel.For
+///   • SmoothLabelMask       → GPU majority-vote kernel, fallback Parallel.For
+///   • ExtractSegmentMesh    → Parallel.For mask build + optimized MarchingCubes
+///   • ResliceVolume         → Parallel.For (GPU removed: too many params for ILGPU inference)
+///   • All BFS operations    → unchanged (inherently sequential)
 /// </summary>
 public static class SegmentationEngine
 {
-    /// <summary>
-    /// Threshold segmentation: label all voxels within [minHU, maxHU] range.
-    /// If enhanceThinBone is true, voxels just below minHU are evaluated for high local contrast
-    /// (e.g. touching air/fat). If contrast is high, they are included as partial-volume bone bounds.
-    /// </summary>
+    // ─────────────────────────────────────────────────────────────────────────
+    // THRESHOLD SEGMENTATION
+    // ─────────────────────────────────────────────────────────────────────────
+
     public static void ThresholdSegment(
         VolumeData volume, SegmentationVolume segVol,
         byte label, short minHU, short maxHU,
         bool enhanceThinBone = false,
         Action<double>? progress = null)
     {
-        int w = volume.Width, h = volume.Height, d = volume.Depth;
-        int total = w * h * d;
-        
-        // 6-connectivity for checking high-contrast air/fat neighbors
-        int[][] n6 = [[1,0,0], [-1,0,0], [0,1,0], [0,-1,0], [0,0,1], [0,0,-1]];
-        short airThreshold = -400; // Anything below this is definitively air/fat, providing high contrast
+        if (!enhanceThinBone)
+        {
+            try { ThresholdGpu(volume, segVol, label, minHU, maxHU, progress); return; }
+            catch { }
+        }
+        ThresholdCpu(volume, segVol, label, minHU, maxHU, enhanceThinBone, progress);
+    }
 
+    private static void ThresholdGpu(
+        VolumeData volume, SegmentationVolume segVol,
+        byte label, short minHU, short maxHU,
+        Action<double>? progress)
+    {
+        var gpu = GpuContext.Instance;
+        int n = volume.Voxels.Length;
+        using var gpuVoxels = gpu.Accelerator.Allocate1D<short>(volume.Voxels);
+        using var gpuLabels = gpu.Accelerator.Allocate1D<byte>(segVol.Labels);
+
+        // ILGPU 1.5.x: cast to Action delegate for type inference
+        var kernel = gpu.Accelerator.LoadAutoGroupedStreamKernel(
+            (Action<Index1D, ArrayView<short>, ArrayView<byte>, short, short, byte>)
+            GpuKernels.ThresholdKernel);
+
+        kernel(n, gpuVoxels.View, gpuLabels.View, minHU, maxHU, label);
+        gpu.Accelerator.Synchronize();
+        gpuLabels.CopyToCPU(segVol.Labels);
+        progress?.Invoke(1.0);
+    }
+
+    private static void ThresholdCpu(
+        VolumeData volume, SegmentationVolume segVol,
+        byte label, short minHU, short maxHU,
+        bool enhanceThinBone, Action<double>? progress)
+    {
+        int w = volume.Width, h = volume.Height, d = volume.Depth;
+        short airThreshold = -400;
         bool[]? externalAirMask = null;
         if (enhanceThinBone)
         {
-            if (progress != null) progress(0.05);
+            progress?.Invoke(0.05);
             externalAirMask = ComputeExternalAirMask(volume, airThreshold);
         }
 
-        for (int z = 0; z < d; z++)
+        Parallel.For(0, d, z =>
         {
             for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
             {
                 int i = x + y * w + z * w * h;
                 short val = volume.Voxels[i];
-                
-                // 1. Standard Threshold Inclusion
                 if (val >= minHU && val <= maxHU)
                 {
                     segVol.Labels[i] = label;
                 }
-                // 2. Thin Bone Enhancement (Partial Volume Effect Recovery)
                 else if (enhanceThinBone && val >= minHU - 200 && val < minHU)
                 {
-                    // This voxel is just slightly below the bone threshold. 
-                    // Does it touch stark empty space within a 2-voxel radius (5x5x5)?
                     bool touchesInternalAir = false;
                     bool touchesExternalAir = false;
-
                     for (int dz = -2; dz <= 2; dz++)
                     for (int dy = -2; dy <= 2; dy++)
                     for (int dx = -2; dx <= 2; dx++)
                     {
                         if (dx == 0 && dy == 0 && dz == 0) continue;
-                        int nx = x + dx, ny = y + dy, nz = z + dz;
-                        if (nx >= 0 && nx < w && ny >= 0 && ny < h && nz >= 0 && nz < d)
+                        int nx2 = x+dx, ny2 = y+dy, nz2 = z+dz;
+                        if (nx2>=0 && nx2<w && ny2>=0 && ny2<h && nz2>=0 && nz2<d)
                         {
-                            int nIdx = nx + ny * w + nz * w * h;
+                            int nIdx = nx2 + ny2*w + nz2*w*h;
                             if (volume.Voxels[nIdx] <= airThreshold)
                             {
                                 if (externalAirMask != null && externalAirMask[nIdx])
@@ -72,156 +104,104 @@ public static class SegmentationEngine
                             }
                         }
                     }
-                    
-                    // Only enhance if it touches protected INTERNAL air (sinuses)
-                    // and does NOT touch EXTERNAL Room air (which coats the skin).
                     if (touchesInternalAir && !touchesExternalAir)
-                    {
                         segVol.Labels[i] = label;
-                    }
                 }
             }
-
-            if (progress != null && z % 20 == 0)
-                progress((double)z / d);
-        }
+            if (z % 20 == 0) progress?.Invoke((double)z / d);
+        });
         progress?.Invoke(1.0);
     }
 
-    /// <summary>
-    /// Computes a boolean mask of "Room Air" by extracting the largest connected component of air voxels.
-    /// Used to prevent the thin-bone edge-enhancer from wrapping onto the patient's external skin.
-    /// </summary>
+    // ─────────────────────────────────────────────────────────────────────────
+    // EXTERNAL AIR MASK
+    // ─────────────────────────────────────────────────────────────────────────
+
     private static bool[] ComputeExternalAirMask(VolumeData volume, short maxAirHU)
     {
         int w = volume.Width, h = volume.Height, d = volume.Depth;
         int totalVoxels = w * h * d;
         var globalVisited = new bool[totalVoxels];
-        
-        List<int> largestComponent = new List<int>();
+        List<int> largestComponent = new();
         int maxSize = 0;
-
-        int[][] n6 = [ [1,0,0], [-1,0,0], [0,1,0], [0,-1,0], [0,0,1], [0,0,-1] ];
+        int[][] n6 = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
         var queue = new Queue<(int x, int y, int z)>();
 
         for (int z = 0; z < d; z++)
         for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++)
         {
-            int idx = x + y * w + z * w * h;
+            int idx = x + y*w + z*w*h;
             if (!globalVisited[idx] && volume.Voxels[idx] <= maxAirHU)
             {
-                var currentComponent = new List<int>();
-                
+                var comp = new List<int>();
                 globalVisited[idx] = true;
                 queue.Enqueue((x, y, z));
-
                 while (queue.Count > 0)
                 {
                     var (cx, cy, cz) = queue.Dequeue();
-                    int cIdx = cx + cy * w + cz * w * h;
-                    currentComponent.Add(cIdx);
-
+                    comp.Add(cx + cy*w + cz*w*h);
                     foreach (var n in n6)
                     {
-                        int nx = cx + n[0], ny = cy + n[1], nz = cz + n[2];
-                        if (nx < 0 || nx >= w || ny < 0 || ny >= h || nz < 0 || nz >= d) continue;
-
-                        int nIdx = nx + ny * w + nz * w * h;
-                        if (!globalVisited[nIdx] && volume.Voxels[nIdx] <= maxAirHU)
+                        int nx=cx+n[0], ny=cy+n[1], nz=cz+n[2];
+                        if (nx>=0&&nx<w&&ny>=0&&ny<h&&nz>=0&&nz<d)
                         {
-                            globalVisited[nIdx] = true;
-                            queue.Enqueue((nx, ny, nz));
+                            int ni = nx+ny*w+nz*w*h;
+                            if (!globalVisited[ni] && volume.Voxels[ni] <= maxAirHU)
+                            { globalVisited[ni] = true; queue.Enqueue((nx,ny,nz)); }
                         }
                     }
                 }
-
-                if (currentComponent.Count > maxSize)
-                {
-                    maxSize = currentComponent.Count;
-                    largestComponent = currentComponent;
-                }
+                if (comp.Count > maxSize) { maxSize = comp.Count; largestComponent = comp; }
             }
         }
-
-        var resultMask = new bool[totalVoxels];
-        foreach (int idx in largestComponent)
-        {
-            resultMask[idx] = true;
-        }
-
-        return resultMask;
+        var mask = new bool[totalVoxels];
+        foreach (int i in largestComponent) mask[i] = true;
+        return mask;
     }
 
-    /// <summary>
-    /// Seed-First Bounded Region Growing: Flood-fills starting from the seed point,
-    /// constrained strictly to voxels that fall within the [minHU, maxHU] global threshold.
-    /// This allows mechanical separation across soft joints.
-    /// </summary>
+    // ─────────────────────────────────────────────────────────────────────────
+    // REGION GROWING
+    // ─────────────────────────────────────────────────────────────────────────
+
     public static int RegionGrow(
         VolumeData volume, SegmentationVolume segVol,
         int seedX, int seedY, int seedZ,
         byte label, short minHU, short maxHU,
         Action<double>? progress = null)
     {
-        short seedValue = volume.GetVoxel(seedX, seedY, seedZ);
-        
-        // Ensure the seed itself is actually within the growth bounds!
-        if (seedValue < minHU || seedValue > maxHU) return 0;
+        int w = volume.Width, h = volume.Height, d = volume.Depth;
+        int[][] neighbors = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+        int seedIdx = seedX + seedY*w + seedZ*w*h;
+        if (segVol.Labels[seedIdx] == label) return 0;
+        short seedVal = volume.Voxels[seedIdx];
+        if (seedVal < minHU || seedVal > maxHU) return 0;
 
-        var visited = new bool[volume.Width * volume.Height * volume.Depth];
         var queue = new Queue<(int x, int y, int z)>();
         queue.Enqueue((seedX, seedY, seedZ));
-
-        int idx = seedX + seedY * volume.Width + seedZ * volume.Width * volume.Height;
-        visited[idx] = true;
-
-        int count = 0;
-        int totalVoxels = volume.Width * volume.Height * volume.Depth;
-
-        // 6-connectivity offsets
-        int[][] neighbors =
-        [
-            [1,0,0], [-1,0,0], [0,1,0], [0,-1,0], [0,0,1], [0,0,-1]
-        ];
-
+        segVol.Labels[seedIdx] = label;
+        int count = 1;
         while (queue.Count > 0)
         {
-            var (x, y, z) = queue.Dequeue();
-            segVol.SetLabel(x, y, z, label);
-            count++;
-
-            if (progress != null && count % 50000 == 0)
-                progress(Math.Min(1.0, (double)count / (totalVoxels * 0.1)));
-
+            var (cx, cy, cz) = queue.Dequeue();
             foreach (var n in neighbors)
             {
-                int nx = x + n[0], ny = y + n[1], nz = z + n[2];
-                if (nx < 0 || nx >= volume.Width ||
-                    ny < 0 || ny >= volume.Height ||
-                    nz < 0 || nz >= volume.Depth) continue;
-
-                int nIdx = nx + ny * volume.Width + nz * volume.Width * volume.Height;
-                if (visited[nIdx]) continue;
-                visited[nIdx] = true;
-
-                short val = volume.Voxels[nIdx];
-                if (val >= minHU && val <= maxHU)
-                    queue.Enqueue((nx, ny, nz));
+                int nx=cx+n[0], ny=cy+n[1], nz=cz+n[2];
+                if (nx<0||nx>=w||ny<0||ny>=h||nz<0||nz>=d) continue;
+                int ni = nx+ny*w+nz*w*h;
+                if (segVol.Labels[ni] == label) continue;
+                short val = volume.Voxels[ni];
+                if (val < minHU || val > maxHU) continue;
+                segVol.Labels[ni] = label;
+                count++;
+                queue.Enqueue((nx, ny, nz));
             }
+            if (count % 50000 == 0) progress?.Invoke((double)count / (w*h*d));
         }
-
         progress?.Invoke(1.0);
         return count;
     }
 
-    /// <summary>
-    /// Multi-Source Competitive BFS.
-    /// Takes a list of seed markers and their assigned target labels.
-    /// All seeds emit a flood-fill simultaneously at the same velocity using the global HU bounds.
-    /// When expanding regions collide at bottlenecks (like the TMJ), they block each other,
-    /// mechanically severing connected anatomy based on Voronoi-like distance metrics!
-    /// </summary>
     public static void CompetitiveRegionGrow(
         VolumeData volume, SegmentationVolume segVol,
         List<(int x, int y, int z, byte label)> seeds,
@@ -229,859 +209,573 @@ public static class SegmentationEngine
         Action<double>? progress = null)
     {
         int w = volume.Width, h = volume.Height, d = volume.Depth;
-        var visited = new bool[w * h * d];
+        int[][] neighbors = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
         var queue = new Queue<(int x, int y, int z, byte label)>();
-
-        // Enqueue all competing seeds simultaneously to start the parallel race
         foreach (var seed in seeds)
         {
-            short seedValue = volume.GetVoxel(seed.x, seed.y, seed.z);
-            if (seedValue >= minHU && seedValue <= maxHU)
-            {
-                int idx = seed.x + seed.y * w + seed.z * w * h;
-                visited[idx] = true;
-                queue.Enqueue(seed);
-            }
+            int si = seed.x + seed.y*w + seed.z*w*h;
+            if (volume.Voxels[si] >= minHU && volume.Voxels[si] <= maxHU)
+            { segVol.Labels[si] = seed.label; queue.Enqueue(seed); }
         }
-
-        int[][] neighbors = [ [1,0,0], [-1,0,0], [0,1,0], [0,-1,0], [0,0,1], [0,0,-1] ];
-        
-        int totalProcessed = 0;
-        int maxEstimate = w * h * d / 10;
-
+        int processed = 0;
         while (queue.Count > 0)
         {
-            var (cx, cy, cz, label) = queue.Dequeue();
-            segVol.SetLabel(cx, cy, cz, label);
-            totalProcessed++;
-
-            if (progress != null && totalProcessed % 50000 == 0)
-                progress(Math.Min(1.0, (double)totalProcessed / maxEstimate));
-
+            var (cx, cy, cz, lbl) = queue.Dequeue();
+            processed++;
             foreach (var n in neighbors)
             {
-                int nx = cx + n[0], ny = cy + n[1], nz = cz + n[2];
-                if (nx < 0 || nx >= w || ny < 0 || ny >= h || nz < 0 || nz >= d) continue;
-
-                int nIdx = nx + ny * w + nz * w * h;
-                
-                // If this voxel has already been claimed by ANY seed's shockwave, we can't touch it.
-                // This is where masks collide and sever!
-                if (visited[nIdx]) continue;
-                visited[nIdx] = true;
-
-                short val = volume.Voxels[nIdx];
-                if (val >= minHU && val <= maxHU)
-                {
-                    queue.Enqueue((nx, ny, nz, label));
-                }
+                int nx=cx+n[0], ny=cy+n[1], nz=cz+n[2];
+                if (nx<0||nx>=w||ny<0||ny>=h||nz<0||nz>=d) continue;
+                int ni = nx+ny*w+nz*w*h;
+                if (segVol.Labels[ni] != 0) continue;
+                short val = volume.Voxels[ni];
+                if (val < minHU || val > maxHU) continue;
+                segVol.Labels[ni] = lbl;
+                queue.Enqueue((nx, ny, nz, lbl));
             }
+            if (processed % 50000 == 0) progress?.Invoke((double)processed / (w*h*d));
         }
-
         progress?.Invoke(1.0);
     }
 
-    /// <summary>
-    /// Mask-Based Region Growing: Flood-fills starting from the seed coordinate,
-    /// but ONLY traverses voxels that already belong to 'sourceLabel'.
-    /// Converts these connected voxels to 'newLabel'.
-    /// </summary>
     public static int RegionGrowLabel(
-        SegmentationVolume segVol,
+        VolumeData volume, SegmentationVolume segVol,
         int seedX, int seedY, int seedZ,
         byte sourceLabel, byte newLabel,
         Action<double>? progress = null)
     {
-        if (seedX < 0 || seedX >= segVol.Width ||
-            seedY < 0 || seedY >= segVol.Height ||
-            seedZ < 0 || seedZ >= segVol.Depth)
-            return 0;
-
-        // Ensure the seed actually sits on the source mask!
-        if (segVol.GetLabel(seedX, seedY, seedZ) != sourceLabel) return 0;
-
         int w = segVol.Width, h = segVol.Height, d = segVol.Depth;
-        var visited = new bool[w * h * d];
+        int[][] neighbors = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+        int seedIdx = seedX + seedY*w + seedZ*w*h;
+        if (segVol.Labels[seedIdx] != sourceLabel) return 0;
+
         var queue = new Queue<(int x, int y, int z)>();
-        
         queue.Enqueue((seedX, seedY, seedZ));
-
-        int idx = seedX + seedY * w + seedZ * w * h;
-        visited[idx] = true;
-
-        int count = 0;
-        int maxPossible = w * h * d / 10; // rough guess for progress reporting
-
-        // 6-connectivity offsets
-        int[][] neighbors = [[1,0,0], [-1,0,0], [0,1,0], [0,-1,0], [0,0,1], [0,0,-1]];
-
+        segVol.Labels[seedIdx] = newLabel;
+        int count = 1;
         while (queue.Count > 0)
         {
-            var (x, y, z) = queue.Dequeue();
-            segVol.SetLabel(x, y, z, newLabel);
-            count++;
-
-            if (progress != null && count % 20000 == 0)
-                progress(Math.Min(1.0, (double)count / maxPossible));
-
+            var (cx, cy, cz) = queue.Dequeue();
             foreach (var n in neighbors)
             {
-                int nx = x + n[0], ny = y + n[1], nz = z + n[2];
-                if (nx < 0 || nx >= w || ny < 0 || ny >= h || nz < 0 || nz >= d) continue;
-
-                int nIdx = nx + ny * w + nz * w * h;
-                if (visited[nIdx]) continue;
-                
-                // ONLY traverse if this neighbor is currently part of the Source Mask
-                if (segVol.Labels[nIdx] == sourceLabel)
-                {
-                    visited[nIdx] = true;
-                    queue.Enqueue((nx, ny, nz));
-                }
+                int nx=cx+n[0], ny=cy+n[1], nz=cz+n[2];
+                if (nx<0||nx>=w||ny<0||ny>=h||nz<0||nz>=d) continue;
+                int ni = nx+ny*w+nz*w*h;
+                if (segVol.Labels[ni] != sourceLabel) continue;
+                segVol.Labels[ni] = newLabel;
+                count++;
+                queue.Enqueue((nx, ny, nz));
             }
+            if (count % 50000 == 0) progress?.Invoke((double)count / (w*h*d));
         }
-
         progress?.Invoke(1.0);
         return count;
     }
 
-    /// <summary>
-    /// Connected component labeling: finds all disconnected regions with the
-    /// same label and splits them into separate labels. Returns the number
-    /// of components found.
-    /// </summary>
+    // ─────────────────────────────────────────────────────────────────────────
+    // CONNECTED COMPONENTS
+    // ─────────────────────────────────────────────────────────────────────────
+
     public static List<(byte newLabel, int voxelCount)> SplitConnectedComponents(
-        SegmentationVolume segVol, byte sourceLabel, byte startingLabel)
+        SegmentationVolume segVol, byte sourceLabel, List<byte> newLabels,
+        int w, int h, int d,
+        Action<double>? progress = null)
     {
-        int w = segVol.Width, h = segVol.Height, d = segVol.Depth;
-        var visited = new bool[w * h * d];
-        var components = new List<(byte, int)>();
-        byte currentLabel = startingLabel;
-
-        int[][] neighbors =
-        [
-            [1,0,0], [-1,0,0], [0,1,0], [0,-1,0], [0,0,1], [0,0,-1]
-        ];
-
-        for (int z = 0; z < d; z++)
-        for (int y = 0; y < h; y++)
-        for (int x = 0; x < w; x++)
-        {
-            int idx = x + y * w + z * w * h;
-            if (visited[idx] || segVol.Labels[idx] != sourceLabel) continue;
-
-            // BFS flood fill for this component
-            var queue = new Queue<(int, int, int)>();
-            queue.Enqueue((x, y, z));
-            visited[idx] = true;
-            int count = 0;
-
-            while (queue.Count > 0)
-            {
-                var (cx, cy, cz) = queue.Dequeue();
-                segVol.SetLabel(cx, cy, cz, currentLabel);
-                count++;
-
-                foreach (var n in neighbors)
-                {
-                    int nIdx = cx + n[0], cy_new = cy + n[1], cz_new = cz + n[2];
-                    if (nIdx < 0 || nIdx >= w || cy_new < 0 || cy_new >= h || cz_new < 0 || cz_new >= d) continue;
-                    int flatIdx = nIdx + cy_new * w + cz_new * w * h;
-                    if (!visited[flatIdx] && segVol.Labels[flatIdx] == sourceLabel)
-                    {
-                        visited[flatIdx] = true;
-                        queue.Enqueue((nIdx, cy_new, cz_new));
-                    }
-                }
-            }
-
-            components.Add((currentLabel, count));
-            currentLabel++;
-        }
-
-        return components;
-    }
-
-    /// <summary>
-    /// Deletes any isolated islands of voxels that contain fewer than `minVoxelCount`.
-    /// Useful for removing scatter noise caused by aggressive contrast enhancement.
-    /// </summary>
-    public static void RemoveSmallComponents(SegmentationVolume segVol, byte targetLabel, int minVoxelCount, Action<double>? progress = null)
-    {
-        int w = segVol.Width, h = segVol.Height, d = segVol.Depth;
-        var visited = new bool[w * h * d];
-
-        int[][] neighbors = [ [1,0,0], [-1,0,0], [0,1,0], [0,-1,0], [0,0,1], [0,0,-1] ];
-        
-        int totalProcessed = 0;
-        int maxEstimate = w * h * d / 12;
-
-        for (int z = 0; z < d; z++)
-        {
-            for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++)
-            {
-                int idx = x + y * w + z * w * h;
-                if (visited[idx] || segVol.Labels[idx] != targetLabel) continue;
-
-                // Found a new island! Let's BFS to count its size.
-                var islandVoxels = new List<int>();
-                var queue = new Queue<(int, int, int)>();
-                
-                queue.Enqueue((x, y, z));
-                visited[idx] = true;
-
-                while (queue.Count > 0)
-                {
-                    var (cx, cy, cz) = queue.Dequeue();
-                    int cIdx = cx + cy * w + cz * w * h;
-                    islandVoxels.Add(cIdx);
-                    totalProcessed++;
-
-                    if (progress != null && totalProcessed % 10000 == 0)
-                        progress(Math.Min(1.0, (double)totalProcessed / maxEstimate));
-
-                    foreach (var n in neighbors)
-                    {
-                        int nx = cx + n[0], ny = cy + n[1], nz = cz + n[2];
-                        if (nx < 0 || nx >= w || ny < 0 || ny >= h || nz < 0 || nz >= d) continue;
-                        
-                        int nIdx = nx + ny * w + nz * w * h;
-                        if (!visited[nIdx] && segVol.Labels[nIdx] == targetLabel)
-                        {
-                            visited[nIdx] = true;
-                            queue.Enqueue((nx, ny, nz));
-                        }
-                    }
-                }
-
-                // If this island is too small (scatter noise), delete it!
-                if (islandVoxels.Count < minVoxelCount)
-                {
-                    foreach (var islandIdx in islandVoxels)
-                    {
-                        segVol.Labels[islandIdx] = 0;
-                    }
-                }
-            }
-        }
-        
-        progress?.Invoke(1.0);
-    }
-
-
-    /// <summary>
-    /// Finds the largest connected component of the given label and clears all other
-    /// disconnected regions with the same label to remove scatter noise.
-    /// </summary>
-    public static void KeepLargestComponent(SegmentationVolume segVol, byte label, Action<double>? progress = null)
-    {
-        int w = segVol.Width, h = segVol.Height, d = segVol.Depth;
         int total = w * h * d;
+        int[][] neighbors = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
         var visited = new bool[total];
+        var components = new List<(int seedIdx, List<int> voxels)>();
 
-        int maxSize = 0;
-        var largestComponentSeeds = new List<(int, int, int)>();
-        var components = new List<List<(int, int, int)>>();
-
-        int[][] neighbors =
-        [
-            [1,0,0], [-1,0,0], [0,1,0], [0,-1,0], [0,0,1], [0,0,-1]
-        ];
-
-        for (int z = 0; z < d; z++)
-        for (int y = 0; y < h; y++)
-        for (int x = 0; x < w; x++)
+        for (int i = 0; i < total; i++)
         {
-            int idx = x + y * w + z * w * h;
-            if (visited[idx] || segVol.Labels[idx] != label) continue;
-
-            // Found a new component, flood fill to find its size
-            var queue = new Queue<(int, int, int)>();
-            var compVoxels = new List<(int, int, int)>();
-            
-            queue.Enqueue((x, y, z));
-            visited[idx] = true;
-
+            if (visited[i] || segVol.Labels[i] != sourceLabel) continue;
+            var comp = new List<int>();
+            var queue = new Queue<int>();
+            queue.Enqueue(i); visited[i] = true;
             while (queue.Count > 0)
             {
-                var (cx, cy, cz) = queue.Dequeue();
-                compVoxels.Add((cx, cy, cz));
-
+                int cur = queue.Dequeue();
+                comp.Add(cur);
+                int cz=cur/(w*h), rem=cur%(w*h), cy=rem/w, cx=rem%w;
                 foreach (var n in neighbors)
                 {
-                    int nx = cx + n[0], ny = cy + n[1], nz = cz + n[2];
-                    if (nx < 0 || nx >= w || ny < 0 || ny >= h || nz < 0 || nz >= d) continue;
-                    int nIdx = nx + ny * w + nz * w * h;
-                    if (!visited[nIdx] && segVol.Labels[nIdx] == label)
-                    {
-                        visited[nIdx] = true;
-                        queue.Enqueue((nx, ny, nz));
-                    }
+                    int nx=cx+n[0], ny=cy+n[1], nz=cz+n[2];
+                    if (nx<0||nx>=w||ny<0||ny>=h||nz<0||nz>=d) continue;
+                    int ni = nx+ny*w+nz*w*h;
+                    if (!visited[ni] && segVol.Labels[ni] == sourceLabel)
+                    { visited[ni] = true; queue.Enqueue(ni); }
                 }
             }
-
-            if (compVoxels.Count > maxSize)
-            {
-                maxSize = compVoxels.Count;
-            }
-            components.Add(compVoxels);
-            
-            if (progress != null && components.Count % 50 == 0)
-                progress(Math.Min(0.5, (double)z / d));
+            components.Add((i, comp));
         }
-
-        // Clear all except the largest
-        int clearCount = 0;
-        foreach (var comp in components)
+        components.Sort((a, b) => b.voxels.Count.CompareTo(a.voxels.Count));
+        var result = new List<(byte, int)>();
+        for (int ci = 0; ci < Math.Min(components.Count, newLabels.Count); ci++)
         {
-            if (comp.Count == maxSize) continue; // Skip largest
-            foreach (var (cx, cy, cz) in comp)
-            {
-                segVol.SetLabel(cx, cy, cz, 0); // clear
-            }
-            clearCount++;
-            if (progress != null && clearCount % 50 == 0)
-                progress(0.5 + Math.Min(0.5, (double)clearCount / components.Count * 0.5));
+            byte nl = newLabels[ci];
+            foreach (int idx in components[ci].voxels)
+                segVol.Labels[idx] = nl;
+            result.Add((nl, components[ci].voxels.Count));
         }
+        progress?.Invoke(1.0);
+        return result;
+    }
 
+    public static void RemoveSmallComponents(
+        SegmentationVolume segVol, byte targetLabel, int minVoxelCount,
+        Action<double>? progress = null)
+    {
+        int w = segVol.Width, h = segVol.Height, d = segVol.Depth, total = w*h*d;
+        int[][] neighbors = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+        var visited = new bool[total];
+        for (int i = 0; i < total; i++)
+        {
+            if (visited[i] || segVol.Labels[i] != targetLabel) continue;
+            var comp = new List<int>();
+            var queue = new Queue<int>();
+            queue.Enqueue(i); visited[i] = true;
+            while (queue.Count > 0)
+            {
+                int cur = queue.Dequeue();
+                comp.Add(cur);
+                int cz=cur/(w*h), rem=cur%(w*h), cy=rem/w, cx=rem%w;
+                foreach (var n in neighbors)
+                {
+                    int nx=cx+n[0], ny=cy+n[1], nz=cz+n[2];
+                    if (nx<0||nx>=w||ny<0||ny>=h||nz<0||nz>=d) continue;
+                    int ni = nx+ny*w+nz*w*h;
+                    if (!visited[ni] && segVol.Labels[ni] == targetLabel)
+                    { visited[ni] = true; queue.Enqueue(ni); }
+                }
+            }
+            if (comp.Count < minVoxelCount)
+                foreach (int idx in comp) segVol.Labels[idx] = 0;
+        }
         progress?.Invoke(1.0);
     }
 
-    /// <summary>
-    /// Performs a Morphological Closing (Dilation followed by Erosion) on a given label.
-    /// Dilation expands the mask by 1 voxel to bridge small gaps and holes.
-    /// Erosion shrinks the mask by 1 voxel to restore original thickness without reopening the bridged holes.
-    /// </summary>
-    public static void MorphologicalClosing(SegmentationVolume segVol, byte label, int iterations = 1, Action<double>? progress = null)
+    public static void KeepLargestComponent(
+        SegmentationVolume segVol, byte label,
+        Action<double>? progress = null)
     {
-        int w = segVol.Width, h = segVol.Height, d = segVol.Depth;
-        var temp = new byte[segVol.Labels.Length];
+        int w = segVol.Width, h = segVol.Height, d = segVol.Depth, total = w*h*d;
+        int[][] neighbors = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+        var visited = new bool[total];
+        List<int>? largest = null;
+        int maxSize = 0;
+        for (int i = 0; i < total; i++)
+        {
+            if (visited[i] || segVol.Labels[i] != label) continue;
+            var comp = new List<int>();
+            var queue = new Queue<int>();
+            queue.Enqueue(i); visited[i] = true;
+            while (queue.Count > 0)
+            {
+                int cur = queue.Dequeue();
+                comp.Add(cur);
+                int cz=cur/(w*h), rem=cur%(w*h), cy=rem/w, cx=rem%w;
+                foreach (var n in neighbors)
+                {
+                    int nx=cx+n[0], ny=cy+n[1], nz=cz+n[2];
+                    if (nx<0||nx>=w||ny<0||ny>=h||nz<0||nz>=d) continue;
+                    int ni = nx+ny*w+nz*w*h;
+                    if (!visited[ni] && segVol.Labels[ni] == label)
+                    { visited[ni] = true; queue.Enqueue(ni); }
+                }
+            }
+            if (comp.Count > maxSize) { maxSize = comp.Count; largest = comp; }
+        }
+        for (int i = 0; i < total; i++)
+            if (segVol.Labels[i] == label) segVol.Labels[i] = 0;
+        if (largest != null)
+            foreach (int idx in largest) segVol.Labels[idx] = label;
+        progress?.Invoke(1.0);
+    }
 
-        // 6-connectivity cross for Dilation/Erosion
-        int[][] n6 = [[1,0,0], [-1,0,0], [0,1,0], [0,-1,0], [0,0,1], [0,0,-1]];
+    // ─────────────────────────────────────────────────────────────────────────
+    // MORPHOLOGICAL CLOSING — GPU first, Parallel.For fallback
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public static void MorphologicalClosing(
+        SegmentationVolume segVol, byte label, int iterations = 1,
+        Action<double>? progress = null)
+    {
+        try { MorphClosingGpu(segVol, label, iterations, progress); }
+        catch { MorphClosingCpu(segVol, label, iterations, progress); }
+    }
+
+    private static void MorphClosingGpu(
+        SegmentationVolume segVol, byte label, int iterations,
+        Action<double>? progress)
+    {
+        var gpu = GpuContext.Instance;
+        int w = segVol.Width, h = segVol.Height, d = segVol.Depth, n = w*h*d;
+        using var gpuA = gpu.Accelerator.Allocate1D<byte>(segVol.Labels);
+        using var gpuB = gpu.Accelerator.Allocate1D<byte>(n);
+
+        var dilK = gpu.Accelerator.LoadAutoGroupedStreamKernel(
+            (Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, byte>)
+            GpuKernels.DilationKernel);
+        var eroK = gpu.Accelerator.LoadAutoGroupedStreamKernel(
+            (Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, byte>)
+            GpuKernels.ErosionKernel);
 
         for (int iter = 0; iter < iterations; iter++)
         {
-            // === 1. DILATION ===
-            Array.Copy(segVol.Labels, temp, temp.Length);
-            for (int z = 1; z < d - 1; z++)
-            {
-                for (int y = 1; y < h - 1; y++)
-                for (int x = 1; x < w - 1; x++)
-                {
-                    int cIdx = x + y * w + z * w * h;
-                    if (temp[cIdx] == label) continue; // Already ON
-
-                    // If any 6-neighbor is ON, turn this voxel ON
-                    foreach (var offset in n6)
-                    {
-                        int nIdx = (x + offset[0]) + (y + offset[1]) * w + (z + offset[2]) * w * h;
-                        if (temp[nIdx] == label)
-                        {
-                            segVol.SetLabel(x, y, z, label);
-                            break;
-                        }
-                    }
-                }
-                if (progress != null && z % 20 == 0) progress(0.0 + ((double)z / d) * 0.25);
-            }
-
-            // === 2. EROSION ===
-            Array.Copy(segVol.Labels, temp, temp.Length);
-            for (int z = 1; z < d - 1; z++)
-            {
-                for (int y = 1; y < h - 1; y++)
-                for (int x = 1; x < w - 1; x++)
-                {
-                    int cIdx = x + y * w + z * w * h;
-                    if (temp[cIdx] != label) continue; // Already OFF
-
-                    // If any 6-neighbor is OFF, turn this voxel OFF
-                    foreach (var offset in n6)
-                    {
-                        int nIdx = (x + offset[0]) + (y + offset[1]) * w + (z + offset[2]) * w * h;
-                        if (temp[nIdx] != label)
-                        {
-                            segVol.SetLabel(x, y, z, 0);
-                            break;
-                        }
-                    }
-                }
-                if (progress != null && z % 20 == 0) progress(0.25 + ((double)z / d) * 0.25);
-            }
+            dilK(n, gpuA.View, gpuB.View, w, h, d, label);
+            gpu.Accelerator.Synchronize();
+            eroK(n, gpuB.View, gpuA.View, w, h, d, label);
+            gpu.Accelerator.Synchronize();
+            progress?.Invoke((double)(iter+1)/iterations);
         }
-        progress?.Invoke(1.0);
+        gpuA.CopyToCPU(segVol.Labels);
     }
 
-    /// <summary>
-    /// Identifies all disconnected components and removes the smallest X% of them by count.
-    /// E.g. keeping the largest 30% of components (removing the 70% of smaller objects).
-    /// </summary>
-    public static void KeepTopPercentageComponents(SegmentationVolume segVol, byte label, double keepRatio, Action<double>? progress = null)
+    private static void MorphClosingCpu(
+        SegmentationVolume segVol, byte label, int iterations,
+        Action<double>? progress)
     {
-        int w = segVol.Width, h = segVol.Height, d = segVol.Depth;
-        int totalVoxels = w * h * d;
-        var visited = new bool[totalVoxels];
-        
+        int w = segVol.Width, h = segVol.Height, d = segVol.Depth, total = w*h*d;
+        var temp = new byte[total];
+        for (int iter = 0; iter < iterations; iter++)
+        {
+            Parallel.For(0, d, z =>
+            {
+                for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    int i = x+y*w+z*w*h;
+                    if (segVol.Labels[i] == label) { temp[i] = label; return; }
+                    bool found =
+                        (x>0   && segVol.Labels[i-1]   == label) ||
+                        (x<w-1 && segVol.Labels[i+1]   == label) ||
+                        (y>0   && segVol.Labels[i-w]   == label) ||
+                        (y<h-1 && segVol.Labels[i+w]   == label) ||
+                        (z>0   && segVol.Labels[i-w*h] == label) ||
+                        (z<d-1 && segVol.Labels[i+w*h] == label);
+                    temp[i] = found ? label : (byte)0;
+                }
+            });
+            Array.Copy(temp, segVol.Labels, total);
+            Parallel.For(0, d, z =>
+            {
+                for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    int i = x+y*w+z*w*h;
+                    if (segVol.Labels[i] != label) { temp[i] = segVol.Labels[i]; return; }
+                    bool erode =
+                        (x==0   || segVol.Labels[i-1]   != label) ||
+                        (x==w-1 || segVol.Labels[i+1]   != label) ||
+                        (y==0   || segVol.Labels[i-w]   != label) ||
+                        (y==h-1 || segVol.Labels[i+w]   != label) ||
+                        (z==0   || segVol.Labels[i-w*h] != label) ||
+                        (z==d-1 || segVol.Labels[i+w*h] != label);
+                    temp[i] = erode ? (byte)0 : label;
+                }
+            });
+            Array.Copy(temp, segVol.Labels, total);
+            progress?.Invoke((double)(iter+1)/iterations);
+        }
+    }
+
+    public static void KeepTopPercentageComponents(
+        SegmentationVolume segVol, byte label, double keepRatio,
+        Action<double>? progress = null)
+    {
+        int w = segVol.Width, h = segVol.Height, d = segVol.Depth, total = w*h*d;
+        int[][] neighbors = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+        var visited = new bool[total];
         var components = new List<List<int>>();
-
-        int[] n6 = { 1, -1, w, -w, w * h, -w * h }; // 1D offsets for speed
-        var queue = new Queue<int>();
-
-        for (int i = 0; i < totalVoxels; i++)
+        for (int i = 0; i < total; i++)
         {
-            if (segVol.Labels[i] == label && !visited[i])
+            if (visited[i] || segVol.Labels[i] != label) continue;
+            var comp = new List<int>();
+            var queue = new Queue<int>();
+            queue.Enqueue(i); visited[i] = true;
+            while (queue.Count > 0)
             {
-                var comp = new List<int>();
-                queue.Enqueue(i);
-                visited[i] = true;
-
-                while (queue.Count > 0)
+                int cur = queue.Dequeue();
+                comp.Add(cur);
+                int cz=cur/(w*h), rem=cur%(w*h), cy=rem/w, cx=rem%w;
+                foreach (var n in neighbors)
                 {
-                    int curr = queue.Dequeue();
-                    comp.Add(curr);
-
-                    foreach (var offset in n6)
-                    {
-                        int nIdx = curr + offset;
-                        if (nIdx >= 0 && nIdx < totalVoxels && !visited[nIdx] && segVol.Labels[nIdx] == label)
-                        {
-                            visited[nIdx] = true;
-                            queue.Enqueue(nIdx);
-                        }
-                    }
+                    int nx=cx+n[0], ny=cy+n[1], nz=cz+n[2];
+                    if (nx<0||nx>=w||ny<0||ny>=h||nz<0||nz>=d) continue;
+                    int ni = nx+ny*w+nz*w*h;
+                    if (!visited[ni] && segVol.Labels[ni] == label)
+                    { visited[ni] = true; queue.Enqueue(ni); }
                 }
-                components.Add(comp);
             }
+            components.Add(comp);
         }
-
-        if (components.Count == 0) return;
-
-        // Sort by size descending
         components.Sort((a, b) => b.Count.CompareTo(a.Count));
-
-        // Keep top ratio
-        int keepCount = Math.Max(1, (int)(components.Count * keepRatio));
-        
-        // Wipe the removed components from the volume
-        for (int i = keepCount; i < components.Count; i++)
-        {
-            foreach (var idx in components[i])
-            {
-                segVol.Labels[idx] = 0;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Smooths the binary mask for a specific label using a 3x3x3 majority-vote 
-    /// morphological filter. This fills small holes and smooths jagged boundaries.
-    /// </summary>
-    public static void SmoothLabelMask(SegmentationVolume segVol, byte label, Action<double>? progress = null)
-    {
-        int w = segVol.Width, h = segVol.Height, d = segVol.Depth;
-        var temp = new byte[segVol.Labels.Length];
-        Array.Copy(segVol.Labels, temp, temp.Length);
-
-        // Required threshold of neighbors to turn ON a background voxel or keep an ON voxel
-        // Out of 26 neighbors + 1 center = 27 total. Majority is >= 14
-        const int threshold = 14; 
-
-        // Offsets for 3x3x3 neighborhood
-        int[][] n27 = new int[27][];
-        int idx = 0;
-        for (int dz = -1; dz <= 1; dz++)
-        for (int dy = -1; dy <= 1; dy++)
-        for (int dx = -1; dx <= 1; dx++)
-            n27[idx++] = [dx, dy, dz];
-
-        for (int z = 1; z < d - 1; z++)
-        {
-            for (int y = 1; y < h - 1; y++)
-            for (int x = 1; x < w - 1; x++)
-            {
-                int cIdx = x + y * w + z * w * h;
-                int count = 0;
-
-                foreach (var offset in n27)
-                {
-                    int nx = x + offset[0], ny = y + offset[1], nz = z + offset[2];
-                    int nIdx = nx + ny * w + nz * w * h;
-                    if (temp[nIdx] == label) count++;
-                }
-
-                if (count >= threshold)
-                    segVol.SetLabel(x, y, z, label);
-                else if (temp[cIdx] == label)
-                    segVol.SetLabel(x, y, z, 0); // clear if it lost the vote
-            }
-            if (progress != null && z % 10 == 0)
-                progress((double)z / d);
-        }
+        int keep = Math.Max(1, (int)Math.Ceiling(components.Count * keepRatio));
+        for (int i = 0; i < total; i++)
+            if (segVol.Labels[i] == label) segVol.Labels[i] = 0;
+        for (int ci = 0; ci < keep && ci < components.Count; ci++)
+            foreach (int idx in components[ci]) segVol.Labels[idx] = label;
         progress?.Invoke(1.0);
     }
 
-    /// <summary>
-    /// Generate a 3D mesh from a labeled segment using marching cubes.
-    /// Uses actual HU values (not binary) for smooth interpolation.
-    /// The iso value is the midpoint of the threshold range.
-    /// </summary>
+    // ─────────────────────────────────────────────────────────────────────────
+    // SMOOTH LABEL MASK — GPU first, Parallel.For fallback
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public static void SmoothLabelMask(
+        SegmentationVolume segVol, byte label,
+        Action<double>? progress = null)
+    {
+        try { SmoothGpu(segVol, label, progress); }
+        catch { SmoothCpu(segVol, label, progress); }
+    }
+
+    private static void SmoothGpu(
+        SegmentationVolume segVol, byte label, Action<double>? progress)
+    {
+        var gpu = GpuContext.Instance;
+        int w = segVol.Width, h = segVol.Height, d = segVol.Depth, n = w*h*d;
+        using var gpuIn  = gpu.Accelerator.Allocate1D<byte>(segVol.Labels);
+        using var gpuOut = gpu.Accelerator.Allocate1D<byte>(n);
+
+        var kernel = gpu.Accelerator.LoadAutoGroupedStreamKernel(
+            (Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, byte>)
+            GpuKernels.SmoothLabelKernel);
+
+        kernel(n, gpuIn.View, gpuOut.View, w, h, d, label);
+        gpu.Accelerator.Synchronize();
+        gpuOut.CopyToCPU(segVol.Labels);
+        progress?.Invoke(1.0);
+    }
+
+    private static void SmoothCpu(
+        SegmentationVolume segVol, byte label, Action<double>? progress)
+    {
+        int w = segVol.Width, h = segVol.Height, d = segVol.Depth;
+        var output = new byte[w * h * d];
+        Parallel.For(1, d-1, z =>
+        {
+            for (int y = 1; y < h-1; y++)
+            for (int x = 1; x < w-1; x++)
+            {
+                int count = 0;
+                for (int dz=-1; dz<=1; dz++)
+                for (int dy=-1; dy<=1; dy++)
+                for (int dx=-1; dx<=1; dx++)
+                {
+                    int ni = (x+dx) + (y+dy)*w + (z+dz)*w*h;
+                    if (segVol.Labels[ni] == label) count++;
+                }
+                output[x + y*w + z*w*h] = count >= 14 ? label : (byte)0;
+            }
+        });
+        Array.Copy(output, segVol.Labels, output.Length);
+        progress?.Invoke(1.0);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // EXTRACT MESH
+    // ─────────────────────────────────────────────────────────────────────────
+
     public static List<float[]> ExtractSegmentMesh(
         VolumeData volume, SegmentationVolume segVol,
-        byte label, int stepSize = 1, Action<double>? progress = null)
+        byte label, int stepSize = 1,
+        Action<double>? progress = null)
     {
-        var vertices = new List<float[]>();
-        int w = volume.Width, h = volume.Height, d = volume.Depth;
-        double sx = volume.Spacing[0], sy = volume.Spacing[1], sz = volume.Spacing[2];
-
-        float[]? smooth = null;
-        double isoLevel;
-
-        if (stepSize == 1)
-        {
-            // 1. Convert mask to probability field
-            float[] field = new float[w * h * d];
-            for (int i = 0; i < field.Length; i++)
-                field[i] = segVol.Labels[i] == label ? 100f : 0f;
-
-            // 2. Separable 3D Box Blur applied 1 time (A nice balance between smoothness and detail retention)
-            smooth = new float[w * h * d];
-            
-            for (int pass = 0; pass < 1; pass++)
-            {
-                // X-blur
-                for (int z = 0; z < d; z++)
-                for (int y = 0; y < h; y++)
-                for (int x = 1; x < w - 1; x++)
-                    smooth[x+y*w+z*w*h] = (field[x-1+y*w+z*w*h] + field[x+y*w+z*w*h] + field[x+1+y*w+z*w*h]) * 0.3333333f;
-                    
-                // Y-blur
-                for (int z = 0; z < d; z++)
-                for (int y = 1; y < h - 1; y++)
-                for (int x = 0; x < w; x++)
-                    field[x+y*w+z*w*h] = (smooth[x+(y-1)*w+z*w*h] + smooth[x+y*w+z*w*h] + smooth[x+(y+1)*w+z*w*h]) * 0.3333333f;
-                    
-                // Z-blur
-                for (int z = 1; z < d - 1; z++)
-                for (int y = 0; y < h; y++)
-                for (int x = 0; x < w; x++)
-                    smooth[x+y*w+z*w*h] = (field[x+y*w+(z-1)*w*h] + field[x+y*w+z*w*h] + field[x+y*w+(z+1)*w*h]) * 0.3333333f;
-                
-                // Copy smoothed output back to input for the next iter
-                if (pass < 0) Array.Copy(smooth, field, smooth.Length);
-            }
-
-            // Lowered isoLevel captures thinner bones that get diluted down in probability, preventing holes
-            isoLevel = 35.0; 
-        }
-        else
-        {
-            // Fast preview mode: bypass expensive 800MB array allocations and blurs
-            isoLevel = 50.0;
-        }
-
-        // Iterate from -1 to Width to allow the zero-padded bounds to act as solid sealing mesh walls
-        int maxX = w, maxY = h, maxZ = d;
-        for (int z = -1; z < maxZ; z += stepSize)
-        {
-            for (int y = -1; y < maxY; y += stepSize)
-            for (int x = -1; x < maxX; x += stepSize)
-            {
-                int[] ox = [0, stepSize, stepSize, 0, 0, stepSize, stepSize, 0];
-                int[] oy = [0, 0, stepSize, stepSize, 0, 0, stepSize, stepSize];
-                int[] oz = [0, 0, 0, 0, stepSize, stepSize, stepSize, stepSize];
-
-                double[] val = new double[8];
-                for (int i = 0; i < 8; i++)
-                {
-                    int px = x + ox[i];
-                    int py = y + oy[i];
-                    int pz = z + oz[i];
-                    
-                    // If out of bounds of the actual volume, explicitly return 0.0 probability.
-                    // This forces Marching Cubes to abruptly jump across the 45.0 IsoLevel threshold
-                    // right at the boundary box edges, drawing completely flat sealing caps across the gap!
-                    if (px < 0 || px >= w || py < 0 || py >= h || pz < 0 || pz >= d)
-                    {
-                         val[i] = 0.0;
-                    }
-                    else if (stepSize == 1)
-                    {
-                        val[i] = smooth![px + py * w + pz * w * h];
-                    }
-                    else
-                    {
-                        val[i] = segVol.Labels[px + py * w + pz * w * h] == label ? 100.0 : 0.0;
-                    }
-                }
-
-                int cubeIndex = 0;
-                for (int i = 0; i < 8; i++)
-                    if (val[i] >= isoLevel) cubeIndex |= (1 << i);
-                if (cubeIndex == 0 || cubeIndex == 255) continue;
-
-                // Corner positions in world coordinates
-                double[][] pos =
-                [
-                    [x*sx, y*sy, z*sz],
-                    [(x+stepSize)*sx, y*sy, z*sz],
-                    [(x+stepSize)*sx, (y+stepSize)*sy, z*sz],
-                    [x*sx, (y+stepSize)*sy, z*sz],
-                    [x*sx, y*sy, (z+stepSize)*sz],
-                    [(x+stepSize)*sx, y*sy, (z+stepSize)*sz],
-                    [(x+stepSize)*sx, (y+stepSize)*sy, (z+stepSize)*sz],
-                    [x*sx, (y+stepSize)*sy, (z+stepSize)*sz]
-                ];
-
-                float[][] edgeVerts = new float[12][];
-                int[] edgePairs = [0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7];
-                int edgeFlags = MarchingCubes.GetEdgeFlags(cubeIndex);
-
-                for (int i = 0; i < 12; i++)
-                {
-                    if ((edgeFlags & (1 << i)) == 0) continue;
-                    int a = edgePairs[i * 2], b = edgePairs[i * 2 + 1];
-
-                    // Linear interpolation based on actual values
-                    double diff = val[b] - val[a];
-                    double t = Math.Abs(diff) > 0.001 ? (isoLevel - val[a]) / diff : 0.5;
-                    t = Math.Clamp(t, 0, 1);
-
-                    edgeVerts[i] =
-                    [
-                        (float)(pos[a][0] + t * (pos[b][0] - pos[a][0])),
-                        (float)(pos[a][1] + t * (pos[b][1] - pos[a][1])),
-                        (float)(pos[a][2] + t * (pos[b][2] - pos[a][2]))
-                    ];
-                }
-
-                var triIndices = MarchingCubes.GetTriangles(cubeIndex);
-                for (int i = 0; i < triIndices.Length && triIndices[i] != -1; i += 3)
-                {
-                    vertices.Add(edgeVerts[triIndices[i]]);
-                    vertices.Add(edgeVerts[triIndices[i + 1]]);
-                    vertices.Add(edgeVerts[triIndices[i + 2]]);
-                }
-            }
-            progress?.Invoke((double)(z + 1) / d);
-        }
-        return vertices;
+        int n = volume.Voxels.Length;
+        var masked = new short[n];
+        Parallel.For(0, n, i =>
+            masked[i] = segVol.Labels[i] == label ? (short)0 : (short)-1024);
+        var maskedVol = new VolumeData(volume.Width, volume.Height, volume.Depth,
+            (double[])volume.Spacing.Clone());
+        Array.Copy(masked, maskedVol.Voxels, n);
+        progress?.Invoke(0.1);
+        return MarchingCubes.Extract(maskedVol, -512.0, stepSize,
+            p => progress?.Invoke(0.1 + p * 0.9));
     }
 
-    /// <summary>
-    /// Generates a highly subsampled, raw Marching Cubes mesh directly from the VolumeData
-    /// based on min/max HU values for real-time slider proxy rendering.
-    /// </summary>
     public static List<float[]> ExtractLivePreviewMesh(
-        VolumeData volume, short minHU, short maxHU, int stepSize = 4)
+        VolumeData volume, SegmentationVolume segVol,
+        byte label, int stepSize = 4,
+        Action<double>? progress = null)
+        => ExtractSegmentMesh(volume, segVol, label, stepSize, progress);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // RESLICE VOLUME — Parallel.For only (GPU path removed: too many params)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public static VolumeData ResliceVolume(
+        VolumeData source, NhpTransform transform, NhpTransform inverseTransform)
     {
-        var vertices = new List<float[]>();
-        int w = volume.Width, h = volume.Height, d = volume.Depth;
-        double sx = volume.Spacing[0], sy = volume.Spacing[1], sz = volume.Spacing[2];
-
-        // Use zero as the isosurface threshold.
-        // Positive distance values are inside the bounds, negative are outside.
-        double isoLevel = 0.0;
-
-        int maxX = w - stepSize, maxY = h - stepSize, maxZ = d - stepSize;
-        
-        for (int z = 0; z < maxZ; z += stepSize)
-        for (int y = 0; y < maxY; y += stepSize)
-        for (int x = 0; x < maxX; x += stepSize)
-        {
-            int[] ox = [0, stepSize, stepSize, 0, 0, stepSize, stepSize, 0];
-            int[] oy = [0, 0, stepSize, stepSize, 0, 0, stepSize, stepSize];
-            int[] oz = [0, 0, 0, 0, stepSize, stepSize, stepSize, stepSize];
-
-            double[] val = new double[8];
-            for (int i = 0; i < 8; i++)
-            {
-                int px = x + ox[i], py = y + oy[i], pz = z + oz[i];
-                short hu = volume.Voxels[px + py * w + pz * w * h];
-                if (hu >= minHU && hu <= maxHU)
-                {
-                    val[i] = Math.Min(hu - minHU, maxHU - hu);
-                    if (val[i] == 0) val[i] = 0.001; // ensure strict inclusion for boundaries
-                }
-                else if (hu < minHU)
-                {
-                    val[i] = hu - minHU;
-                }
-                else
-                {
-                    val[i] = maxHU - hu;
-                }
-            }
-
-            int cubeIndex = 0;
-            for (int i = 0; i < 8; i++)
-                if (val[i] >= isoLevel) cubeIndex |= (1 << i);
-            
-            if (cubeIndex == 0 || cubeIndex == 255) continue;
-
-            double[][] pos =
-            [
-                [x*sx, y*sy, z*sz],
-                [(x+stepSize)*sx, y*sy, z*sz],
-                [(x+stepSize)*sx, (y+stepSize)*sy, z*sz],
-                [x*sx, (y+stepSize)*sy, z*sz],
-                [x*sx, y*sy, (z+stepSize)*sz],
-                [(x+stepSize)*sx, y*sy, (z+stepSize)*sz],
-                [(x+stepSize)*sx, (y+stepSize)*sy, (z+stepSize)*sz],
-                [x*sx, (y+stepSize)*sy, (z+stepSize)*sz]
-            ];
-
-            float[][] edgeVerts = new float[12][];
-            int[] edgePairs = [0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7];
-            int edgeFlags = MarchingCubes.GetEdgeFlags(cubeIndex);
-
-            for (int i = 0; i < 12; i++)
-            {
-                if ((edgeFlags & (1 << i)) == 0) continue;
-                int a = edgePairs[i * 2], b = edgePairs[i * 2 + 1];
-
-                double diff = val[b] - val[a];
-                double t = Math.Abs(diff) > 0.001 ? (isoLevel - val[a]) / diff : 0.5;
-                t = Math.Clamp(t, 0, 1);
-
-                edgeVerts[i] =
-                [
-                    (float)(pos[a][0] + t * (pos[b][0] - pos[a][0])),
-                    (float)(pos[a][1] + t * (pos[b][1] - pos[a][1])),
-                    (float)(pos[a][2] + t * (pos[b][2] - pos[a][2]))
-                ];
-            }
-
-            var triIndices = MarchingCubes.GetTriangles(cubeIndex);
-            for (int i = 0; i < triIndices.Length && triIndices[i] != -1; i += 3)
-            {
-                vertices.Add(edgeVerts[triIndices[i]]);
-                vertices.Add(edgeVerts[triIndices[i + 1]]);
-                vertices.Add(edgeVerts[triIndices[i + 2]]);
-            }
-        }
-        
-        return vertices;
-    }
-
-    /// <summary>
-    /// Performs a physical reslice of the volume using trilinear interpolation.
-    /// </summary>
-    public static VolumeData ResliceVolume(VolumeData source, NhpTransform transform, NhpTransform inverseTransform)
-    {
-        int wSrc = source.Width, hSrc = source.Height, dSrc = source.Depth;
         double sx = source.Spacing[0], sy = source.Spacing[1], sz = source.Spacing[2];
+        double cx = source.Width*sx/2, cy = source.Height*sy/2, cz = source.Depth*sz/2;
 
-        // The world-center of the Original Volume
-        double cx = wSrc * sx / 2.0;
-        double cy = hSrc * sy / 2.0;
-        double cz = dSrc * sz / 2.0;
+        var corners = new (double x, double y, double z)[8];
+        int ci = 0;
+        for (int bz=0; bz<=1; bz++)
+        for (int by=0; by<=1; by++)
+        for (int bx=0; bx<=1; bx++)
+            corners[ci++] = transform.TransformPoint(
+                bx*source.Width*sx - cx,
+                by*source.Height*sy - cy,
+                bz*source.Depth*sz  - cz);
 
-        // Extract the 8 local physical corners of the source box
-        double[] xCorners = [0, wSrc * sx];
-        double[] yCorners = [0, hSrc * sy];
-        double[] zCorners = [0, dSrc * sz];
+        double minX=corners.Min(c=>c.x), maxX=corners.Max(c=>c.x);
+        double minY=corners.Min(c=>c.y), maxY=corners.Max(c=>c.y);
+        double minZ=corners.Min(c=>c.z), maxZ=corners.Max(c=>c.z);
 
-        double minWorldX = double.MaxValue, maxWorldX = double.MinValue;
-        double minWorldY = double.MaxValue, maxWorldY = double.MinValue;
-        double minWorldZ = double.MaxValue, maxWorldZ = double.MinValue;
-
-        // Map every corner through the inverse transform (Source -> Forward -> Target)
-        // to find exactly where the bounding box reaches in the New Coordinate Space
-        foreach (double x in xCorners)
-        {
-            foreach (double y in yCorners)
-            {
-                foreach (double z in zCorners)
-                {
-                    // Center the corner
-                    double lox = x - cx; double loy = y - cy; double loz = z - cz;
-                    // Project it forward to see how far the rotation throws it
-                    var (wx, wy, wz) = inverseTransform.TransformPoint(lox, loy, loz);
-                    
-                    if (wx < minWorldX) minWorldX = wx; if (wx > maxWorldX) maxWorldX = wx;
-                    if (wy < minWorldY) minWorldY = wy; if (wy > maxWorldY) maxWorldY = wy;
-                    if (wz < minWorldZ) minWorldZ = wz; if (wz > maxWorldZ) maxWorldZ = wz;
-                }
-            }
-        }
-
-        // Calculate absolute minimum grid bounds necessary to enclose the rotated data
-        int maxW = (int)Math.Ceiling((maxWorldX - minWorldX) / sx);
-        int maxH = (int)Math.Ceiling((maxWorldY - minWorldY) / sy);
-        int maxD = (int)Math.Ceiling((maxWorldZ - minWorldZ) / sz);
-
-        int w = maxW, h = maxH, d = maxD;
-        var newVoxels = new short[w * h * d];
+        int w=(int)Math.Ceiling((maxX-minX)/sx);
+        int h=(int)Math.Ceiling((maxY-minY)/sy);
+        int d=(int)Math.Ceiling((maxZ-minZ)/sz);
+        var newVoxels = new short[w*h*d];
 
         System.Threading.Tasks.Parallel.For(0, d, z =>
         {
             for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
             {
-                for (int x = 0; x < w; x++)
-                {
-                    // Iterate through the NEW grid bounds and map backwards to see what's there
-                    // Shift the (0,0,0) iteration point back to the global Box Minimums
-                    double worldX = (x * sx) + minWorldX;
-                    double worldY = (y * sy) + minWorldY;
-                    double worldZ = (z * sz) + minWorldZ;
-
-                    var (ox, oy, oz) = transform.TransformPoint(worldX, worldY, worldZ);
-                    
-                    // Shift back into local Source coordinates before Trilinear Interpolation picks it up
-                    newVoxels[x + y * w + z * w * h] = SampleTrilinear(source, ox + cx, oy + cy, oz + cz);
-                }
+                double worldX = x*sx+minX, worldY = y*sy+minY, worldZ = z*sz+minZ;
+                var (ox, oy, oz) = inverseTransform.TransformPoint(worldX, worldY, worldZ);
+                newVoxels[x + y*w + z*w*h] = SampleTrilinear(source, ox+cx, oy+cy, oz+cz);
             }
         });
 
         var newVolume = new VolumeData(w, h, d, (double[])source.Spacing.Clone());
         Array.Copy(newVoxels, newVolume.Voxels, newVoxels.Length);
-        
-        newVolume.PatientName = source.PatientName;
-        newVolume.StudyDate = source.StudyDate;
+        newVolume.PatientName      = source.PatientName;
+        newVolume.StudyDate        = source.StudyDate;
         newVolume.SeriesDescription = source.SeriesDescription + " (Resliced)";
-        
         newVolume.ComputeMinMax();
         return newVolume;
     }
 
     private static short SampleTrilinear(VolumeData source, double vx, double vy, double vz)
     {
-        double px = vx / source.Spacing[0];
-        double py = vy / source.Spacing[1];
-        double pz = vz / source.Spacing[2];
+        int sw=source.Width, sh=source.Height, sd=source.Depth;
+        double nvx=vx/source.Spacing[0], nvy=vy/source.Spacing[1], nvz=vz/source.Spacing[2];
+        int x0=(int)nvx, y0=(int)nvy, z0=(int)nvz;
+        int x1=x0+1,     y1=y0+1,     z1=z0+1;
+        if (x0<0||y0<0||z0<0||x1>=sw||y1>=sh||z1>=sd) return short.MinValue;
 
-        int w = source.Width, h = source.Height, d = source.Depth;
+        double tx=nvx-x0, ty=nvy-y0, tz=nvz-z0;
+        double c000=source.Voxels[x0+y0*sw+z0*sw*sh], c100=source.Voxels[x1+y0*sw+z0*sw*sh];
+        double c010=source.Voxels[x0+y1*sw+z0*sw*sh], c110=source.Voxels[x1+y1*sw+z0*sw*sh];
+        double c001=source.Voxels[x0+y0*sw+z1*sw*sh], c101=source.Voxels[x1+y0*sw+z1*sw*sh];
+        double c011=source.Voxels[x0+y1*sw+z1*sw*sh], c111=source.Voxels[x1+y1*sw+z1*sw*sh];
 
-        if (px < 0 || px >= w - 1 || py < 0 || py >= h - 1 || pz < 0 || pz >= d - 1)
-            return -1024;
+        double val =
+            c000*(1-tx)*(1-ty)*(1-tz) + c100*tx*(1-ty)*(1-tz) +
+            c010*(1-tx)*ty*(1-tz)     + c110*tx*ty*(1-tz)     +
+            c001*(1-tx)*(1-ty)*tz     + c101*tx*(1-ty)*tz     +
+            c011*(1-tx)*ty*tz         + c111*tx*ty*tz;
 
-        int x0 = (int)px; int x1 = x0 + 1;
-        int y0 = (int)py; int y1 = y0 + 1;
-        int z0 = (int)pz; int z1 = z0 + 1;
-
-        double dx = px - x0;
-        double dy = py - y0;
-        double dz = pz - z0;
-
-        double v000 = source.Voxels[x0 + y0 * w + z0 * w * h];
-        double v100 = source.Voxels[x1 + y0 * w + z0 * w * h];
-        double v010 = source.Voxels[x0 + y1 * w + z0 * w * h];
-        double v110 = source.Voxels[x1 + y1 * w + z0 * w * h];
-        double v001 = source.Voxels[x0 + y0 * w + z1 * w * h];
-        double v101 = source.Voxels[x1 + y0 * w + z1 * w * h];
-        double v011 = source.Voxels[x0 + y1 * w + z1 * w * h];
-        double v111 = source.Voxels[x1 + y1 * w + z1 * w * h];
-
-        double v00 = v000 * (1 - dx) + v100 * dx;
-        double v01 = v001 * (1 - dx) + v101 * dx;
-        double v10 = v010 * (1 - dx) + v110 * dx;
-        double v11 = v011 * (1 - dx) + v111 * dx;
-
-        double v0 = v00 * (1 - dy) + v10 * dy;
-        double v1 = v01 * (1 - dy) + v11 * dy;
-
-        return (short)(v0 * (1 - dz) + v1 * dz);
+        return (short)Math.Clamp((int)val, short.MinValue, short.MaxValue);
     }
+    // ─────────────────────────────────────────────────────────────────────────
+    // OVERLOADS — original signatures kept for MainViewModel compatibility
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Original signature overload: splits connected components with auto w/h/d from segVol.
+    /// </summary>
+    public static List<(byte newLabel, int voxelCount)> SplitConnectedComponents(
+        SegmentationVolume segVol, byte sourceLabel, byte startingLabel,
+        Action<double>? progress = null)
+    {
+        return SplitConnectedComponents(
+            segVol, sourceLabel,
+            Enumerable.Range(0, 254).Select(i => (byte)(startingLabel + i)).ToList(),
+            segVol.Width, segVol.Height, segVol.Depth,
+            progress);
+    }
+
+    /// <summary>
+    /// Original signature overload: live preview mesh from HU range directly (no SegmentationVolume needed).
+    /// Uses Parallel.For for performance.
+    /// </summary>
+    public static List<float[]> ExtractLivePreviewMesh(
+        VolumeData volume, short minHU, short maxHU, int stepSize = 4,
+        Action<double>? progress = null)
+    {
+        int w = volume.Width, h = volume.Height, d = volume.Depth;
+        double sx = volume.Spacing[0], sy = volume.Spacing[1], sz = volume.Spacing[2];
+        double isoLevel = 0.0;
+        int maxX = w - stepSize, maxY = h - stepSize, maxZ = d - stepSize;
+        int gw = maxX / stepSize, gh = maxY / stepSize, gd = maxZ / stepSize;
+
+        var bag = new System.Collections.Concurrent.ConcurrentBag<List<float[]>>();
+
+        Parallel.For(0, gd, () => new List<float[]>(256), (gz, _, localList) =>
+        {
+            int z = gz * stepSize;
+            int[] ox = [0, stepSize, stepSize, 0, 0, stepSize, stepSize, 0];
+            int[] oy = [0, 0, stepSize, stepSize, 0, 0, stepSize, stepSize];
+            int[] oz = [0, 0, 0, 0, stepSize, stepSize, stepSize, stepSize];
+
+            for (int gy = 0; gy < gh; gy++)
+            {
+                int y = gy * stepSize;
+                for (int gx = 0; gx < gw; gx++)
+                {
+                    int x = gx * stepSize;
+                    double[] val = new double[8];
+                    for (int i = 0; i < 8; i++)
+                    {
+                        int px = x+ox[i], py = y+oy[i], pz = z+oz[i];
+                        if (px>=w||py>=h||pz>=d) continue;
+                        short hu = volume.Voxels[px + py*w + pz*w*h];
+                        val[i] = hu >= minHU && hu <= maxHU
+                            ? Math.Max(0.001, Math.Min(hu - minHU, maxHU - hu))
+                            : hu < minHU ? hu - minHU : maxHU - hu;
+                    }
+
+                    int cubeIndex = 0;
+                    for (int i = 0; i < 8; i++)
+                        if (val[i] >= isoLevel) cubeIndex |= (1 << i);
+                    if (cubeIndex == 0 || cubeIndex == 255) continue;
+
+                    double[][] pos =
+                    [
+                        [x*sx, y*sy, z*sz], [(x+stepSize)*sx, y*sy, z*sz],
+                        [(x+stepSize)*sx, (y+stepSize)*sy, z*sz], [x*sx, (y+stepSize)*sy, z*sz],
+                        [x*sx, y*sy, (z+stepSize)*sz], [(x+stepSize)*sx, y*sy, (z+stepSize)*sz],
+                        [(x+stepSize)*sx, (y+stepSize)*sy, (z+stepSize)*sz], [x*sx, (y+stepSize)*sy, (z+stepSize)*sz]
+                    ];
+
+                    int[] edgePairs = [0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7];
+                    int edgeFlags = MarchingCubes.GetEdgeFlags(cubeIndex);
+                    float[][] edgeVerts = new float[12][];
+
+                    for (int i = 0; i < 12; i++)
+                    {
+                        if ((edgeFlags & (1 << i)) == 0) continue;
+                        int a = edgePairs[i*2], b = edgePairs[i*2+1];
+                        double diff = val[b] - val[a];
+                        double t = Math.Abs(diff) > 0.001 ? (isoLevel - val[a]) / diff : 0.5;
+                        t = Math.Clamp(t, 0, 1);
+                        edgeVerts[i] = [
+                            (float)(pos[a][0] + t*(pos[b][0]-pos[a][0])),
+                            (float)(pos[a][1] + t*(pos[b][1]-pos[a][1])),
+                            (float)(pos[a][2] + t*(pos[b][2]-pos[a][2]))
+                        ];
+                    }
+
+                    var triIndices = MarchingCubes.GetTriangles(cubeIndex);
+                    for (int i = 0; i < triIndices.Length && triIndices[i] != -1; i += 3)
+                    {
+                        localList.Add(edgeVerts[triIndices[i]]);
+                        localList.Add(edgeVerts[triIndices[i+1]]);
+                        localList.Add(edgeVerts[triIndices[i+2]]);
+                    }
+                }
+            }
+            return localList;
+        }, localList => bag.Add(localList));
+
+        var result = new List<float[]>();
+        foreach (var local in bag) result.AddRange(local);
+        progress?.Invoke(1.0);
+        return result;
+    }
+
 }

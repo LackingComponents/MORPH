@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -406,24 +407,28 @@ public static class MeshOps
     public static List<float[]> SubtractByProximity(List<float[]> boneVerts, KdTree castTree, float radiusMm)
     {
         float radiusSq = radiusMm * radiusMm;
-        var result = new List<float[]>(boneVerts.Count);
+        int triCount = boneVerts.Count / 3;
+        var keepFlags = new bool[triCount];
 
-        for (int i = 0; i + 2 < boneVerts.Count; i += 3)
+        // Parallel nearest-neighbor per triangle
+        Parallel.For(0, triCount, t =>
         {
-            // Triangle centroid
-            float cx = (boneVerts[i][0] + boneVerts[i + 1][0] + boneVerts[i + 2][0]) / 3f;
-            float cy = (boneVerts[i][1] + boneVerts[i + 1][1] + boneVerts[i + 2][1]) / 3f;
-            float cz = (boneVerts[i][2] + boneVerts[i + 1][2] + boneVerts[i + 2][2]) / 3f;
-
+            int i = t * 3;
+            float cx = (boneVerts[i][0] + boneVerts[i+1][0] + boneVerts[i+2][0]) / 3f;
+            float cy = (boneVerts[i][1] + boneVerts[i+1][1] + boneVerts[i+2][1]) / 3f;
+            float cz = (boneVerts[i][2] + boneVerts[i+1][2] + boneVerts[i+2][2]) / 3f;
             var (_, distSq) = castTree.FindNearest(cx, cy, cz);
+            keepFlags[t] = distSq > radiusSq;
+        });
 
-            if (distSq > radiusSq)
-            {
-                // Keep this triangle
-                result.Add(new float[] { boneVerts[i][0], boneVerts[i][1], boneVerts[i][2] });
-                result.Add(new float[] { boneVerts[i + 1][0], boneVerts[i + 1][1], boneVerts[i + 1][2] });
-                result.Add(new float[] { boneVerts[i + 2][0], boneVerts[i + 2][1], boneVerts[i + 2][2] });
-            }
+        var result = new List<float[]>(triCount * 3 / 2);
+        for (int t = 0; t < triCount; t++)
+        {
+            if (!keepFlags[t]) continue;
+            int i = t * 3;
+            result.Add(new float[] { boneVerts[i][0],   boneVerts[i][1],   boneVerts[i][2] });
+            result.Add(new float[] { boneVerts[i+1][0], boneVerts[i+1][1], boneVerts[i+1][2] });
+            result.Add(new float[] { boneVerts[i+2][0], boneVerts[i+2][1], boneVerts[i+2][2] });
         }
         return result;
     }
@@ -445,17 +450,26 @@ public static class MeshOps
     /// </summary>
     public static (List<float[]> Above, List<float[]> Below) SplitByZPlane(List<float[]> verts, float zCut)
     {
+        int triCount = verts.Count / 3;
+        var aboveBag = new ConcurrentBag<(int t, bool above)>();
+
+        Parallel.For(0, triCount, t =>
+        {
+            int i = t * 3;
+            float cz = (verts[i][2] + verts[i+1][2] + verts[i+2][2]) / 3f;
+            aboveBag.Add((t, cz >= zCut));
+        });
+
         var above = new List<float[]>();
         var below = new List<float[]>();
 
-        for (int i = 0; i + 2 < verts.Count; i += 3)
+        foreach (var (t, isAbove) in aboveBag.OrderBy(x => x.t))
         {
-            float cz = (verts[i][2] + verts[i + 1][2] + verts[i + 2][2]) / 3f;
-
-            var target = cz >= zCut ? above : below;
-            target.Add(new float[] { verts[i][0], verts[i][1], verts[i][2] });
-            target.Add(new float[] { verts[i + 1][0], verts[i + 1][1], verts[i + 1][2] });
-            target.Add(new float[] { verts[i + 2][0], verts[i + 2][1], verts[i + 2][2] });
+            int i = t * 3;
+            var target = isAbove ? above : below;
+            target.Add(new float[] { verts[i][0],   verts[i][1],   verts[i][2] });
+            target.Add(new float[] { verts[i+1][0], verts[i+1][1], verts[i+1][2] });
+            target.Add(new float[] { verts[i+2][0], verts[i+2][1], verts[i+2][2] });
         }
 
         return (above, below);
@@ -508,23 +522,29 @@ public static class MeshOps
     /// </summary>
     public static List<float[]> ClipToBoundingBox(List<float[]> verts, float[] center, float[] halfExtents)
     {
-        var result = new List<float[]>();
-        float minX = center[0] - halfExtents[0], maxX = center[0] + halfExtents[0];
-        float minY = center[1] - halfExtents[1], maxY = center[1] + halfExtents[1];
-        float minZ = center[2] - halfExtents[2], maxZ = center[2] + halfExtents[2];
+        float minX = center[0]-halfExtents[0], maxX = center[0]+halfExtents[0];
+        float minY = center[1]-halfExtents[1], maxY = center[1]+halfExtents[1];
+        float minZ = center[2]-halfExtents[2], maxZ = center[2]+halfExtents[2];
+        int triCount = verts.Count / 3;
+        var keepFlags = new bool[triCount];
 
-        for (int i = 0; i + 2 < verts.Count; i += 3)
+        Parallel.For(0, triCount, t =>
         {
-            float cx = (verts[i][0] + verts[i + 1][0] + verts[i + 2][0]) / 3f;
-            float cy = (verts[i][1] + verts[i + 1][1] + verts[i + 2][1]) / 3f;
-            float cz = (verts[i][2] + verts[i + 1][2] + verts[i + 2][2]) / 3f;
+            int i = t * 3;
+            float cx = (verts[i][0]+verts[i+1][0]+verts[i+2][0]) / 3f;
+            float cy = (verts[i][1]+verts[i+1][1]+verts[i+2][1]) / 3f;
+            float cz = (verts[i][2]+verts[i+1][2]+verts[i+2][2]) / 3f;
+            keepFlags[t] = cx>=minX&&cx<=maxX&&cy>=minY&&cy<=maxY&&cz>=minZ&&cz<=maxZ;
+        });
 
-            if (cx >= minX && cx <= maxX && cy >= minY && cy <= maxY && cz >= minZ && cz <= maxZ)
-            {
-                result.Add(new float[] { verts[i][0], verts[i][1], verts[i][2] });
-                result.Add(new float[] { verts[i + 1][0], verts[i + 1][1], verts[i + 1][2] });
-                result.Add(new float[] { verts[i + 2][0], verts[i + 2][1], verts[i + 2][2] });
-            }
+        var result = new List<float[]>();
+        for (int t = 0; t < triCount; t++)
+        {
+            if (!keepFlags[t]) continue;
+            int i = t * 3;
+            result.Add(new float[] { verts[i][0],   verts[i][1],   verts[i][2] });
+            result.Add(new float[] { verts[i+1][0], verts[i+1][1], verts[i+1][2] });
+            result.Add(new float[] { verts[i+2][0], verts[i+2][1], verts[i+2][2] });
         }
         return result;
     }
@@ -535,24 +555,30 @@ public static class MeshOps
     /// </summary>
     public static List<float[]> ExcludeBoundingBox(List<float[]> verts, float[] center, float[] halfExtents)
     {
-        var result = new List<float[]>(verts.Count);
-        float minX = center[0] - halfExtents[0], maxX = center[0] + halfExtents[0];
-        float minY = center[1] - halfExtents[1], maxY = center[1] + halfExtents[1];
-        float minZ = center[2] - halfExtents[2], maxZ = center[2] + halfExtents[2];
+        float minX = center[0]-halfExtents[0], maxX = center[0]+halfExtents[0];
+        float minY = center[1]-halfExtents[1], maxY = center[1]+halfExtents[1];
+        float minZ = center[2]-halfExtents[2], maxZ = center[2]+halfExtents[2];
+        int triCount = verts.Count / 3;
+        var keepFlags = new bool[triCount];
 
-        for (int i = 0; i + 2 < verts.Count; i += 3)
+        Parallel.For(0, triCount, t =>
         {
-            float cx = (verts[i][0] + verts[i + 1][0] + verts[i + 2][0]) / 3f;
-            float cy = (verts[i][1] + verts[i + 1][1] + verts[i + 2][1]) / 3f;
-            float cz = (verts[i][2] + verts[i + 1][2] + verts[i + 2][2]) / 3f;
+            int i = t * 3;
+            float cx = (verts[i][0]+verts[i+1][0]+verts[i+2][0]) / 3f;
+            float cy = (verts[i][1]+verts[i+1][1]+verts[i+2][1]) / 3f;
+            float cz = (verts[i][2]+verts[i+1][2]+verts[i+2][2]) / 3f;
+            bool inside = cx>=minX&&cx<=maxX&&cy>=minY&&cy<=maxY&&cz>=minZ&&cz<=maxZ;
+            keepFlags[t] = !inside;
+        });
 
-            bool inside = cx >= minX && cx <= maxX && cy >= minY && cy <= maxY && cz >= minZ && cz <= maxZ;
-            if (!inside)
-            {
-                result.Add(new float[] { verts[i][0], verts[i][1], verts[i][2] });
-                result.Add(new float[] { verts[i + 1][0], verts[i + 1][1], verts[i + 1][2] });
-                result.Add(new float[] { verts[i + 2][0], verts[i + 2][1], verts[i + 2][2] });
-            }
+        var result = new List<float[]>(verts.Count);
+        for (int t = 0; t < triCount; t++)
+        {
+            if (!keepFlags[t]) continue;
+            int i = t * 3;
+            result.Add(new float[] { verts[i][0],   verts[i][1],   verts[i][2] });
+            result.Add(new float[] { verts[i+1][0], verts[i+1][1], verts[i+1][2] });
+            result.Add(new float[] { verts[i+2][0], verts[i+2][1], verts[i+2][2] });
         }
         return result;
     }
@@ -575,28 +601,33 @@ public static class MeshOps
     public static List<float[]> SubtractByArchVolume(
         List<float[]> boneVerts, List<(double X, double Y, double Z)> splineSamples, float radiusMm)
     {
-        // Build a KdTree from the spline samples for fast proximity queries
         var splineTree = new KdTree();
         var splinePoints = splineSamples.Select(
             p => new float[] { (float)p.X, (float)p.Y, (float)p.Z }).ToList();
         splineTree.Build(splinePoints);
 
         float radiusSq = radiusMm * radiusMm;
-        var result = new List<float[]>(boneVerts.Count);
+        int triCount = boneVerts.Count / 3;
+        var keepFlags = new bool[triCount];
 
-        for (int i = 0; i + 2 < boneVerts.Count; i += 3)
+        Parallel.For(0, triCount, t =>
         {
-            float cx = (boneVerts[i][0] + boneVerts[i + 1][0] + boneVerts[i + 2][0]) / 3f;
-            float cy = (boneVerts[i][1] + boneVerts[i + 1][1] + boneVerts[i + 2][1]) / 3f;
-            float cz = (boneVerts[i][2] + boneVerts[i + 1][2] + boneVerts[i + 2][2]) / 3f;
-
+            int i = t * 3;
+            float cx = (boneVerts[i][0]+boneVerts[i+1][0]+boneVerts[i+2][0]) / 3f;
+            float cy = (boneVerts[i][1]+boneVerts[i+1][1]+boneVerts[i+2][1]) / 3f;
+            float cz = (boneVerts[i][2]+boneVerts[i+1][2]+boneVerts[i+2][2]) / 3f;
             var (_, distSq) = splineTree.FindNearest(cx, cy, cz);
-            if (distSq > radiusSq)
-            {
-                result.Add(new float[] { boneVerts[i][0], boneVerts[i][1], boneVerts[i][2] });
-                result.Add(new float[] { boneVerts[i + 1][0], boneVerts[i + 1][1], boneVerts[i + 1][2] });
-                result.Add(new float[] { boneVerts[i + 2][0], boneVerts[i + 2][1], boneVerts[i + 2][2] });
-            }
+            keepFlags[t] = distSq > radiusSq;
+        });
+
+        var result = new List<float[]>(boneVerts.Count);
+        for (int t = 0; t < triCount; t++)
+        {
+            if (!keepFlags[t]) continue;
+            int i = t * 3;
+            result.Add(new float[] { boneVerts[i][0],   boneVerts[i][1],   boneVerts[i][2] });
+            result.Add(new float[] { boneVerts[i+1][0], boneVerts[i+1][1], boneVerts[i+1][2] });
+            result.Add(new float[] { boneVerts[i+2][0], boneVerts[i+2][1], boneVerts[i+2][2] });
         }
         return result;
     }

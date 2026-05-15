@@ -24,8 +24,9 @@ public partial class CondyleSplitWindow : Window
     private readonly double _boneMinHu;
 
     // 3 user-picked points defining the split plane
-    private readonly List<Point3D> _planePoints = new();
-    private readonly List<MeshGeometryModel3D> _planeMarkers = new();
+    private readonly List<Point3D> _planePoints = new(); // Used to be list of 3
+    private readonly Point3D?[] _splitPoints = new Point3D?[5];
+    private readonly MeshGeometryModel3D?[] _splitMarkers = new MeshGeometryModel3D?[5];
 
     // Plane: Ax + By + Cz + D = 0
     private Vector3D _planeNormal;
@@ -40,6 +41,7 @@ public partial class CondyleSplitWindow : Window
     private float[] _rightHalfExtents = { 15f, 10f, 10f };
     private GroupModel3D? _leftBoxVisual;
     private GroupModel3D? _rightBoxVisual;
+    private LineGeometryModel3D? _condylarAxisVisual;
 
     // Drag state
     private int _dragPointIndex = -1;       // Step 1: dragging plane points
@@ -59,14 +61,21 @@ public partial class CondyleSplitWindow : Window
     private List<float[]>? _mandibleVerts;
     private int _currentStep = 1;
 
+    // Track the order of point placement: RN=0, RP=1, IN=2, LP=3, LN=4
+    private readonly string[] _pointNames = { 
+        "Right Condyle", "Right posterior teeth", "Interincisal", 
+        "Left posterior teeth", "Left Condyle" 
+    };
+
     // Public results
     public bool Accepted { get; private set; }
     public List<float[]>? CraniumResult { get; private set; }
     public List<float[]>? MandibleResult { get; private set; }
     public (double X, double Y, double Z)? LeftCondyleCenter { get; private set; }
     public (double X, double Y, double Z)? RightCondyleCenter { get; private set; }
+    public (double X, double Y, double Z)? DentalMidlinePoint { get; private set; }
 
-    private void CenterViewportOnBone()
+    private void CenterViewportOnBone(System.Windows.Media.Media3D.Vector3D? lookDir = null)
     {
         if (_boneVerts == null || _boneVerts.Count == 0 || MainViewport.Camera == null) return;
 
@@ -85,10 +94,12 @@ public partial class CondyleSplitWindow : Window
             (maxX - minX) * (maxX - minX) +
             (maxY - minY) * (maxY - minY) +
             (maxZ - minZ) * (maxZ - minZ));
-        double distance = Math.Max(diagonal * 1.2, 10);
+        double distance = Math.Max(diagonal * 0.9, 10);
 
-        // Look from anterior (negative Y in RAS)
-        var dir = new System.Windows.Media.Media3D.Vector3D(0, 1, 0);
+        // Default to Anterior if no lookDir specified
+        var dir = lookDir ?? new System.Windows.Media.Media3D.Vector3D(0, 1, 0);
+        dir.Normalize();
+
         MainViewport.Camera.Position = new System.Windows.Media.Media3D.Point3D(
             pivot.X - dir.X * distance, pivot.Y - dir.Y * distance, pivot.Z - dir.Z * distance);
         MainViewport.Camera.LookDirection = dir * distance;
@@ -122,13 +133,22 @@ public partial class CondyleSplitWindow : Window
     }
 
     // ═══════════════════════════════════
-    // STEP 1: Pick 3 points → plane
+    // STEP 1: Pick 5 points
     // ═══════════════════════════════════
     private void SetupStep1()
     {
         _currentStep = 1;
+        
+        for (int i = 0; i < 5; i++)
+        {
+            _splitPoints[i] = null;
+            if (_splitMarkers[i] != null) MainGroup.Children.Remove(_splitMarkers[i]);
+            _splitMarkers[i] = null;
+        }
+
         _planePoints.Clear();
-        _planeMarkers.Clear();
+        if (_planeTriangleVisual != null) MainGroup.Children.Remove(_planeTriangleVisual);
+        
         _leftCondyleCenter = null;
         _rightCondyleCenter = null;
         _leftCondyleClickPoint = null;
@@ -136,29 +156,58 @@ public partial class CondyleSplitWindow : Window
         _dragPointIndex = -1;
 
         MainGroup.Children.Clear();
-        // AddLighting(); // Lighting is now handled in XAML directly via <hx:AmbientLight3D> and <hx:DirectionalLight3D>
 
-        var boneModel = MeshHelper.BuildModel3D(_boneVerts, 200, 190, 180, 220);
+        // Build bone model with 255 alpha (fully opaque) and exact MainViewport default color 245,245,230
+        var boneModel = MeshHelper.BuildModel3D(_boneVerts, 245, 245, 230, 255);
         MainGroup.Children.Add(boneModel);
 
-        CenterViewportOnBone();
+        // Start: look from right profile (Vector3D(1, 0, 0))
+        CenterViewportOnBone(new System.Windows.Media.Media3D.Vector3D(1, 0, 0));
 
-        StepTitle.Text = "Step 1: Define Separation Plane";
-        StepInstructions.Text =
-            "Click 3 points: (1) between central incisors (or anterior ridge), (2) distal-occlusal of last left molar (or posterior ridge), " +
-            "(3) distal-occlusal of last right molar. Drag points to widen. Then 'Next: Condyles'.";
-        StatusText.Text = "0/3 points placed";
+        StepTitle.Text = "Step 1: Define Plane & Condyles";
+        UpdateStep1Instructions();
+        
         SplitBtn.Visibility = Visibility.Visible;
-        SplitBtn.Content = "Next: Condyles";
-        SplitBtn.IsEnabled = true;
+        SplitBtn.Content = "Next: Review";
+        SplitBtn.IsEnabled = false; // Need 5 points
         ConfirmBtn.Visibility = Visibility.Collapsed;
         AcceptBtn.Visibility = Visibility.Collapsed;
     }
 
+    private int GetNextEmptySlot()
+    {
+        for (int i = 0; i < 5; i++)
+            if (_splitPoints[i] == null) return i;
+        return -1;
+    }
+
+    private void UpdateStep1Instructions()
+    {
+        int total = 0;
+        for (int i = 0; i < 5; i++) if (_splitPoints[i] != null) total++;
+
+        int nextSlot = GetNextEmptySlot();
+        if (nextSlot != -1)
+        {
+            StatusText.Text = $"Placed {total}/5. Please click: {_pointNames[nextSlot]}";
+            StepInstructions.Text = "Click sequence: (1) Right Condyle, (2) Right Posterior, (3) Interincisal, (4) Left Posterior, (5) Left Condyle. Right-click points to delete.";
+            SplitBtn.IsEnabled = false;
+        }
+        else
+        {
+            StatusText.Text = "All 5 points placed.";
+            StepInstructions.Text = "Click 'Next: Review' to view and adjust bounding boxes and the separation plane.";
+            SplitBtn.IsEnabled = true;
+        }
+    }
+
     private void ComputePlane()
     {
-        if (_planePoints.Count < 3) return;
-        var p0 = _planePoints[0]; var p1 = _planePoints[1]; var p2 = _planePoints[2];
+        // 1=RP, 2=IN, 3=LP
+        if (_splitPoints[1] == null || _splitPoints[2] == null || _splitPoints[3] == null) return;
+        var p0 = _splitPoints[2]!.Value; // Interincisal
+        var p1 = _splitPoints[3]!.Value; // Left Posterior
+        var p2 = _splitPoints[1]!.Value; // Right Posterior
         var v1 = p1 - p0; var v2 = p2 - p0;
         _planeNormal = Vector3D.CrossProduct(v1, v2);
         if (_planeNormal.Length < 1e-10) return;
@@ -180,17 +229,19 @@ public partial class CondyleSplitWindow : Window
     private void ShowPlaneTriangle()
     {
         if (_planeTriangleVisual != null) MainGroup.Children.Remove(_planeTriangleVisual);
-        if (_planePoints.Count < 3) return;
+        if (_splitPoints[1] == null || _splitPoints[2] == null || _splitPoints[3] == null) return;
 
         // Create local U, V vectors for the plane
-        var u = (_planePoints[2] - _planePoints[1]); u.Normalize();
+        var u = (_splitPoints[1]!.Value - _splitPoints[3]!.Value); u.Normalize();
         var v = Vector3D.CrossProduct(_planeNormal, u); v.Normalize();
+
+        List<Point3D> planePts = new List<Point3D> { _splitPoints[2]!.Value, _splitPoints[3]!.Value, _splitPoints[1]!.Value };
 
         // Project the 3 points onto U, V to find the bounding box in local plane coordinates
         double minU = double.MaxValue, maxU = double.MinValue;
         double minV = double.MaxValue, maxV = double.MinValue;
 
-        foreach (var pt in _planePoints)
+        foreach (var pt in planePts)
         {
             var pVec = pt - _planeCentroid;
             double pu = Vector3D.DotProduct(pVec, u);
@@ -248,20 +299,49 @@ public partial class CondyleSplitWindow : Window
     // ═══════════════════════════════════
     private void GoToCondyleStep()
     {
-        if (_planePoints.Count < 3)
+        if (GetNextEmptySlot() != -1)
         {
-            MessageBox.Show("Please place all 3 points.", "Need 3 Points",
+            MessageBox.Show("Please place all 5 points first.", "Need Points",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
+
         _currentStep = 2;
         _dragPointIndex = -1;
 
-        StepTitle.Text = "Step 2: Condylar Bounding Boxes";
+        // Compute and draw the plane
+        ComputePlane();
+
+        // Populate condylar boxes
+        // 10mm medial shift: right side (+x) shifts -10, left side (-x) shifts +10 (assuming X origin near midline)
+        float midlineX = (float)(_splitPoints[2]!.Value.X);
+
+        if (_splitPoints[0] != null)
+        {
+            var pRight = _splitPoints[0]!.Value;
+            float startX = (float)pRight.X;
+            startX += (startX > midlineX) ? -10f : 10f; // Shift medial
+
+            _rightCondyleCenter = new[] { startX, (float)pRight.Y, (float)pRight.Z };
+            _rightCondyleClickPoint = new[] { (float)pRight.X, (float)pRight.Y, (float)pRight.Z };
+        }
+        if (_splitPoints[4] != null)
+        {
+            var pLeft = _splitPoints[4]!.Value;
+            float startX = (float)pLeft.X;
+            startX += (startX > midlineX) ? -10f : 10f; // Shift medial
+
+            _leftCondyleCenter = new[] { startX, (float)pLeft.Y, (float)pLeft.Z };
+            _leftCondyleClickPoint = new[] { (float)pLeft.X, (float)pLeft.Y, (float)pLeft.Z };
+        }
+        RebuildBoxVisuals();
+
+        CenterViewportOnBone(new System.Windows.Media.Media3D.Vector3D(0, 1, 0)); // Resnap to anterior
+
+        StepTitle.Text = "Step 2: Review Condylar Bounding Boxes & Plane";
         StepInstructions.Text =
-            "Click the lateral aspect of each condyle (left, right). " +
-            "Drag center to move, drag corners to resize. Then 'Split'.";
-        StatusText.Text = "Place left condyle...";
+            "Review the bounding boxes and cut plane. Drag the box center to move, drag corners to resize. Then click 'Split'.";
+        StatusText.Text = "Ready to split";
         SplitBtn.Content = "Split";
     }
 
@@ -324,20 +404,19 @@ public partial class CondyleSplitWindow : Window
                     MainGroup.Children.Add(mandModel);
                 }
 
-                // Condylar axis line
-                var lineBuilder = new HelixToolkit.SharpDX.LineBuilder();
-                lineBuilder.AddLine(new System.Numerics.Vector3(leftC[0], leftC[1], leftC[2]), new System.Numerics.Vector3(rightC[0], rightC[1], rightC[2]));
-                var axis = new LineGeometryModel3D { Geometry = lineBuilder.ToLineGeometry3D(), Color = System.Windows.Media.Colors.Red, Thickness = 3 };
-                MainGroup.Children.Add(axis);
-                
-                AddSphereMarker(leftC, System.Windows.Media.Colors.LimeGreen, 2);
-                AddSphereMarker(rightC, System.Windows.Media.Colors.OrangeRed, 2);
+
+                AddSphereMarker(leftC,  System.Windows.Media.Colors.Cyan, 2);
+                AddSphereMarker(rightC, System.Windows.Media.Colors.Cyan, 2);
                 RebuildBoxVisuals();
 
                 CraniumResult = _craniumVerts;
                 MandibleResult = _mandibleVerts;
                 LeftCondyleCenter = (leftC[0], leftC[1], leftC[2]);
                 RightCondyleCenter = (rightC[0], rightC[1], rightC[2]);
+                if (_splitPoints[2].HasValue)
+                {
+                    DentalMidlinePoint = (_splitPoints[2]!.Value.X, _splitPoints[2]!.Value.Y, _splitPoints[2]!.Value.Z);
+                }
 
                 _currentStep = 3;
                 StepTitle.Text = "Step 3: Review & Accept";
@@ -569,32 +648,47 @@ public partial class CondyleSplitWindow : Window
         if (_currentStep == 1)
         {
             // Check existing points for drag
-            for (int i = 0; i < _planePoints.Count; i++)
+            for (int i = 0; i < 5; i++)
             {
-                if ((_planePoints[i] - hit.Value).Length < 5)
+                if (_splitPoints[i] != null && (_splitPoints[i]!.Value - hit.Value).Length < 5)
                 { _dragPointIndex = i; e.Handled = true; return; }
             }
 
-            if (_planePoints.Count < 3)
+            int nextSlot = GetNextEmptySlot();
+            if (nextSlot != -1)
             {
-                _planePoints.Add(hit.Value);
-                var colors = new[] { System.Windows.Media.Colors.Cyan, System.Windows.Media.Colors.Yellow, System.Windows.Media.Colors.Magenta };
+                _splitPoints[nextSlot] = hit.Value;
+
                 var builder = new HelixToolkit.Geometry.MeshBuilder();
                 builder.AddSphere(new System.Numerics.Vector3(0, 0, 0), 2f);
+                
+                // Color points cyan initially, but conditionally color Condyles vs plane points? Let's just use Cyan
+                var mat = new PhongMaterial { DiffuseColor = new HelixToolkit.Maths.Color4(0, 1, 1, 1) };
+                
                 var marker = new MeshGeometryModel3D
                 {
                     Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh()),
-                    Material = new PhongMaterial { DiffuseColor = new HelixToolkit.Maths.Color4(colors[_planePoints.Count - 1].R / 255f, colors[_planePoints.Count - 1].G / 255f, colors[_planePoints.Count - 1].B / 255f, colors[_planePoints.Count - 1].A / 255f) },
+                    Material = mat,
                     Transform = new TranslateTransform3D(hit.Value.X, hit.Value.Y, hit.Value.Z)
                 };
-                _planeMarkers.Add(marker);
+                
+                _splitMarkers[nextSlot] = marker;
                 MainGroup.Children.Add(marker);
 
-                string[] labels = { "Incisors", "Left posterior", "Right posterior" };
-                StatusText.Text = $"{_planePoints.Count}/3: {labels[_planePoints.Count - 1]} placed";
-                if (_planePoints.Count == 3) ComputePlane();
+                UpdateStep1Instructions();
+
+                int nextAfter = GetNextEmptySlot();
+                // Sequence: 0: RN, 1: RP, 2: IN, 3: LP, 4: LN
+                if (nextAfter != -1)
+                {
+                    if (nextAfter == 1) CenterViewportOnBone(new System.Windows.Media.Media3D.Vector3D(0.707, 0.707, 0)); // Right 45
+                    else if (nextAfter == 2) CenterViewportOnBone(new System.Windows.Media.Media3D.Vector3D(0, 1, 0)); // Anterior
+                    else if (nextAfter == 3) CenterViewportOnBone(new System.Windows.Media.Media3D.Vector3D(-0.707, 0.707, 0)); // Left 45
+                    else if (nextAfter == 4) CenterViewportOnBone(new System.Windows.Media.Media3D.Vector3D(-1, 0, 0)); // Left Profile
+                }
             }
             e.Handled = true;
+            return;
         }
         else if (_currentStep == 2)
         {
@@ -624,26 +718,6 @@ public partial class CondyleSplitWindow : Window
                 }
             }
 
-            if (_rightCondyleCenter == null)
-            {
-                float midlineX = (float)(_planePoints[0].X + _planePoints[1].X + _planePoints[2].X) / 3f;
-                float startX = (float)hit.Value.X;
-                startX += (startX > midlineX) ? -10f : 10f; // Shift medial
-
-                _rightCondyleCenter = new[] { startX, (float)hit.Value.Y, (float)hit.Value.Z };
-                _rightCondyleClickPoint = new[] { (float)hit.Value.X, (float)hit.Value.Y, (float)hit.Value.Z };
-                StatusText.Text = "Right condyle placed. Now click LEFT condyle.";
-            }
-            else if (_leftCondyleCenter == null)
-            {
-                float midlineX = (float)(_planePoints[0].X + _planePoints[1].X + _planePoints[2].X) / 3f;
-                float startX = (float)hit.Value.X;
-                startX += (startX > midlineX) ? -10f : 10f; // Shift medial
-
-                _leftCondyleCenter = new[] { startX, (float)hit.Value.Y, (float)hit.Value.Z };
-                _leftCondyleClickPoint = new[] { (float)hit.Value.X, (float)hit.Value.Y, (float)hit.Value.Z };
-                StatusText.Text = "Both placed. Drag corners to resize, drag face to move along normal. Then 'Split'.";
-            }
             RebuildBoxVisuals();
             e.Handled = true;
         }
@@ -657,14 +731,22 @@ public partial class CondyleSplitWindow : Window
         var hit = GetHitPoint(pos);
         if (hit == null && _dragFaceAxis == -1) return; // Need hit point unless we use ray-plane intersection for face drag
 
-        if (_currentStep == 1 && _dragPointIndex >= 0 && _dragPointIndex < _planePoints.Count && hit != null)
+        if (_currentStep == 1 && _dragPointIndex >= 0 && _dragPointIndex < 5 && hit != null)
         {
             // Drag point along the plane
-            if (_planePoints.Count == 3)
+            if (_splitPoints[_dragPointIndex] != null)
             {
                 var pt = hit.Value;
-                _planePoints[_dragPointIndex] = new Point3D(pt.X, pt.Y, _planePoints[_dragPointIndex].Z);
-                ShowPlaneTriangle();
+                _splitPoints[_dragPointIndex] = new Point3D(pt.X, pt.Y, _splitPoints[_dragPointIndex]!.Value.Z);
+                var marker = _splitMarkers[_dragPointIndex];
+                if (marker != null) marker.Transform = new TranslateTransform3D(pt.X, pt.Y, _splitPoints[_dragPointIndex]!.Value.Z);
+                
+                // Realtime plane and box updates if all 5 points already exist and we're just tweaking
+                if (GetNextEmptySlot() == -1)
+                {
+                    ComputePlane();
+                    RebuildBoxVisuals(); // This won't work perfectly until Step 2 but it's fine for the plane visual
+                }
             }
         }
 
@@ -724,7 +806,7 @@ public partial class CondyleSplitWindow : Window
     private bool CheckBoxHit(Point3D hit, float[] c, float[] he, ref int cornerIdx, ref int faceAxis)
     {
         // 1. Check if clicking the lateral corner sphere 
-        double midlineX = _planePoints.Count == 3 ? (_planePoints[0].X + _planePoints[1].X + _planePoints[2].X) / 3.0 : 0;
+        double midlineX = _planeCentroid.X;
         float signX = c[0] > midlineX ? 1f : -1f; // Lateral side
         Point3D corner = new Point3D(c[0] + he[0] * signX, c[1] + he[1], c[2] + he[2]);
         if ((hit - corner).Length < 5.0)
@@ -757,33 +839,51 @@ public partial class CondyleSplitWindow : Window
         _dragPointIndex = -1; _isDragging = false; _dragCornerIdx = -1; _dragFaceAxis = -1;
     }
 
-    // Use right-click to reset extents to 15,10,10
+    // Use right-click to reset extents to 15,10,10 or delete a point
     private void Viewport_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (_currentStep != 2) return;
-
         var pos = e.GetPosition(MainViewport);
         var hit = GetHitPoint(pos);
         if (hit == null) return;
 
-        // Find which box is closest
-        float[]? center = null; float[]? he = null; string side = "";
-        if (_leftCondyleCenter != null && (_rightCondyleCenter == null ||
-            DistanceTo(hit.Value, _leftCondyleCenter) < DistanceTo(hit.Value, _rightCondyleCenter!)))
-        { center = _leftCondyleCenter; he = _leftHalfExtents; side = "Left"; }
-        else if (_rightCondyleCenter != null)
-        { center = _rightCondyleCenter; he = _rightHalfExtents; side = "Right"; }
+        if (_currentStep == 1)
+        {
+            for (int i = 0; i < 5; i++)
+            {
+                if (_splitPoints[i] != null && (_splitPoints[i]!.Value - hit.Value).Length < 5)
+                {
+                    _splitPoints[i] = null;
+                    if (_splitMarkers[i] != null) MainGroup.Children.Remove(_splitMarkers[i]);
+                    _splitMarkers[i] = null;
+                    
+                    if (_planeTriangleVisual != null) { MainGroup.Children.Remove(_planeTriangleVisual); _planeTriangleVisual = null; }
+                    UpdateStep1Instructions();
+                    e.Handled = true;
+                    return;
+                }
+            }
+        }
+        else if (_currentStep == 2)
+        {
+            // Find which box is closest
+            float[]? center = null; float[]? he = null; string side = "";
+            if (_leftCondyleCenter != null && (_rightCondyleCenter == null ||
+                DistanceTo(hit.Value, _leftCondyleCenter) < DistanceTo(hit.Value, _rightCondyleCenter!)))
+            { center = _leftCondyleCenter; he = _leftHalfExtents; side = "Left"; }
+            else if (_rightCondyleCenter != null)
+            { center = _rightCondyleCenter; he = _rightHalfExtents; side = "Right"; }
 
-        if (center == null || he == null) return;
+            if (center == null || he == null) return;
 
-        he[0] = 15f; he[1] = 10f; he[2] = 10f;
+            he[0] = 15f; he[1] = 10f; he[2] = 10f;
 
-        if (side == "Left") _leftHalfExtents = he;
-        else _rightHalfExtents = he;
+            if (side == "Left") _leftHalfExtents = he;
+            else _rightHalfExtents = he;
 
-        RebuildBoxVisuals();
-        StatusText.Text = $"{side} box reset to 30x20x20mm.";
-        e.Handled = true;
+            RebuildBoxVisuals();
+            StatusText.Text = $"{side} box reset to 30x20x20mm.";
+            e.Handled = true;
+        }
     }
 
     // ═══════════════════════════════════
@@ -797,10 +897,35 @@ public partial class CondyleSplitWindow : Window
     {
         if (_leftBoxVisual != null) MainGroup.Children.Remove(_leftBoxVisual);
         if (_rightBoxVisual != null) MainGroup.Children.Remove(_rightBoxVisual);
+        if (_condylarAxisVisual != null) MainGroup.Children.Remove(_condylarAxisVisual);
+
+        // Render solid Axis first so it correctly depth tests behind opaque bone but behind the transparent boxes
+        if (_leftCondyleCenter != null && _rightCondyleCenter != null)
+        {
+            // X-axis lateral extensions, sticking out an extra 15mm past the actual box edges
+            float leftDx = (_leftCondyleCenter[0] > _rightCondyleCenter[0]) ? _leftHalfExtents[0] + 15f : -(_leftHalfExtents[0] + 15f);
+            float rightDx = (_rightCondyleCenter[0] > _leftCondyleCenter[0]) ? _rightHalfExtents[0] + 15f : -(_rightHalfExtents[0] + 15f);
+
+            var p1 = new System.Numerics.Vector3(_leftCondyleCenter[0] + leftDx, _leftCondyleCenter[1], _leftCondyleCenter[2]);
+            var p2 = new System.Numerics.Vector3(_rightCondyleCenter[0] + rightDx, _rightCondyleCenter[1], _rightCondyleCenter[2]);
+
+            var lineBuilder = new HelixToolkit.SharpDX.LineBuilder();
+            lineBuilder.AddLine(p1, p2);
+
+            _condylarAxisVisual = new LineGeometryModel3D 
+            { 
+                Geometry = lineBuilder.ToLineGeometry3D(), 
+                Color = System.Windows.Media.Colors.Red, 
+                Thickness = 4
+            };
+            MainGroup.Children.Add(_condylarAxisVisual);
+        }
+
+        // Render transparent Boxes AFTER axis so they naturally blend over it
         if (_leftCondyleCenter != null)
-        { _leftBoxVisual = CreateBoxVisual(_leftCondyleCenter, _leftHalfExtents, System.Windows.Media.Colors.LimeGreen); MainGroup.Children.Add(_leftBoxVisual); }
+        { _leftBoxVisual  = CreateBoxVisual(_leftCondyleCenter,  _leftHalfExtents,  System.Windows.Media.Colors.Cyan); MainGroup.Children.Add(_leftBoxVisual); }
         if (_rightCondyleCenter != null)
-        { _rightBoxVisual = CreateBoxVisual(_rightCondyleCenter, _rightHalfExtents, System.Windows.Media.Colors.OrangeRed); MainGroup.Children.Add(_rightBoxVisual); }
+        { _rightBoxVisual = CreateBoxVisual(_rightCondyleCenter, _rightHalfExtents, System.Windows.Media.Colors.Cyan); MainGroup.Children.Add(_rightBoxVisual); }
     }
 
     private GroupModel3D CreateBoxVisual(float[] c, float[] he, System.Windows.Media.Color color)
@@ -840,7 +965,7 @@ public partial class CondyleSplitWindow : Window
         { 
             Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(sbuild.ToMesh()),
             Material = new PhongMaterial { 
-                DiffuseColor = new HelixToolkit.Maths.Color4(1f, 1f, 0f, 1f),
+                DiffuseColor = new HelixToolkit.Maths.Color4(0f, 1f, 1f, 1f),
                 SpecularColor = new HelixToolkit.Maths.Color4(0.8f, 0.8f, 0.8f, 1f),
                 SpecularShininess = 32f
             },

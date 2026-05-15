@@ -6,7 +6,9 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using HelixToolkit.Wpf.SharpDX;
+using HelixToolkit.SharpDX;
 using OrthoPlanner.Core.Geometry;
+using OrthoPlanner.App.ViewModels;
 
 namespace OrthoPlanner.App;
 
@@ -43,7 +45,9 @@ public partial class BssoOsteotomyWindow : Window
     private MeshGeometryModel3D[] _bHandles = new MeshGeometryModel3D[4];
     private MeshGeometryModel3D?  _sagMidH;
     private MeshGeometryModel3D[] _sagBotH  = new MeshGeometryModel3D[2];
-    private MeshGeometryModel3D?  _postH;
+    private MeshGeometryModel3D?  _postH;     // kept for Clear() cleanup compat, not created
+    private MeshGeometryModel3D?  _armBotH;  // new: inferior-medial corner of posterior arm
+    private Point3D               _armBot;   // stored position of that corner
 
     private MeshGeometryModel3D _boneMesh;
     private MeshGeometryModel3D _hoveredHalf;
@@ -57,8 +61,8 @@ public partial class BssoOsteotomyWindow : Window
     private Point3D  _dragPlanePos;
     private Vector3D _dragPlaneNormal;
 
-    private const float ExtLat = 20f;
-    private const float ExtInf = 60f;
+    private const float ExtLat = 10f;
+    private const float ExtInf = 10f;  // kept as fallback; sagBot Z is now driven by bInf.Z
     private const float ArmExt = 25f;
 
     private static readonly HelixToolkit.Maths.Color4 CyanFill = new(0f, 1f, 1f, 0.35f);
@@ -66,7 +70,7 @@ public partial class BssoOsteotomyWindow : Window
     public BssoOsteotomyWindow(List<float[]> mandibleVerts)
     {
         InitializeComponent();
-        MainViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
+        MainViewport.EffectsManager = new DefaultEffectsManager();
         CompositionTarget.Rendering += (_, _) => {
             var d = SubCamera.LookDirection;
             if (d.Length > 0.001) { d.Normalize(); Headlamp.Direction = new Vector3D(-d.X,-d.Y,-d.Z); Backlamp.Direction = new Vector3D(d.X,d.Y,d.Z); }
@@ -94,9 +98,8 @@ public partial class BssoOsteotomyWindow : Window
     private void HiHalf(bool left) {
         float mx = _mandibleVerts.Count>0 ? _mandibleVerts.Average(v=>v[0]) : 0f;
         var h = HalfV(left,mx);
-        var b = new HelixToolkit.Geometry.MeshBuilder();
-        for(int i=0;i+2<h.Count;i+=3) b.AddTriangle(Nv(h[i]),Nv(h[i+1]),Nv(h[i+2]));
-        _hoveredHalf.Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(b.ToMesh());
+        var hMesh = MeshHelper.BuildSmoothMesh(h);
+        _hoveredHalf.Geometry = hMesh;
     }
     private void OvH(bool left, bool show) {
         var brd = (FindName(left?"LeftOverlay":"RightOverlay") as System.Windows.Controls.Border)!;
@@ -106,6 +109,9 @@ public partial class BssoOsteotomyWindow : Window
     }
     private void DoSelectSide(bool left) {
         _isLeftSide = left;
+        // Hardcode medial/lateral X direction from side — immune to unusual anatomy
+        _latDirX = left ? -1f : 1f;   // lateral  (buccal) direction
+        _medDirX = -_latDirX;          // medial (lingual) direction
         float mx = _mandibleVerts.Count>0 ? _mandibleVerts.Average(v=>v[0]) : 0f;
         _halfDisplayVerts = HalfV(left, mx);
         MainGroup.Children.Remove(_boneMesh);
@@ -118,6 +124,11 @@ public partial class BssoOsteotomyWindow : Window
         StepInstructions.Text = "Click 2 points on the LINGUAL (medial) cortex of the ramus.";
         StatusText.Text = "Place 2 lingual points…";
         NextBtn.Visibility=Visibility.Visible; NextBtn.IsEnabled=false; ClearBtn.Visibility=Visibility.Visible;
+        // Auto-orient to lingual (medial) surface
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => {
+            CenterOn(_halfDisplayVerts);
+            LookFromSide(false);
+        });
     }
 
     // ── Mouse ───────────────────────────────────────────────────────────────
@@ -156,6 +167,12 @@ public partial class BssoOsteotomyWindow : Window
                 _lc[_dragIdx] = np; _lHandles[_dragIdx].Transform = Tt(np);
                 if(_dragIdx==0) _sagTop[1]=np;
                 else if(_dragIdx==1) _sagTop[0]=np;
+                else if(_dragIdx==2) {
+                    // _lc[2] is hinged to _postArmTip — keep in sync, drag armBot X/Y with it
+                    _postArmTip = np;
+                    _armBot = new Point3D(np.X, np.Y, _armBot.Z);
+                    if(_armBotH!=null) _armBotH.Transform = Tt(_armBot);
+                }
                 break;
             case 1: // buccal
                 _bc[_dragIdx] = np; _bHandles[_dragIdx].Transform = Tt(np);
@@ -166,8 +183,8 @@ public partial class BssoOsteotomyWindow : Window
             case 3: // sagBot[i]
                 _sagBot[_dragIdx] = np; _sagBotH[_dragIdx].Transform = Tt(np);
                 break;
-            case 4: // posterior arm
-                _postArmTip = np; _postH!.Transform = Tt(np);
+            case 5: // armBot (inferior-medial corner of posterior arm)
+                _armBot = np; _armBotH!.Transform = Tt(np);
                 break;
         }
         RebuildPlanes();
@@ -184,7 +201,7 @@ public partial class BssoOsteotomyWindow : Window
         for(int i=0;i<4;i++) if(_bHandles[i]==vis||Dist(hit,_bc[i])<5) return SD(_bHandles[i],1,i,_bc[i],pn);
         if(_sagMidH!=null&&(_sagMidH==vis||Dist(hit,_sagTop[2])<5)) return SD(_sagMidH,2,0,_sagTop[2],pn);
         for(int i=0;i<2;i++) if(_sagBotH[i]!=null&&(_sagBotH[i]==vis||Dist(hit,_sagBot[i])<5)) return SD(_sagBotH[i],3,i,_sagBot[i],pn);
-        if(_postH!=null&&(_postH==vis||Dist(hit,_postArmTip)<5)) return SD(_postH,4,0,_postArmTip,pn);
+        if(_armBotH!=null&&(_armBotH==vis||Dist(hit,_armBot)<5)) return SD(_armBotH,5,0,_armBot,pn);
         return false;
     }
     private bool SD(MeshGeometryModel3D h, int g, int i, Point3D pos, Vector3D pn)
@@ -198,15 +215,10 @@ public partial class BssoOsteotomyWindow : Window
         var bSup  = _rawBuccal.OrderByDescending(p => p.Z).First();
         var bInf  = _rawBuccal.OrderBy(p => p.Z).First();
 
-        float lAvgX = (float)((lAnt.X + lPost.X) / 2.0);
-        float bAvgX = (float)((bSup.X + bInf.X) / 2.0);
-        _latDirX = Math.Sign(lAvgX - bAvgX);
-        if(_latDirX == 0) _latDirX = 1f;
-        _medDirX = -_latDirX;
-
+        // Direction already hardcoded in DoSelectSide; bInf.Z drives sagittal inferior extent
         _sagTop[0] = lPost; _sagTop[1] = lAnt;
-        _sagBot[0] = new Point3D(lPost.X, lPost.Y, lPost.Z - ExtInf);
-        _sagBot[1] = new Point3D(lAnt.X,  lAnt.Y,  lAnt.Z  - ExtInf);
+        _sagBot[0] = new Point3D(lPost.X, lPost.Y, bInf.Z);
+        _sagBot[1] = new Point3D(lAnt.X,  lAnt.Y,  bInf.Z);
 
         _lc[0] = lAnt;  _lc[1] = lPost;
         _lc[2] = new Point3D(lPost.X + _medDirX*ExtLat, lPost.Y, lPost.Z);
@@ -226,8 +238,19 @@ public partial class BssoOsteotomyWindow : Window
         foreach(var d in _rawDots) MainGroup.Children.Remove(d);
         _rawDots.Clear();
 
-        var bSup = _bc[0];
+        var bSup = _bc[0]; var bInf = _bc[1];
         _sagTop[2] = Lerp(_sagTop[1], bSup, 0.5);
+
+        // Project sagTop[2] down along the buccal inclination vector to reach bInf.Z
+        // so that the sagTop[2]→sagBot[1] edge is parallel to the buccal cut plane.
+        double bZspan = bInf.Z - bSup.Z;
+        if (Math.Abs(bZspan) > 0.001) {
+            double scale = (bInf.Z - _sagTop[2].Z) / bZspan;
+            _sagBot[1] = new Point3D(
+                _sagTop[2].X + scale * (bInf.X - bSup.X),
+                _sagTop[2].Y + scale * (bInf.Y - bSup.Y),
+                bInf.Z);
+        }
 
         if(_sagMidH!=null) MainGroup.Children.Remove(_sagMidH);
         _sagMidH = Sph(_sagTop[2]); MainGroup.Children.Add(_sagMidH);
@@ -237,9 +260,14 @@ public partial class BssoOsteotomyWindow : Window
             _sagBotH[i] = Sph(_sagBot[i]); MainGroup.Children.Add(_sagBotH[i]);
         }
 
-        _postArmTip = new Point3D(_sagTop[0].X + _medDirX*ArmExt, _sagTop[0].Y, _sagTop[0].Z);
-        if(_postH!=null) MainGroup.Children.Remove(_postH);
-        _postH = Sph(_postArmTip); MainGroup.Children.Add(_postH);
+        // Hinge: _postArmTip coincides with _lc[2] (shared handle, no separate _postH)
+        _postArmTip = _lc[2];
+        _postH = null; // _lHandles[2] is the shared visual handle
+
+        // New: inferior-medial corner handle
+        _armBot = new Point3D(_postArmTip.X, _postArmTip.Y, _sagBot[0].Z);
+        if(_armBotH!=null) MainGroup.Children.Remove(_armBotH);
+        _armBotH = Sph(_armBot); MainGroup.Children.Add(_armBotH);
         RebuildPlanes();
     }
 
@@ -280,8 +308,7 @@ public partial class BssoOsteotomyWindow : Window
         });
         _sagittalVis.Children.Add(new LineGeometryModel3D{Geometry=lb.ToLineGeometry3D(),Color=Colors.Cyan,Thickness=2});
 
-        var armBot = new Point3D(_postArmTip.X, _postArmTip.Y, _sagBot[0].Z);
-        BuildGP(_postArmVis, new[]{ _sagTop[0], _postArmTip, armBot, _sagBot[0] });
+        BuildGP(_postArmVis, new[]{ _sagTop[0], _postArmTip, _armBot, _sagBot[0] });
     }
 
     private static void AddQuad(HelixToolkit.Geometry.MeshBuilder mb, Point3D a, Point3D b, Point3D c, Point3D d)
@@ -314,6 +341,7 @@ public partial class BssoOsteotomyWindow : Window
             _step=2; StepTitle.Text=$"BSSO ({sd}): Step 2 – Buccal Points";
             StepInstructions.Text="Click 2 points on the BUCCAL (lateral) cortex (one superior, one inferior).";
             StatusText.Text="Place 2 buccal points…"; NextBtn.IsEnabled=false;
+            LookFromSide(true); // rotate to buccal (lateral) view
         } else if(_step==2) {
             _step=3; StepTitle.Text=$"BSSO ({sd}): Step 3 – Adjust";
             StepInstructions.Text="Drag handles to adjust. Click Perform Cut when ready.";
@@ -332,6 +360,7 @@ public partial class BssoOsteotomyWindow : Window
         for(int i=0;i<2;i++){if(_sagBotH[i]!=null){MainGroup.Children.Remove(_sagBotH[i]);_sagBotH[i]=null!;}}
         if(_sagMidH!=null){MainGroup.Children.Remove(_sagMidH);_sagMidH=null;}
         if(_postH!=null){MainGroup.Children.Remove(_postH);_postH=null;}
+        if(_armBotH!=null){MainGroup.Children.Remove(_armBotH);_armBotH=null;}
         _lc=new Point3D[4]; _bc=new Point3D[4]; _sagTop=new Point3D[3]; _sagBot=new Point3D[2];
         _lingualVis.Children.Clear(); _sagittalVis.Children.Clear(); _postArmVis.Children.Clear(); _buccalVis.Children.Clear();
         _step=1; NextBtn.Visibility=Visibility.Visible; NextBtn.IsEnabled=false;
@@ -362,7 +391,7 @@ public partial class BssoOsteotomyWindow : Window
 
             // Build polyplane with 2.0mm precise influence — extruding cuts into marrow
             var bSup = _bc[0]; var bInf = _bc[1];
-            var armBot = new Point3D(_postArmTip.X, _postArmTip.Y, _sagBot[0].Z);
+            // armBot is now a stored draggable field (initialized in InitSagittal)
             
             float medX = -cutSide * 20f; // medial extrusion
             float latX =  cutSide * 20f; // lateral extrusion
@@ -390,7 +419,7 @@ public partial class BssoOsteotomyWindow : Window
             // Anterior border of sagittal split
             quads.Add((Fv(_sagTop[2]),Fv(bSup),Fv(bInf),Fv(_sagTop[2])));
             // Posterior arm
-            quads.Add((Fv(_sagTop[0]),Fv(_postArmTip),Fv(armBot),Fv(_sagBot[0])));
+            quads.Add((Fv(_sagTop[0]),Fv(_postArmTip),Fv(_armBot),Fv(_sagBot[0])));
             
             var poly = new Polyplane(0.0); // No distance barrier needed anymore, using exact intersection
             poly.SetMeshFromQuads(quads);
@@ -571,10 +600,12 @@ public partial class BssoOsteotomyWindow : Window
     private void Cancel_Click(object s, RoutedEventArgs e) { DialogResult=false; Close(); }
 
     // ── Utilities ────────────────────────────────────────────────────────────
-    private MeshGeometryModel3D MkBone(List<float[]> v, HelixToolkit.Maths.Color4 c) {
-        var b = new HelixToolkit.Geometry.MeshBuilder();
-        for(int i=0;i+2<v.Count;i+=3) b.AddTriangle(Nv(v[i]),Nv(v[i+1]),Nv(v[i+2]));
-        return new MeshGeometryModel3D{ Geometry=HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(b.ToMesh()), Material=new PhongMaterial{DiffuseColor=c} };
+    private MeshGeometryModel3D MkBone(List<float[]> v, HelixToolkit.Maths.Color4 col) {
+        var mesh = MeshHelper.BuildSmoothMesh(v);
+        return new MeshGeometryModel3D {
+            Geometry = mesh,
+            Material = MeshHelper.BoneMaterial(col)
+        };
     }
     private MeshGeometryModel3D Sph(Point3D c, float r=2.2f) {
         var b = new HelixToolkit.Geometry.MeshBuilder(); b.AddSphere(new System.Numerics.Vector3(0,0,0),r);
@@ -616,5 +647,22 @@ public partial class BssoOsteotomyWindow : Window
     private Point3D? RayPl(Point3D o,Vector3D d,Point3D pp,Vector3D pn){
         double nd=Vector3D.DotProduct(d,pn); if(Math.Abs(nd)<0.0001) return null;
         double t=Vector3D.DotProduct(pp-o,pn)/nd; return t<0?null:o+d*t;
+    }
+    private void LookFromSide(bool buccal) {
+        if (MainViewport.Camera is not HelixToolkit.Wpf.SharpDX.PerspectiveCamera cam) return;
+        var v = _halfDisplayVerts.Count > 0 ? _halfDisplayVerts : _mandibleVerts;
+        if (v == null || v.Count == 0) return;
+        double mnX=v[0][0], mxX=v[0][0], mnY=v[0][1], mxY=v[0][1], mnZ=v[0][2], mxZ=v[0][2];
+        foreach(var u in v){if(u[0]<mnX)mnX=u[0];if(u[0]>mxX)mxX=u[0];if(u[1]<mnY)mnY=u[1];if(u[1]>mxY)mxY=u[1];if(u[2]<mnZ)mnZ=u[2];if(u[2]>mxZ)mxZ=u[2];}
+        var center = new Point3D((mnX+mxX)/2,(mnY+mxY)/2,(mnZ+mxZ)/2);
+        double span = Math.Sqrt(Math.Pow(mxX-mnX,2)+Math.Pow(mxY-mnY,2)+Math.Pow(mxZ-mnZ,2));
+        double dist = span * 0.95;
+        // Camera position: medial side for lingual, lateral side for buccal
+        float viewDirX = buccal ? _latDirX : _medDirX;
+        cam.Position = new Point3D(center.X + viewDirX * dist, center.Y, center.Z);
+        cam.LookDirection = new Vector3D(-viewDirX * dist, 0, 0);
+        cam.UpDirection = new Vector3D(0, 0, 1);
+        MainViewport.FixedRotationPointEnabled = true;
+        MainViewport.FixedRotationPoint = center;
     }
 }
