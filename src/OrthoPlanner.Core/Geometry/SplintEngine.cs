@@ -2,11 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using g3;
-using ManifoldNET;
 
 namespace OrthoPlanner.Core.Geometry;
 
-// ── Arch Curve (Catmull-Rom) ──────────────────────────────────────────────
+// â”€â”€ Arch Curve (Catmull-Rom) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 public class ArchCurve
 {
     private readonly List<(float x, float y, float z)> _ctrl = new();
@@ -58,10 +57,10 @@ public class ArchCurve
     }
 }
 
-// ── Splint Engine ─────────────────────────────────────────────────────────
+// â”€â”€ Splint Engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 public static class SplintEngine
 {
-    // ── Watertight check ─────────────────────────────────────────────────
+    // â”€â”€ Watertight check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public static float WatertightScore(float[] mesh)
     {
         if (mesh == null || mesh.Length < 9) return 1f;
@@ -83,11 +82,11 @@ public static class SplintEngine
         return edgeCounts.Count==0 ? 1f : (float)boundary/edgeCounts.Count;
     }
 
-    // ── Per-ring outward normals (perpendicular to arch tangent in XY) ───
+    // â”€â”€ Per-ring outward normals (perpendicular to arch tangent in XY) â”€â”€â”€
     private static (float x,float y,float z)[] ComputeNormals(
         List<(float x,float y,float z)> curve, int n)
     {
-        // Arch centroid in XY — used to ensure normals point AWAY from the arch center
+        // Arch centroid in XY â€” used to ensure normals point AWAY from the arch center
         float cx = 0, cy = 0;
         foreach (var p in curve) { cx += p.x; cy += p.y; }
         cx /= curve.Count; cy /= curve.Count;
@@ -100,7 +99,7 @@ public static class SplintEngine
             float len=MathF.Sqrt(tx*tx+ty*ty);
             if (len<1e-6f){tx=1;ty=0;} else {tx/=len;ty/=len;}
 
-            // N = T × Z = (ty, -tx, 0)
+            // N = T Ã— Z = (ty, -tx, 0)
             float nx=ty, ny=-tx;
 
             // Flip if pointing toward centroid instead of away
@@ -112,7 +111,7 @@ public static class SplintEngine
         return result;
     }
 
-    // ── Flat ribbon mesh — shows labio-lingual footprint on arch surface ──
+    // â”€â”€ Flat ribbon mesh â€” shows labio-lingual footprint on arch surface â”€â”€
     /// <summary>Returns a thin flat ribbon along the arch showing the LL width.
     /// Used for live preview before Generate is clicked.</summary>
     public static float[] GenerateRibbonMesh(
@@ -143,7 +142,7 @@ public static class SplintEngine
         return tris.ToArray();
     }
 
-    // ── Horseshoe solid ───────────────────────────────────────────────────
+    // â”€â”€ Horseshoe solid â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     /// <summary>
     /// Generates a clean horseshoe-shaped splint solid.
     /// The top surface follows the upper arch curve (tooth contact).
@@ -188,21 +187,21 @@ public static class SplintEngine
         return result;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //  GENERATE SPLINT — correct closed-solid boolean pipeline
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    //  GENERATE SPLINT â€” correct closed-solid boolean pipeline
     //
-    //  Step A  Dilate upper mesh 1mm, clip below upperZ, cap at upperZ → closed solid
-    //  Step B  Same for lower (clip above lowerZ, cap at lowerZ)          → closed solid
-    //  Step C  horseshoe ∪ solidUpper1mm ∪ solidLower1mm (all closed)    → splint blank
-    //  Step D  Dilate 0.1mm versions, clip+cap → closed subtraction tools
-    //  Step E  blank − upper0.1mm − lower0.1mm                           → final splint
-    // ═══════════════════════════════════════════════════════════════════════
+    //  Step A  Dilate upper mesh 1mm, clip below upperZ, cap at upperZ â†’ closed solid
+    //  Step B  Same for lower (clip above lowerZ, cap at lowerZ)          â†’ closed solid
+    //  Step C  horseshoe âˆª solidUpper1mm âˆª solidLower1mm (all closed)    â†’ splint blank
+    //  Step D  Dilate 0.1mm versions, clip+cap â†’ closed subtraction tools
+    //  Step E  blank âˆ’ upper0.1mm âˆ’ lower0.1mm                           â†’ final splint
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     public static float[] GenerateSplint(
         List<(float x,float y,float z)> upperCurve,
         List<(float x,float y,float z)> lowerCurve,
         float labiolingualMm     = 8f,
-        float upperPenetrationMm = 0f,   // UI only — not used here
-        float lowerPenetrationMm = 0f,   // UI only — not used here
+        float upperPenetrationMm = 0f,   // UI only â€” not used here
+        float lowerPenetrationMm = 0f,   // UI only â€” not used here
         float[]? upperMesh       = null,
         float[]? lowerMesh       = null,
         int sampleCount          = 160)
@@ -234,7 +233,7 @@ public static class SplintEngine
             BO[i]=(l.x+nl.x*half, l.y+nl.y*half, l.z); BI[i]=(l.x-nl.x*half, l.y-nl.y*half, l.z);
         }
 
-        // ── Build horseshoe (closed by construction) ─────────────────────────
+        // â”€â”€ Build horseshoe (closed by construction) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         var horseshoeTris = new List<float>(n * 6 * 2 * 9);
         for (int i = 0; i < n-1; i++)
         {
@@ -254,203 +253,49 @@ public static class SplintEngine
 
         try
         {
+            const float VS      = 0.1f;
+            const float CrownMm = 15f;
+            const float Dil1    = 1.0f;
+            const float Dil01   = 0.1f;
+            const float Pad     = 3f;
+
             float upperZ = upper.Max(p => p.z);
             float lowerZ = lower.Min(p => p.z);
-            const float CrownMm = 15f;   // crown depth to include
-            const float Dil1mm  = 1.0f;  // outer skin dilation
-            const float Dil01mm = 0.1f;  // pocket clearance
 
-            // ── Z-clip ─────────────────────────────────────────────────────
-            float[] ClipZ(float[] mesh, float zMin, float zMax)
-            {
-                var r = new List<float>(mesh.Length / 3);
-                for (int i = 0; i+8 < mesh.Length; i += 9)
-                {
-                    float cz = (mesh[i+2]+mesh[i+5]+mesh[i+8]) / 3f;
-                    if (cz >= zMin && cz <= zMax)
-                        for (int k=0; k<9; k++) r.Add(mesh[i+k]);
-                }
-                return r.ToArray();
-            }
+            float minX=float.MaxValue,minY=float.MaxValue,minZ2=float.MaxValue;
+            float maxX=float.MinValue,maxY=float.MinValue,maxZ2=float.MinValue;
+            void Expand(float[] m){for(int i=0;i<m.Length;i+=3){if(m[i]<minX)minX=m[i];if(m[i]>maxX)maxX=m[i];if(m[i+1]<minY)minY=m[i+1];if(m[i+1]>maxY)maxY=m[i+1];if(m[i+2]<minZ2)minZ2=m[i+2];if(m[i+2]>maxZ2)maxZ2=m[i+2];}}
+            Expand(upperMesh);Expand(lowerMesh);Expand(horseshoeFlat);
+            minZ2=MathF.Min(minZ2,upperZ-CrownMm-Dil1);
+            maxZ2=MathF.Max(maxZ2,lowerZ+CrownMm+Dil1);
 
-            // ── Cap open Z-cut boundary with centroid-fan triangulation ─────
-            // This seals ONLY the cut plane boundary so the mesh becomes a
-            // closed solid. It does NOT fill the tooth pockets — those are
-            // created later by boolean subtraction.
-            float[] CapAtZ(float[] mesh, float capZ)
-            {
-                const float SnapEps = 0.6f;
-                var arr = (float[])mesh.Clone();
-                for (int i=2; i<arr.Length; i+=3)
-                    if (MathF.Abs(arr[i]-capZ) < SnapEps) arr[i] = capZ;
+            float ox=minX-Pad,oy=minY-Pad,oz=minZ2-Pad;
+            int nx=(int)MathF.Ceiling((maxX+Pad-ox)/VS)+2;
+            int ny=(int)MathF.Ceiling((maxY+Pad-oy)/VS)+2;
+            int nz=(int)MathF.Ceiling((maxZ2+Pad-oz)/VS)+2;
+            if((long)nx*ny*nz>400_000_000L) return horseshoeFlat;
 
-                // Build directed half-edge sets
-                var rev = new HashSet<long>();
-                var vpos = new Dictionary<long,(float x,float y)>();
-                var allFwd = new List<(long a, long b, int triBase, int edgeIdx)>();
+            SdfGrid Sdf(float[] mesh,float dil,float zMin,float zMax)
+                =>SdfOps.MeshToSdf(mesh,dil,zMin,zMax,ox,oy,oz,nx,ny,nz,VS);
 
-                long Qk(float x,float y,float z) => unchecked(
-                    (long)Math.Round(x*200)*1_000_000_007L ^
-                    (long)Math.Round(y*200)*999_999_937L   ^
-                    (long)Math.Round(z*200));
-                long Ek(long a,long b) => unchecked(a*1_000_000_007L ^ b);
+            var sdfBlank=Sdf(horseshoeFlat,0f,float.NegativeInfinity,float.PositiveInfinity);
+            sdfBlank.UnionWith(Sdf(upperMesh,Dil1,upperZ-CrownMm,upperZ));
+            sdfBlank.UnionWith(Sdf(lowerMesh,Dil1,lowerZ,lowerZ+CrownMm));
+            sdfBlank.SubtractWith(Sdf(upperMesh,Dil01,upperZ-CrownMm,upperZ));
+            sdfBlank.SubtractWith(Sdf(lowerMesh,Dil01,lowerZ,lowerZ+CrownMm));
 
-                for (int i=0; i+8<arr.Length; i+=9)
-                {
-                    long[] ks = { Qk(arr[i],arr[i+1],arr[i+2]),
-                                  Qk(arr[i+3],arr[i+4],arr[i+5]),
-                                  Qk(arr[i+6],arr[i+7],arr[i+8]) };
-                    for (int v=0; v<3; v++)
-                        vpos[ks[v]] = (arr[i+v*3], arr[i+v*3+1]);
-                    for (int e=0; e<3; e++)
-                    {
-                        allFwd.Add((ks[e], ks[(e+1)%3], i, e));
-                        rev.Add(Ek(ks[(e+1)%3], ks[e]));
-                    }
-                }
-
-                // Collect boundary edges at capZ (no matching reverse edge)
-                var boundNext = new Dictionary<long,long>();
-                foreach (var (a, b, triBase, edgeIdx) in allFwd)
-                {
-                    if (rev.Contains(Ek(a,b))) continue;  // interior edge
-                    float za = arr[triBase + edgeIdx*3 + 2];
-                    float zb = arr[triBase + ((edgeIdx+1)%3)*3 + 2];
-                    if (MathF.Abs(za-capZ) < 0.01f && MathF.Abs(zb-capZ) < 0.01f)
-                        boundNext[a] = b;
-                }
-
-                var capTris = new List<float>();
-                var visited = new HashSet<long>();
-                foreach (var startKey in boundNext.Keys)
-                {
-                    if (visited.Contains(startKey)) continue;
-                    var loop = new List<long>();
-                    long cur = startKey;
-                    while (!visited.Contains(cur) && boundNext.TryGetValue(cur, out long nxt))
-                    { visited.Add(cur); loop.Add(cur); cur = nxt; }
-                    if (loop.Count < 3) continue;
-
-                    float cx=0, cy=0;
-                    foreach (var k in loop) { cx+=vpos[k].x; cy+=vpos[k].y; }
-                    cx /= loop.Count; cy /= loop.Count;
-
-                    for (int i=0; i<loop.Count; i++)
-                    {
-                        var va = vpos[loop[i]]; var vb = vpos[loop[(i+1)%loop.Count]];
-                        capTris.Add(cx);   capTris.Add(cy);   capTris.Add(capZ);
-                        capTris.Add(va.x); capTris.Add(va.y); capTris.Add(capZ);
-                        capTris.Add(vb.x); capTris.Add(vb.y); capTris.Add(capZ);
-                    }
-                }
-                return arr.Concat(capTris).ToArray();
-            }
-
-            // ── Convert indexed flat triangle soup to ManifoldNET Manifold ───
-            // Builds a proper vertex-indexed mesh before passing to Manifold.
-            // Tangents array must be exactly 4*nTri*3 floats (or empty for faceted).
-            // Returns null if the resulting Manifold has 0 triangles (rejected input).
-            Manifold? ToManifold(float[] flat)
-            {
-                int triCount = flat.Length / 9;
-                if (triCount == 0) return null;
-
-                // Index coincident vertices with a dictionary
-                var vmap  = new Dictionary<(float,float,float), uint>();
-                var verts = new List<float>(triCount * 3);
-                var tris  = new uint[triCount * 3];
-                for (int i=0; i<triCount; i++)
-                {
-                    for (int v=0; v<3; v++)
-                    {
-                        int b = i*9 + v*3;
-                        var key = (flat[b], flat[b+1], flat[b+2]);
-                        if (!vmap.TryGetValue(key, out uint vi))
-                        {
-                            vi = (uint)(verts.Count / 3);
-                            vmap[key] = vi;
-                            verts.Add(flat[b]); verts.Add(flat[b+1]); verts.Add(flat[b+2]);
-                        }
-                        tris[i*3+v] = vi;
-                    }
-                }
-
-                // MeshGLData: numProp=3 (x,y,z only), tangents=empty → faceted shading
-                // Empty tangents array (length 0) is valid per ManifoldNET docs for faceted mesh
-                var data   = new MeshGLData(verts.ToArray(), tris, 3u, new float[0]);
-                var meshGL = new MeshGL(data);
-                var m      = Manifold.Create(meshGL);
-                // Manifold.Create silently returns empty manifold for non-manifold inputs
-                return (m.Status == ManifoldError.NoError && m.MeshGL.TriangleNumber > 0) ? m : null;
-            }
-
-            // ── Convert Manifold result back to flat triangle soup ──────────
-            float[] FromManifold(Manifold m)
-            {
-                var mg      = m.MeshGL;
-                var vp      = mg.VerticesProperties;
-                var tv      = mg.TriangleVertices;
-                int nTri    = (int)mg.TriangleNumber;
-                int numProp = (int)mg.PropertiesNumber;
-                if (nTri == 0 || numProp < 3 || vp == null || tv == null) return Array.Empty<float>();
-                var r = new float[nTri * 9];
-                for (int i=0; i<nTri; i++)
-                    for (int v=0; v<3; v++)
-                    {
-                        int vi = (int)tv[i*3+v];
-                        r[i*9+v*3]   = vp[vi*numProp];
-                        r[i*9+v*3+1] = vp[vi*numProp+1];
-                        r[i*9+v*3+2] = vp[vi*numProp+2];
-                    }
-                return r;
-            }
-
-            // Build a closed solid: dilate → clip → cap
-            float[] MakeSolid(float[] mesh, float dilMm, float capZ, bool keepBelow)
-            {
-                float[] dilated = OffsetMeshVertices(mesh, dilMm);
-                float[] clipped = keepBelow
-                    ? ClipZ(dilated, capZ - CrownMm, capZ + 0.1f)
-                    : ClipZ(dilated, capZ - 0.1f,    capZ + CrownMm);
-                if (clipped.Length < 9) return Array.Empty<float>();
-                return CapAtZ(clipped, capZ);
-            }
-
-            // ── Step A/B: closed 1mm-dilated tooth solids ─────────────────
-            float[] solidUpper1  = MakeSolid(upperMesh, Dil1mm, upperZ, keepBelow:true);
-            float[] solidLower1  = MakeSolid(lowerMesh, Dil1mm, lowerZ, keepBelow:false);
-
-            // ── Step C: union horseshoe + tooth skins ─────────────────────
-            // Horseshoe is always valid (constructed by us, guaranteed closed).
-            // Tooth solids may fail if CapAtZ didn't fully close them → skip gracefully.
-            var mHorse = ToManifold(horseshoeFlat);
-            if (mHorse == null) return horseshoeFlat;  // horseshoe construction bug
-
-            Manifold blank = mHorse;
-            if (solidUpper1.Length >= 9) { var m = ToManifold(solidUpper1); if (m != null) blank = Manifold.Union(blank, m); }
-            if (solidLower1.Length >= 9) { var m = ToManifold(solidLower1); if (m != null) blank = Manifold.Union(blank, m); }
-
-            if (blank.Status != ManifoldError.NoError) return horseshoeFlat;
-
-            // ── Step D/E: 0.1mm subtraction tools → tooth pockets ─────────
-            float[] solidUpper01 = MakeSolid(upperMesh, Dil01mm, upperZ, keepBelow:true);
-            float[] solidLower01 = MakeSolid(lowerMesh, Dil01mm, lowerZ, keepBelow:false);
-
-            if (solidUpper01.Length >= 9) { var tool = ToManifold(solidUpper01); if (tool != null) { var s = Manifold.Difference(blank, tool); if (s.Status == ManifoldError.NoError) blank = s; } }
-            if (solidLower01.Length >= 9) { var tool = ToManifold(solidLower01); if (tool != null) { var s = Manifold.Difference(blank, tool); if (s.Status == ManifoldError.NoError) blank = s; } }
-
-            var result = FromManifold(blank);
-            return result.Length >= 9 ? result : horseshoeFlat;
+            float[] result=SdfOps.MarchingCubes(sdfBlank,0f);
+            return result.Length>=9?result:horseshoeFlat;
         }
-        catch { return horseshoeFlat; }
+        catch{return horseshoeFlat;}
     }
 
     private static float Sq(float v) => v * v;
 
-
     // ── Isotropic mesh offset via geometry3Sharp ──────────────────────────
     /// <summary>
     /// Offsets every vertex of the triangle soup by <paramref name="offsetMm"/> mm
+
     /// along its area-weighted vertex normal, using geometry3Sharp for robust
     /// per-vertex normal computation on non-watertight meshes.
     /// </summary>
@@ -458,7 +303,7 @@ public static class SplintEngine
     {
         if (mesh == null || mesh.Length < 9) return mesh ?? Array.Empty<float>();
 
-        // ── Build a DMesh3 (indexed) from the flat triangle soup ──────────
+        // â”€â”€ Build a DMesh3 (indexed) from the flat triangle soup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         var dm = new DMesh3(MeshComponents.VertexNormals);
         var vmap = new Dictionary<Vector3f, int>();
 
@@ -484,10 +329,10 @@ public static class SplintEngine
                 dm.AppendTriangle(a_, b_, c_);
         }
 
-        // ── Compute per-vertex normals (area-weighted, handles open meshes) ─
+        // â”€â”€ Compute per-vertex normals (area-weighted, handles open meshes) â”€
         MeshNormals.QuickCompute(dm);
 
-        // ── Offset each vertex along its normal ───────────────────────────
+        // â”€â”€ Offset each vertex along its normal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         foreach (int vid in dm.VertexIndices())
         {
             Vector3d pos = dm.GetVertex(vid);
@@ -495,7 +340,7 @@ public static class SplintEngine
             dm.SetVertex(vid, pos + new Vector3d(nor.x, nor.y, nor.z) * offsetMm);
         }
 
-        // ── Rebuild flat triangle soup ────────────────────────────────────
+        // â”€â”€ Rebuild flat triangle soup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         var result = new float[triCount * 9];
         int ri = 0;
         foreach (int tid in dm.TriangleIndices())
@@ -513,7 +358,7 @@ public static class SplintEngine
         return result;
     }
 
-    // ── Tooth pocket: crop + side-wall prisms ────────────────────────────
+    // â”€â”€ Tooth pocket: crop + side-wall prisms â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     /// <summary>
     /// Collects triangles from the offset tooth mesh that fall inside the
     /// horseshoe XY footprint AND within penetrationMm of the horseshoe
