@@ -253,13 +253,15 @@ public static class SplintEngine
 
         try
         {
-            const double VS      = 0.1;
+            const double VS_SDF  = 0.2;   // SDF grid resolution: 8x less RAM than 0.1mm (feasible on desktop)
+            const double VS_MC   = 0.1;   // MC sampling resolution: queries SDF via trilinear interp
             const double CrownMm = 10.0;
             const double Dil1    = 1.0;
             const double Dil01   = 0.1;
 
             float upperZ = upper.Max(p => p.z);
             float lowerZ = lower.Min(p => p.z);
+            System.Diagnostics.Debug.WriteLine($"[Splint] upperZ={upperZ:F1} lowerZ={lowerZ:F1}");
 
             // BoundedImplicitFunction3d wrapper that shifts the iso by 'Offset'
             // (positive Offset = shrink, negative = expand/dilate)
@@ -294,22 +296,21 @@ public static class SplintEngine
                 return r.ToArray();
             }
 
-            // Compute SDF ONCE per mesh — reuse for both 1mm and 0.1mm via OffsetImpl.
-            // NarrowBand_SpatialFloodFill: fills interior with correct negative sign.
-            // UseParallel: uses all CPU cores.
+            // Compute SDF ONCE per mesh (at 0.2mm) — reuse via OffsetImpl for both offsets
             BoundedImplicitFunction3d? BaseSdf(float[] soup){
                 if(soup.Length<9) return null;
                 var m=ToMesh(soup); if(m.TriangleCount==0) return null;
-                System.Diagnostics.Debug.WriteLine($"[Splint] SDF for {m.TriangleCount} tris");
-                var sdf=new MeshSignedDistanceGrid(m,(float)VS){
-                    ExactBandWidth=(int)Math.Ceiling(Dil1/VS)+4,
+                System.Diagnostics.Debug.WriteLine($"[Splint] SDF {m.TriangleCount} tris @ 0.2mm");
+                var sdf=new MeshSignedDistanceGrid(m,(float)VS_SDF){
+                    ExactBandWidth=(int)Math.Ceiling(Dil1/VS_SDF)+4,
                     ComputeSigns=true,
                     ComputeMode=MeshSignedDistanceGrid.ComputeModes.NarrowBand_SpatialFloodFill,
                     InsideMode=MeshSignedDistanceGrid.InsideModes.ParityCount,
                     UseParallel=true
                 };
                 sdf.Compute();
-                return new DenseGridTrilinearImplicit(sdf.Grid,sdf.GridOrigin,(float)VS);
+                System.Diagnostics.Debug.WriteLine($"[Splint] SDF done, grid={sdf.Grid.size}");
+                return new DenseGridTrilinearImplicit(sdf.Grid,sdf.GridOrigin,(float)VS_SDF);
             }
 
             float[] upCrop=Crop(upperMesh), loCrop=Crop(lowerMesh), hoCrop=Crop(horseshoeFlat);
@@ -337,8 +338,8 @@ public static class SplintEngine
             float pad=(float)(labiolingualMm*0.5+Dil1+3);
             var mcBounds=new AxisAlignedBox3d(new Vector3d(mnX-pad,mnY-pad,lowerZ-CrownMm-Dil1),new Vector3d(mxX+pad,mxY+pad,upperZ+CrownMm+Dil1));
 
-            System.Diagnostics.Debug.WriteLine($"[Splint] bounds={mcBounds.Min:F1}..{mcBounds.Max:F1}");
-            var mc=new MarchingCubes{Implicit=final2,Bounds=mcBounds,CubeSize=VS};
+            System.Diagnostics.Debug.WriteLine($"[Splint] bounds={mcBounds.Min:F1}..{mcBounds.Max:F1}  MC@{VS_MC}mm");
+            var mc=new MarchingCubes{Implicit=final2,Bounds=mcBounds,CubeSize=VS_MC};
             mc.Generate();
             System.Diagnostics.Debug.WriteLine($"[Splint] MC → {mc.Mesh?.TriangleCount} tris");
 
@@ -347,7 +348,13 @@ public static class SplintEngine
             foreach(int tid in dm.TriangleIndices()){var t=dm.GetTriangle(tid);var va=dm.GetVertex(t.a);var vb=dm.GetVertex(t.b);var vc=dm.GetVertex(t.c);res[ri++]=(float)va.x;res[ri++]=(float)va.y;res[ri++]=(float)va.z;res[ri++]=(float)vb.x;res[ri++]=(float)vb.y;res[ri++]=(float)vb.z;res[ri++]=(float)vc.x;res[ri++]=(float)vc.y;res[ri++]=(float)vc.z;}
             return res.Length>=9?res:horseshoeFlat;
         }
-        catch(Exception ex){System.Diagnostics.Debug.WriteLine($"[Splint ERROR] {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}"); return horseshoeFlat;}
+        catch(Exception ex){
+            string msg=$"[Splint ERROR] {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}";
+            System.Diagnostics.Debug.WriteLine(msg);
+            try{System.IO.File.WriteAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(),"splint_error.txt"),msg);}catch{}
+            return horseshoeFlat;
+        }
+
     }
 
     private static float Sq(float v) => v * v;
