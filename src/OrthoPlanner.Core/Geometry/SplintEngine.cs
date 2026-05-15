@@ -349,16 +349,27 @@ public static class SplintEngine
                 return result.ToArray();
             }
 
-            // Union: append two DMesh3 into one (flat concatenation, no internal face removal needed
-            // before subtraction — the boolean subtract handles interior intersections)
+            // Proper boolean union: A ∪ B = (A minus interior of B) + full B
+            // This removes the overlapping interior faces before appending B,
+            // giving a single connected solid instead of two overlapping shells.
             DMesh3 MeshUnion(DMesh3 a, DMesh3 b)
             {
-                var combined = new DMesh3(a);       // copy A
-                MeshEditor.Append(combined, b);     // append B triangles
+                try
+                {
+                    var mb = new MeshBoolean { Target = new DMesh3(a), Tool = b };
+                    if (mb.Compute() && mb.Result != null && mb.Result.TriangleCount > 0)
+                    {
+                        MeshEditor.Append(mb.Result, b);
+                        return mb.Result;
+                    }
+                }
+                catch { /* fall through to simple append */ }
+                var combined = new DMesh3(a);
+                MeshEditor.Append(combined, b);
                 return combined;
             }
 
-            // Difference: Target minus Tool using g3Sharp MeshBoolean
+            // Difference: Target minus Tool
             DMesh3? MeshDiff(DMesh3 target, DMesh3 tool)
             {
                 try
@@ -376,7 +387,7 @@ public static class SplintEngine
             var origUpDM = ToDMesh(sealedUpperOrig);
             var origLoDM = ToDMesh(sealedLowerOrig);
 
-            // Union: horseshoe ∪ dilated_upper ∪ dilated_lower → splint blank
+            // Union: horseshoe ∪ dilated_upper ∪ dilated_lower → single connected blank
             var blank = MeshUnion(MeshUnion(horseDM, dilUpDM), dilLoDM);
 
             // Subtract original upper teeth → upper tooth pockets
