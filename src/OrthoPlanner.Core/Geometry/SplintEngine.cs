@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using g3;
+using ManifoldNET;
 
 namespace OrthoPlanner.Core.Geometry;
 
@@ -255,44 +256,43 @@ public static class SplintEngine
         {
             float upperZ = upper.Max(p => p.z);
             float lowerZ = lower.Min(p => p.z);
-            const float CrownMm   = 15f;   // how far into the crown to include
-            const float Dil1mm    = 1.0f;  // outer skin dilation
-            const float Dil01mm   = 0.1f;  // pocket clearance dilation
+            const float CrownMm = 15f;   // crown depth to include
+            const float Dil1mm  = 1.0f;  // outer skin dilation
+            const float Dil01mm = 0.1f;  // pocket clearance
 
-            // ── Helpers ──────────────────────────────────────────────────────
-
-            // Z-clip: keep triangles whose centroid is in [zMin, zMax]
+            // ── Z-clip ─────────────────────────────────────────────────────
             float[] ClipZ(float[] mesh, float zMin, float zMax)
             {
                 var r = new List<float>(mesh.Length / 3);
                 for (int i = 0; i+8 < mesh.Length; i += 9)
                 {
-                    float cz=(mesh[i+2]+mesh[i+5]+mesh[i+8])/3f;
+                    float cz = (mesh[i+2]+mesh[i+5]+mesh[i+8]) / 3f;
                     if (cz >= zMin && cz <= zMax)
-                        for (int k=0;k<9;k++) r.Add(mesh[i+k]);
+                        for (int k=0; k<9; k++) r.Add(mesh[i+k]);
                 }
                 return r.ToArray();
             }
 
-            // Cap the open boundary of a clipped mesh at capZ with centroid-fan triangulation.
-            // Handles multiple disconnected boundary loops (one per tooth cusp area).
+            // ── Cap open Z-cut boundary with centroid-fan triangulation ─────
+            // This seals ONLY the cut plane boundary so the mesh becomes a
+            // closed solid. It does NOT fill the tooth pockets — those are
+            // created later by boolean subtraction.
             float[] CapAtZ(float[] mesh, float capZ)
             {
                 const float SnapEps = 0.6f;
-                // Snap vertices near capZ to exactly capZ
                 var arr = (float[])mesh.Clone();
                 for (int i=2; i<arr.Length; i+=3)
                     if (MathF.Abs(arr[i]-capZ) < SnapEps) arr[i] = capZ;
 
-                // Build half-edge map for boundary detection
-                var fwd = new Dictionary<long,long>();   // directed edge start→end
-                var rev = new HashSet<long>();           // reversed edges that exist
+                // Build directed half-edge sets
+                var rev = new HashSet<long>();
                 var vpos = new Dictionary<long,(float x,float y)>();
+                var allFwd = new List<(long a, long b, int triBase, int edgeIdx)>();
 
-                long Qk(float x,float y,float z)
-                    => unchecked((long)Math.Round(x*200)*1_000_000_007L
-                               ^ (long)Math.Round(y*200)*999_999_937L
-                               ^ (long)Math.Round(z*200));
+                long Qk(float x,float y,float z) => unchecked(
+                    (long)Math.Round(x*200)*1_000_000_007L ^
+                    (long)Math.Round(y*200)*999_999_937L   ^
+                    (long)Math.Round(z*200));
                 long Ek(long a,long b) => unchecked(a*1_000_000_007L ^ b);
 
                 for (int i=0; i+8<arr.Length; i+=9)
@@ -300,40 +300,26 @@ public static class SplintEngine
                     long[] ks = { Qk(arr[i],arr[i+1],arr[i+2]),
                                   Qk(arr[i+3],arr[i+4],arr[i+5]),
                                   Qk(arr[i+6],arr[i+7],arr[i+8]) };
-                    for (int v=0;v<3;v++)
+                    for (int v=0; v<3; v++)
+                        vpos[ks[v]] = (arr[i+v*3], arr[i+v*3+1]);
+                    for (int e=0; e<3; e++)
                     {
-                        int b3=i+v*3;
-                        vpos[ks[v]]=(arr[b3],arr[b3+1]);
-                    }
-                    for (int e=0;e<3;e++)
-                    {
-                        long a=ks[e], b=ks[(e+1)%3];
-                        fwd[Ek(a,b)] = 0; // mark forward
-                        rev.Add(Ek(b,a));
+                        allFwd.Add((ks[e], ks[(e+1)%3], i, e));
+                        rev.Add(Ek(ks[(e+1)%3], ks[e]));
                     }
                 }
 
-                // boundary half-edges: forward exists but not reverse
-                // only keep edges where both verts are at capZ
+                // Collect boundary edges at capZ (no matching reverse edge)
                 var boundNext = new Dictionary<long,long>();
-                for (int i=0; i+8<arr.Length; i+=9)
+                foreach (var (a, b, triBase, edgeIdx) in allFwd)
                 {
-                    long[] ks = { Qk(arr[i],arr[i+1],arr[i+2]),
-                                  Qk(arr[i+3],arr[i+4],arr[i+5]),
-                                  Qk(arr[i+6],arr[i+7],arr[i+8]) };
-                    for (int e=0;e<3;e++)
-                    {
-                        long a=ks[e], b=ks[(e+1)%3];
-                        if (!rev.Contains(Ek(a,b)))              // boundary
-                        {
-                            float za=arr[i+e*3+2], zb=arr[i+((e+1)%3)*3+2];
-                            if (MathF.Abs(za-capZ)<0.01f && MathF.Abs(zb-capZ)<0.01f)
-                                boundNext[a]=b;
-                        }
-                    }
+                    if (rev.Contains(Ek(a,b))) continue;  // interior edge
+                    float za = arr[triBase + edgeIdx*3 + 2];
+                    float zb = arr[triBase + ((edgeIdx+1)%3)*3 + 2];
+                    if (MathF.Abs(za-capZ) < 0.01f && MathF.Abs(zb-capZ) < 0.01f)
+                        boundNext[a] = b;
                 }
 
-                // Trace loops and fan-triangulate each
                 var capTris = new List<float>();
                 var visited = new HashSet<long>();
                 foreach (var startKey in boundNext.Keys)
@@ -342,19 +328,16 @@ public static class SplintEngine
                     var loop = new List<long>();
                     long cur = startKey;
                     while (!visited.Contains(cur) && boundNext.TryGetValue(cur, out long nxt))
-                    { visited.Add(cur); loop.Add(cur); cur=nxt; }
+                    { visited.Add(cur); loop.Add(cur); cur = nxt; }
                     if (loop.Count < 3) continue;
 
-                    float cx=0,cy=0;
+                    float cx=0, cy=0;
                     foreach (var k in loop) { cx+=vpos[k].x; cy+=vpos[k].y; }
-                    cx/=loop.Count; cy/=loop.Count;
+                    cx /= loop.Count; cy /= loop.Count;
 
-                    for (int i=0;i<loop.Count;i++)
+                    for (int i=0; i<loop.Count; i++)
                     {
-                        var va=vpos[loop[i]]; var vb=vpos[loop[(i+1)%loop.Count]];
-                        // winding: cap normal should point outward (away from mesh interior)
-                        // at capZ for upper (keepBelow): normal points +Z
-                        // determined by cross product — let caller reverse if wrong
+                        var va = vpos[loop[i]]; var vb = vpos[loop[(i+1)%loop.Count]];
                         capTris.Add(cx);   capTris.Add(cy);   capTris.Add(capZ);
                         capTris.Add(va.x); capTris.Add(va.y); capTris.Add(capZ);
                         capTris.Add(vb.x); capTris.Add(vb.y); capTris.Add(capZ);
@@ -363,7 +346,49 @@ public static class SplintEngine
                 return arr.Concat(capTris).ToArray();
             }
 
-            // Build closed dilated solid: dilate → clip → cap
+            // ── Convert flat triangle soup to ManifoldNET Manifold ──────────
+            // Manifold.Create() internally merges coincident vertices and
+            // validates the mesh — no separate CloseHoles needed.
+            Manifold ToManifold(float[] flat)
+            {
+                int triCount = flat.Length / 9;
+                // vertProperties: interleaved x,y,z for each vertex (unindexed)
+                // ManifoldNET will weld coincident vertices internally
+                var verts = new float[triCount * 3 * 3];
+                var tris  = new uint[triCount * 3];
+                for (int i=0; i<triCount; i++)
+                {
+                    int b = i*9;
+                    for (int k=0; k<9; k++) verts[i*9+k] = flat[b+k];
+                    tris[i*3]   = (uint)(i*3);
+                    tris[i*3+1] = (uint)(i*3+1);
+                    tris[i*3+2] = (uint)(i*3+2);
+                }
+                var meshGL = new MeshGL(verts, tris, 3, Array.Empty<float>());
+                return Manifold.Create(meshGL);
+            }
+
+            // ── Convert Manifold result back to flat triangle soup ──────────
+            float[] FromManifold(Manifold m)
+            {
+                var mg    = m.MeshGL;
+                var vp    = mg.VerticesProperties; // x,y,z,x,y,z,...
+                var tv    = mg.TriangleVertices;   // i0,i1,i2,...
+                int nTri  = (int)mg.TriangleNumber;
+                var r     = new float[nTri * 9];
+                int numProp = (int)mg.PropertiesNumber;
+                for (int i=0; i<nTri; i++)
+                    for (int v=0; v<3; v++)
+                    {
+                        int vi = (int)tv[i*3+v];
+                        r[i*9+v*3]   = vp[vi*numProp];
+                        r[i*9+v*3+1] = vp[vi*numProp+1];
+                        r[i*9+v*3+2] = vp[vi*numProp+2];
+                    }
+                return r;
+            }
+
+            // Build a closed solid: dilate mesh → clip at capZ → cap the cut boundary
             float[] MakeSolid(float[] mesh, float dilMm, float capZ, bool keepBelow)
             {
                 float[] dilated = OffsetMeshVertices(mesh, dilMm);
@@ -374,77 +399,36 @@ public static class SplintEngine
                 return CapAtZ(clipped, capZ);
             }
 
-            // flat[] → indexed DMesh3
-            DMesh3 ToDMesh(float[] flat)
-            {
-                var dm=new DMesh3();
-                var vm=new Dictionary<Vector3f,int>();
-                int GetV(float x,float y,float z)
-                { var k=new Vector3f(x,y,z); if(!vm.TryGetValue(k,out int vi)){vi=dm.AppendVertex(new Vector3d(x,y,z));vm[k]=vi;} return vi; }
-                for(int i=0;i+8<flat.Length;i+=9)
-                { int a=GetV(flat[i],flat[i+1],flat[i+2]),b=GetV(flat[i+3],flat[i+4],flat[i+5]),c=GetV(flat[i+6],flat[i+7],flat[i+8]);
-                  if(a!=b&&b!=c&&a!=c) dm.AppendTriangle(a,b,c); }
-                return dm;
-            }
-
-            float[] FromDMesh(DMesh3 dm)
-            {
-                var r=new List<float>(dm.TriangleCount*9);
-                foreach(int tid in dm.TriangleIndices())
-                { var t=dm.GetTriangle(tid); var va=dm.GetVertex(t.a);var vb=dm.GetVertex(t.b);var vc=dm.GetVertex(t.c);
-                  r.Add((float)va.x);r.Add((float)va.y);r.Add((float)va.z);
-                  r.Add((float)vb.x);r.Add((float)vb.y);r.Add((float)vb.z);
-                  r.Add((float)vc.x);r.Add((float)vc.y);r.Add((float)vc.z); }
-                return r.ToArray();
-            }
-
-            DMesh3? BoolDiff(DMesh3 target, DMesh3 tool)
-            {
-                try { var mb=new MeshBoolean{Target=target,Tool=tool}; return mb.Compute()&&mb.Result?.TriangleCount>0?mb.Result:null; }
-                catch { return null; }
-            }
-
-            // ── Step A/B: build closed 1mm-dilated solids ─────────────────────
-            float[] solidUpper1 = MakeSolid(upperMesh, Dil1mm, upperZ, keepBelow:true);
-            float[] solidLower1 = MakeSolid(lowerMesh, Dil1mm, lowerZ, keepBelow:false);
+            // ── Step A/B: closed 1mm-dilated solids (outer skin) ───────────
+            float[] solidUpper1  = MakeSolid(upperMesh, Dil1mm,  upperZ, keepBelow:true);
+            float[] solidLower1  = MakeSolid(lowerMesh, Dil1mm,  lowerZ, keepBelow:false);
             if (solidUpper1.Length < 9 || solidLower1.Length < 9) return horseshoeFlat;
 
-            // ── Step C: union of three closed solids ──────────────────────────
-            // horseshoe ∪ solidUpper1 ∪ solidLower1
-            // Each input is closed → MeshBoolean difference gives proper seam removal.
-            var horseDM = ToDMesh(horseshoeFlat);
-            var upDM    = ToDMesh(solidUpper1);
-            var loDM    = ToDMesh(solidLower1);
+            // ── Step C: union via ManifoldNET (fast, guaranteed manifold) ──
+            var mHorse  = ToManifold(horseshoeFlat);
+            var mUp1    = ToManifold(solidUpper1);
+            var mLo1    = ToManifold(solidLower1);
+            var blank   = Manifold.Union(Manifold.Union(mHorse, mUp1), mLo1);
+            if (blank.Status != ManifoldError.NoError) return horseshoeFlat;
 
-            // Union(A,B) = (A − B) + B  [removes A's interior face at the seam, appends B]
-            DMesh3 BoolUnion(DMesh3 a, DMesh3 b)
-            {
-                var diff = BoolDiff(new DMesh3(a), b);
-                if (diff != null) { MeshEditor.Append(diff, b); return diff; }
-                var fb = new DMesh3(a); MeshEditor.Append(fb, b); return fb;
-            }
-
-            var blank = BoolUnion(BoolUnion(horseDM, upDM), loDM);
-
-            // ── Step D/E: 0.1mm clearance solids → subtract ───────────────────
+            // ── Step D/E: 0.1mm tools → subtract to create pockets ─────────
             float[] solidUpper01 = MakeSolid(upperMesh, Dil01mm, upperZ, keepBelow:true);
             float[] solidLower01 = MakeSolid(lowerMesh, Dil01mm, lowerZ, keepBelow:false);
 
             if (solidUpper01.Length >= 9)
             {
-                var r = BoolDiff(blank, ToDMesh(solidUpper01));
-                if (r != null) blank = r;
+                var tool = ToManifold(solidUpper01);
+                var sub  = Manifold.Difference(blank, tool);
+                if (sub.Status == ManifoldError.NoError) blank = sub;
             }
             if (solidLower01.Length >= 9)
             {
-                var r = BoolDiff(blank, ToDMesh(solidLower01));
-                if (r != null) blank = r;
+                var tool = ToManifold(solidLower01);
+                var sub  = Manifold.Difference(blank, tool);
+                if (sub.Status == ManifoldError.NoError) blank = sub;
             }
 
-            // Final repair pass
-            try { var rp=new gs.MeshAutoRepair(blank){RepairTolerance=0.01}; rp.Apply(); } catch {}
-
-            return FromDMesh(blank);
+            return FromManifold(blank);
         }
         catch { return horseshoeFlat; }
     }
