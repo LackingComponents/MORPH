@@ -120,11 +120,18 @@
                 <TextBlock x:Name="ThicknessLabel" Text="8.0 mm" FontSize="11" Foreground="#8CF"
                            VerticalAlignment="Center" Width="48"/>
 
-                <TextBlock Text="   Tooth penetration:" FontSize="11" Foreground="#AABBCC" VerticalAlignment="Center"/>
-                <Slider x:Name="PenetrationSlider" Minimum="0.5" Maximum="10" Value="3"
+                <TextBlock Text="   Upper penetration:" FontSize="11" Foreground="#AABBCC" VerticalAlignment="Center"/>
+                <Slider x:Name="UpperPenetrationSlider" Minimum="-5" Maximum="10" Value="0"
                         Width="80" Margin="6,0" VerticalAlignment="Center"
-                        SmallChange="0.5" ValueChanged="PenetrationSlider_ValueChanged"/>
-                <TextBlock x:Name="PenetrationLabel" Text="3.0 mm" FontSize="11" Foreground="#8CF"
+                        SmallChange="0.5" ValueChanged="UpperPenetrationSlider_ValueChanged"/>
+                <TextBlock x:Name="UpperPenetrationLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF"
+                           VerticalAlignment="Center" Width="48"/>
+
+                <TextBlock Text="   Lower penetration:" FontSize="11" Foreground="#AABBCC" VerticalAlignment="Center"/>
+                <Slider x:Name="LowerPenetrationSlider" Minimum="-5" Maximum="10" Value="0"
+                        Width="80" Margin="6,0" VerticalAlignment="Center"
+                        SmallChange="0.5" ValueChanged="LowerPenetrationSlider_ValueChanged"/>
+                <TextBlock x:Name="LowerPenetrationLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF"
                            VerticalAlignment="Center" Width="48"/>
 
                 <TextBlock x:Name="QualityText" Text="" FontSize="10" Foreground="#F80"

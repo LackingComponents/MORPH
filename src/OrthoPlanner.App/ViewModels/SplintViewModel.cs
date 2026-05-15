@@ -64,22 +64,35 @@ public partial class MainViewModel
             // Use Closed event so result is read after the window fully shuts down
             win.Closed += (_, _) =>
             {
-                if (win.Accepted && win.SplintVertices != null && win.SplintVertices.Length >= 9)
+                try
                 {
-                    var splintMesh = new MeshViewModel
+                    if (!win.Accepted || win.SplintVertices == null || win.SplintVertices.Length < 9)
+                        return;
+
+                    var verts = win.SplintVertices;
+                    Application.Current.Dispatcher.Invoke(() =>
                     {
-                        Name      = "Splint (Final Occlusion)",
-                        Vertices  = win.SplintVertices,
-                        ColorR    = 200,
-                        ColorG    = 230,
-                        ColorB    = 255,
-                        IsVisible = true
-                    };
-                    splintMesh.OnVisibilityChanged = RefreshCombinedModel;
-                    splintMesh.BuildModel();
-                    ImportedMeshes.Add(splintMesh);
-                    RefreshCombinedModel();
-                    StatusText = $"Splint generated — {win.SplintVertices.Length / 9:N0} triangles.";
+                        var splintMesh = new MeshViewModel
+                        {
+                            Name      = "Splint (Final Occlusion)",
+                            Vertices  = verts,
+                            ColorR    = 200,
+                            ColorG    = 230,
+                            ColorB    = 255,
+                            IsVisible = true
+                        };
+                        splintMesh.OnVisibilityChanged = RefreshCombinedModel;
+                        splintMesh.BuildModel();
+                        ImportedMeshes.Add(splintMesh);
+                        RefreshCombinedModel();
+                        StatusText = $"Splint generated — {verts.Length / 9:N0} triangles.";
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Application.Current.Dispatcher.Invoke(() =>
+                        MessageBox.Show($"Failed to add splint mesh:\n{ex.Message}",
+                            "Splint Error", MessageBoxButton.OK, MessageBoxImage.Error));
                 }
             };
 

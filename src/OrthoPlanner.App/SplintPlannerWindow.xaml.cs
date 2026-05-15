@@ -402,8 +402,11 @@ public partial class SplintPlannerWindow : Window
         if (_lowerArch?.ControlPointCount >= 2) RefreshLowerRibbon();
     }
 
-    private void PenetrationSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
-    { if (PenetrationLabel != null) PenetrationLabel.Text = $"{e.NewValue:F1} mm"; }
+    private void UpperPenetrationSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
+    { if (UpperPenetrationLabel != null) UpperPenetrationLabel.Text = $"{e.NewValue:F1} mm"; }
+
+    private void LowerPenetrationSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
+    { if (LowerPenetrationLabel != null) LowerPenetrationLabel.Text = $"{e.NewValue:F1} mm"; }
 
     // ═══════════════════════════════════════════════════════════
     //  CLEAR
@@ -453,8 +456,9 @@ public partial class SplintPlannerWindow : Window
         AcceptBtn.Visibility  = Visibility.Collapsed;
         StatusText.Text = "Generating…";
 
-        float thickness   = (float)ThicknessSlider.Value;
-        float penetration = (float)PenetrationSlider.Value;
+        float thickness      = (float)ThicknessSlider.Value;
+        float upperPenetration = (float)UpperPenetrationSlider.Value;
+        float lowerPenetration = (float)LowerPenetrationSlider.Value;
         var upperSampled  = _upperArch.Sample(160);
         var lowerSampled  = _lowerArch.Sample(160);
         float[] uMesh = _upperMesh, lMesh = _lowerMesh;
@@ -464,8 +468,9 @@ public partial class SplintPlannerWindow : Window
         {
             splint = await Task.Run(() => SplintEngine.GenerateSplint(
                 upperSampled, lowerSampled,
-                labiolingualMm: thickness,
-                penetrationMm:  penetration,
+                labiolingualMm:    thickness,
+                upperPenetrationMm: upperPenetration,
+                lowerPenetrationMm: lowerPenetration,
                 upperMesh: uMesh, lowerMesh: lMesh,
                 sampleCount: 160));
         }

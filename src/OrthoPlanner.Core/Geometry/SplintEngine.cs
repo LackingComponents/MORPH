@@ -190,11 +190,12 @@ public static class SplintEngine
     public static float[] GenerateSplint(
         List<(float x,float y,float z)> upperCurve,
         List<(float x,float y,float z)> lowerCurve,
-        float labiolingualMm = 8f,
-        float penetrationMm  = 3f,
-        float[]? upperMesh   = null,
-        float[]? lowerMesh   = null,
-        int sampleCount      = 160)
+        float labiolingualMm    = 8f,
+        float upperPenetrationMm = 0f,   // how far ABOVE upper arch to wrap (default 0)
+        float lowerPenetrationMm = 0f,   // how far BELOW lower arch to wrap (default 0)
+        float[]? upperMesh      = null,
+        float[]? lowerMesh      = null,
+        int sampleCount         = 160)
     {
         if (upperCurve.Count < 2 || lowerCurve.Count < 2) return Array.Empty<float>();
 
@@ -267,18 +268,17 @@ public static class SplintEngine
         AddQuad(tris, TI[n-1], TO[n-1], BO[n-1], BI[n-1]);
 
         // ── Tooth pockets ───────────────────────────────────────────────────
-        // 0.1 mm isotropic clearance offset + crop to horseshoe region + prism walls
         const float ClearanceMm = 0.1f;
-        if (upperMesh != null && upperMesh.Length >= 9)
+        if (upperMesh != null && upperMesh.Length >= 9 && upperPenetrationMm > 0)
         {
             var offU = OffsetMeshVertices(upperMesh, ClearanceMm);
-            BuildToothPocket(offU, upper, labiolingualMm, penetrationMm,
+            BuildToothPocket(offU, upper, labiolingualMm, upperPenetrationMm,
                              isUpper: true, tris);
         }
-        if (lowerMesh != null && lowerMesh.Length >= 9)
+        if (lowerMesh != null && lowerMesh.Length >= 9 && lowerPenetrationMm > 0)
         {
             var offL = OffsetMeshVertices(lowerMesh, ClearanceMm);
-            BuildToothPocket(offL, lower, labiolingualMm, penetrationMm,
+            BuildToothPocket(offL, lower, labiolingualMm, lowerPenetrationMm,
                              isUpper: false, tris);
         }
 
@@ -354,8 +354,7 @@ public static class SplintEngine
     /// <summary>
     /// Collects triangles from the offset tooth mesh that fall inside the
     /// horseshoe XY footprint AND within penetrationMm of the horseshoe
-    /// reference surface, then caps each boundary edge with a prism wall
-    /// down (upper) or up (lower) to the horseshoe reference Z.
+    /// reference surface, then caps BOUNDARY edges only with prism walls.
     /// </summary>
     private static void BuildToothPocket(
         float[] offsetMesh,
@@ -363,18 +362,14 @@ public static class SplintEngine
         float llWidth, float penetrationMm, bool isUpper,
         List<float> tris)
     {
-        float half = llWidth * 0.5f;
+        float half  = llWidth * 0.5f;
         float half2 = half * half;
 
-        // For a given XY, find nearest arch point and return its Z
         float NearestZ(float px, float py)
         {
             float bestD=float.MaxValue, bestZ=0f;
             foreach(var pt in archCurve)
-            {
-                float dx=px-pt.x, dy=py-pt.y, d=dx*dx+dy*dy;
-                if(d<bestD){bestD=d;bestZ=pt.z;}
-            }
+            { float dx=px-pt.x,dy=py-pt.y,d=dx*dx+dy*dy; if(d<bestD){bestD=d;bestZ=pt.z;} }
             return bestZ;
         }
         bool InFootprint(float px, float py)
@@ -384,15 +379,23 @@ public static class SplintEngine
             return bestD<=half2;
         }
 
-        // Track boundary edges → each edge key maps to occurrence count
-        var edgeCounts = new Dictionary<(int,int),int>();
-        // Collected triangle vertices
-        var patchTris = new List<(float ax,float ay,float az,
-                                  float bx,float by,float bz,
-                                  float cx_,float cy,float cz,
-                                  float refZ)>();
+        // edge key: symmetric (undirected), stores first-seen directed edge + zRef for wall winding
+        var edgeMap = new Dictionary<long,(int count,float x1,float y1,float z1,float x2,float y2,float z2,float zRef)>();
 
-        for(int i=0;i+8<offsetMesh.Length;i+=9)
+        long EKey(float x1,float y1,float z1,float x2,float y2,float z2)
+        {
+            long a = (long)Math.Round(x1*50)*1_000_033L ^ (long)Math.Round(y1*50)*999_983L ^ (long)Math.Round(z1*50)*1_000_003L;
+            long b = (long)Math.Round(x2*50)*1_000_033L ^ (long)Math.Round(y2*50)*999_983L ^ (long)Math.Round(z2*50)*1_000_003L;
+            return a < b ? a*31337L ^ b : b*31337L ^ a;
+        }
+        void TrackEdge(float x1,float y1,float z1,float x2,float y2,float z2,float zRef)
+        {
+            long k = EKey(x1,y1,z1,x2,y2,z2);
+            edgeMap.TryGetValue(k, out var prev);
+            edgeMap[k] = (prev.count+1, x1,y1,z1, x2,y2,z2, zRef);
+        }
+
+        for(int i=0; i+8<offsetMesh.Length; i+=9)
         {
             float ax=offsetMesh[i],   ay=offsetMesh[i+1], az=offsetMesh[i+2];
             float bx=offsetMesh[i+3], by=offsetMesh[i+4], bz=offsetMesh[i+5];
@@ -404,67 +407,45 @@ public static class SplintEngine
             float zRef = NearestZ(pcx,pcy);
             if(isUpper)
             {
-                // Maxilla: arch line is the BOTTOM of the upper teeth (occlusal surface).
-                // Penetration wraps ABOVE the arch line (into the tooth body).
-                // Keep triangles where zRef ≤ pcz ≤ zRef + penetrationMm
+                // Maxilla: keep triangles ABOVE arch line up to penetrationMm
                 if(pcz < zRef || pcz > zRef + penetrationMm) continue;
             }
             else
             {
-                // Mandible: arch line is the TOP of the lower teeth (occlusal surface).
-                // Penetration wraps BELOW the arch line (into the tooth body).
-                // Keep triangles where zRef - penetrationMm ≤ pcz ≤ zRef
+                // Mandible: keep triangles BELOW arch line down to penetrationMm
                 if(pcz > zRef || pcz < zRef - penetrationMm) continue;
             }
 
-            // Add tooth-surface triangle.
-            // For upper: tooth is ABOVE arch line, cavity face points DOWN → reverse winding
-            // For lower: tooth is BELOW arch line, cavity face points UP → keep winding
+            // Add tooth-surface triangle with cavity-facing winding
             if(isUpper)
             {
-                // Reversed: face the interior of the splint (downward)
                 tris.Add(ax);tris.Add(ay);tris.Add(az);
                 tris.Add(cx_);tris.Add(cy);tris.Add(cz);
                 tris.Add(bx);tris.Add(by);tris.Add(bz);
             }
             else
             {
-                // Normal winding: face the interior (upward)
                 tris.Add(ax);tris.Add(ay);tris.Add(az);
                 tris.Add(bx);tris.Add(by);tris.Add(bz);
                 tris.Add(cx_);tris.Add(cy);tris.Add(cz);
             }
 
-            // Track edges for boundary detection (using quantised vertex hash as int index)
-            int VI(float x,float y,float z)
-                => (int)(((long)Math.Round(x*10))*99991L ^ ((long)Math.Round(y*10))*999983L
-                        ^ ((long)Math.Round(z*10))*9999991L) & 0x7FFFFFFF;
-            patchTris.Add((ax,ay,az, bx,by,bz, cx_,cy,cz, zRef));
+            // Track all three edges for boundary detection
+            TrackEdge(ax,ay,az, bx,by,bz, zRef);
+            TrackEdge(bx,by,bz, cx_,cy,cz, zRef);
+            TrackEdge(cx_,cy,cz, ax,ay,az, zRef);
         }
 
-        // For each collected triangle, build prism walls on its boundary edges.
-        // An edge is "boundary" if it appears in only one triangle of the patch.
-        // We use a simplified approach: for each triangle, add prism walls for
-        // all three edges (double-counted interior edges will cancel by winding).
-        // This is visually correct for the first iteration.
-        foreach(var(ax,ay,az, bx,by,bz, cx_,cy,cz, zRef) in patchTris)
+        // Emit prism walls ONLY for boundary edges (count == 1)
+        foreach(var kv in edgeMap)
         {
-            // Side wall: project outer edge vertex to horseshoe ref Z
-            void WallEdge((float x,float y,float z) p1,(float x,float y,float z) p2)
-            {
-                // Projected versions at horseshoe reference Z
-                var p1r = (p1.x, p1.y, zRef);
-                var p2r = (p2.x, p2.y, zRef);
-                if(isUpper)
-                    // Tooth above arch; wall goes from tooth DOWN to zRef
-                    AddQuad(tris, p2, p1, p1r, p2r);
-                else
-                    // Tooth below arch; wall goes from tooth UP to zRef
-                    AddQuad(tris, p1, p2, p2r, p1r);
-            }
-            WallEdge((ax,ay,az),(bx,by,bz));
-            WallEdge((bx,by,bz),(cx_,cy,cz));
-            WallEdge((cx_,cy,cz),(ax,ay,az));
+            if(kv.Value.count != 1) continue;
+            var (_,x1,y1,z1, x2,y2,z2, zRef) = kv.Value;
+            var p1r=(x1,y1,zRef); var p2r=(x2,y2,zRef);
+            if(isUpper)
+                AddQuad(tris,(x2,y2,z2),(x1,y1,z1),p1r,p2r);
+            else
+                AddQuad(tris,(x1,y1,z1),(x2,y2,z2),p2r,p1r);
         }
     }
 
