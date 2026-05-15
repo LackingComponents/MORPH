@@ -346,39 +346,54 @@ public static class SplintEngine
                 return arr.Concat(capTris).ToArray();
             }
 
-            // ── Convert flat triangle soup to ManifoldNET Manifold ──────────
-            // Manifold.Create() internally merges coincident vertices and
-            // validates the mesh — no separate CloseHoles needed.
-            Manifold ToManifold(float[] flat)
+            // ── Convert indexed flat triangle soup to ManifoldNET Manifold ───
+            // Builds a proper vertex-indexed mesh before passing to Manifold.
+            // Tangents array must be exactly 4*nTri*3 floats (or empty for faceted).
+            // Returns null if the resulting Manifold has 0 triangles (rejected input).
+            Manifold? ToManifold(float[] flat)
             {
                 int triCount = flat.Length / 9;
-                // vertProperties: interleaved x,y,z for each vertex (unindexed)
-                // ManifoldNET will weld coincident vertices internally
-                var verts = new float[triCount * 3 * 3];
+                if (triCount == 0) return null;
+
+                // Index coincident vertices with a dictionary
+                var vmap  = new Dictionary<(float,float,float), uint>();
+                var verts = new List<float>(triCount * 3);
                 var tris  = new uint[triCount * 3];
                 for (int i=0; i<triCount; i++)
                 {
-                    int b = i*9;
-                    for (int k=0; k<9; k++) verts[i*9+k] = flat[b+k];
-                    tris[i*3]   = (uint)(i*3);
-                    tris[i*3+1] = (uint)(i*3+1);
-                    tris[i*3+2] = (uint)(i*3+2);
+                    for (int v=0; v<3; v++)
+                    {
+                        int b = i*9 + v*3;
+                        var key = (flat[b], flat[b+1], flat[b+2]);
+                        if (!vmap.TryGetValue(key, out uint vi))
+                        {
+                            vi = (uint)(verts.Count / 3);
+                            vmap[key] = vi;
+                            verts.Add(flat[b]); verts.Add(flat[b+1]); verts.Add(flat[b+2]);
+                        }
+                        tris[i*3+v] = vi;
+                    }
                 }
-                // Use MeshGLData wrapper — passes numProp as uint, tangents as null (no smoothing)
-                var data   = new MeshGLData(verts, tris, 3u, null!);
+
+                // MeshGLData: numProp=3 (x,y,z only), tangents=empty → faceted shading
+                // Empty tangents array (length 0) is valid per ManifoldNET docs for faceted mesh
+                var data   = new MeshGLData(verts.ToArray(), tris, 3u, new float[0]);
                 var meshGL = new MeshGL(data);
-                return Manifold.Create(meshGL);
+                var m      = Manifold.Create(meshGL);
+                // Manifold.Create silently returns empty manifold for non-manifold inputs
+                return (m.Status == ManifoldError.NoError && m.MeshGL.TriangleNumber > 0) ? m : null;
             }
 
             // ── Convert Manifold result back to flat triangle soup ──────────
             float[] FromManifold(Manifold m)
             {
-                var mg    = m.MeshGL;
-                var vp    = mg.VerticesProperties; // x,y,z,x,y,z,...
-                var tv    = mg.TriangleVertices;   // i0,i1,i2,...
-                int nTri  = (int)mg.TriangleNumber;
-                var r     = new float[nTri * 9];
+                var mg      = m.MeshGL;
+                var vp      = mg.VerticesProperties;
+                var tv      = mg.TriangleVertices;
+                int nTri    = (int)mg.TriangleNumber;
                 int numProp = (int)mg.PropertiesNumber;
+                if (nTri == 0 || numProp < 3 || vp == null || tv == null) return Array.Empty<float>();
+                var r = new float[nTri * 9];
                 for (int i=0; i<nTri; i++)
                     for (int v=0; v<3; v++)
                     {
@@ -390,7 +405,7 @@ public static class SplintEngine
                 return r;
             }
 
-            // Build a closed solid: dilate mesh → clip at capZ → cap the cut boundary
+            // Build a closed solid: dilate → clip → cap
             float[] MakeSolid(float[] mesh, float dilMm, float capZ, bool keepBelow)
             {
                 float[] dilated = OffsetMeshVertices(mesh, dilMm);
@@ -401,36 +416,31 @@ public static class SplintEngine
                 return CapAtZ(clipped, capZ);
             }
 
-            // ── Step A/B: closed 1mm-dilated solids (outer skin) ───────────
-            float[] solidUpper1  = MakeSolid(upperMesh, Dil1mm,  upperZ, keepBelow:true);
-            float[] solidLower1  = MakeSolid(lowerMesh, Dil1mm,  lowerZ, keepBelow:false);
-            if (solidUpper1.Length < 9 || solidLower1.Length < 9) return horseshoeFlat;
+            // ── Step A/B: closed 1mm-dilated tooth solids ─────────────────
+            float[] solidUpper1  = MakeSolid(upperMesh, Dil1mm, upperZ, keepBelow:true);
+            float[] solidLower1  = MakeSolid(lowerMesh, Dil1mm, lowerZ, keepBelow:false);
 
-            // ── Step C: union via ManifoldNET (fast, guaranteed manifold) ──
-            var mHorse  = ToManifold(horseshoeFlat);
-            var mUp1    = ToManifold(solidUpper1);
-            var mLo1    = ToManifold(solidLower1);
-            var blank   = Manifold.Union(Manifold.Union(mHorse, mUp1), mLo1);
+            // ── Step C: union horseshoe + tooth skins ─────────────────────
+            // Horseshoe is always valid (constructed by us, guaranteed closed).
+            // Tooth solids may fail if CapAtZ didn't fully close them → skip gracefully.
+            var mHorse = ToManifold(horseshoeFlat);
+            if (mHorse == null) return horseshoeFlat;  // horseshoe construction bug
+
+            Manifold blank = mHorse;
+            if (solidUpper1.Length >= 9) { var m = ToManifold(solidUpper1); if (m != null) blank = Manifold.Union(blank, m); }
+            if (solidLower1.Length >= 9) { var m = ToManifold(solidLower1); if (m != null) blank = Manifold.Union(blank, m); }
+
             if (blank.Status != ManifoldError.NoError) return horseshoeFlat;
 
-            // ── Step D/E: 0.1mm tools → subtract to create pockets ─────────
+            // ── Step D/E: 0.1mm subtraction tools → tooth pockets ─────────
             float[] solidUpper01 = MakeSolid(upperMesh, Dil01mm, upperZ, keepBelow:true);
             float[] solidLower01 = MakeSolid(lowerMesh, Dil01mm, lowerZ, keepBelow:false);
 
-            if (solidUpper01.Length >= 9)
-            {
-                var tool = ToManifold(solidUpper01);
-                var sub  = Manifold.Difference(blank, tool);
-                if (sub.Status == ManifoldError.NoError) blank = sub;
-            }
-            if (solidLower01.Length >= 9)
-            {
-                var tool = ToManifold(solidLower01);
-                var sub  = Manifold.Difference(blank, tool);
-                if (sub.Status == ManifoldError.NoError) blank = sub;
-            }
+            if (solidUpper01.Length >= 9) { var tool = ToManifold(solidUpper01); if (tool != null) { var s = Manifold.Difference(blank, tool); if (s.Status == ManifoldError.NoError) blank = s; } }
+            if (solidLower01.Length >= 9) { var tool = ToManifold(solidLower01); if (tool != null) { var s = Manifold.Difference(blank, tool); if (s.Status == ManifoldError.NoError) blank = s; } }
 
-            return FromManifold(blank);
+            var result = FromManifold(blank);
+            return result.Length >= 9 ? result : horseshoeFlat;
         }
         catch { return horseshoeFlat; }
     }
