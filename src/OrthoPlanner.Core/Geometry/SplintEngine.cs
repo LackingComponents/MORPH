@@ -278,36 +278,56 @@ public static class SplintEngine
             // Z-clip triangle soup by triangle centroid
             float[] ClipZ(float[] s, float zMin, float zMax){var r=new List<float>();for(int i=0;i+8<s.Length;i+=9){float cz=(s[i+2]+s[i+5]+s[i+8])/3f;if(cz>=zMin&&cz<=zMax)for(int k=0;k<9;k++)r.Add(s[i+k]);}return r.ToArray();}
 
-            // MeshImpl: uses NarrowBand_SpatialFloodFill so interior voxels get correct
-            // negative SDF values (not MaxValue). This makes the dental solids properly
-            // solid (not just shells), enabling correct pocket subtraction.
-            // We use the FULL unclipped mesh for correct sign computation; the MC bounds
-            // restrict the output to the crown+horseshoe region.
-            BoundedImplicitFunction3d? MeshImpl(float[] soup, double dilMm)
-            {
-                if(soup.Length<9) return null;
-                var m=ToMesh(soup); if(m.TriangleCount==0) return null;
-                int band = (int)Math.Ceiling(dilMm/VS)+3;
-                var sdf=new MeshSignedDistanceGrid(m,(float)VS)
-                {
-                    ExactBandWidth = Math.Max(band,4),
-                    ComputeSigns   = true,
-                    ComputeMode    = MeshSignedDistanceGrid.ComputeModes.NarrowBand_SpatialFloodFill,
-                    InsideMode     = MeshSignedDistanceGrid.InsideModes.ParityCount
-                };
-                sdf.Compute();
-                BoundedImplicitFunction3d impl=new DenseGridTrilinearImplicit(sdf.Grid,sdf.GridOrigin,(float)VS);
-                return dilMm>1e-9 ? Offset(impl,-dilMm) : impl;
+            // Pre-clip meshes to crown+horseshoe region before SDF (avoids full-skull BVH)
+            float mnX=float.MaxValue,mnY=float.MaxValue,mxX=float.MinValue,mxY=float.MinValue;
+            foreach(var p in upper){if(p.x<mnX)mnX=p.x;if(p.x>mxX)mxX=p.x;if(p.y<mnY)mnY=p.y;if(p.y>mxY)mxY=p.y;}
+            foreach(var p in lower){if(p.x<mnX)mnX=p.x;if(p.x>mxX)mxX=p.x;if(p.y<mnY)mnY=p.y;if(p.y>mxY)mxY=p.y;}
+            float clipPad=(float)(labiolingualMm*0.5+Dil1+6);
+            float[] Crop(float[] s){
+                var r=new List<float>();
+                for(int i=0;i+8<s.Length;i+=9){
+                    float cx=(s[i]+s[i+3]+s[i+6])/3f,cy=(s[i+1]+s[i+4]+s[i+7])/3f,cz=(s[i+2]+s[i+5]+s[i+8])/3f;
+                    if(cx>=mnX-clipPad&&cx<=mxX+clipPad&&cy>=mnY-clipPad&&cy<=mxY+clipPad
+                       &&cz>=lowerZ-(float)(CrownMm+Dil1+1)&&cz<=upperZ+(float)(CrownMm+Dil1+1))
+                        for(int k=0;k<9;k++)r.Add(s[i+k]);
+                }
+                return r.ToArray();
             }
 
-            // Use FULL unclipped dental meshes (correct interior signs via flood fill)
-            // MC bounds (below) limit extraction to the crown+horseshoe region only
-            var horseImpl = MeshImpl(horseshoeFlat, 0.0);
-            var upImpl1   = MeshImpl(upperMesh,     Dil1);
-            var loImpl1   = MeshImpl(lowerMesh,     Dil1);
-            var upImpl01  = MeshImpl(upperMesh,     Dil01);
-            var loImpl01  = MeshImpl(lowerMesh,     Dil01);
-            if(horseImpl==null||upImpl1==null||loImpl1==null||upImpl01==null||loImpl01==null) return horseshoeFlat;
+            // Compute SDF ONCE per mesh — reuse for both 1mm and 0.1mm via OffsetImpl.
+            // NarrowBand_SpatialFloodFill: fills interior with correct negative sign.
+            // UseParallel: uses all CPU cores.
+            BoundedImplicitFunction3d? BaseSdf(float[] soup){
+                if(soup.Length<9) return null;
+                var m=ToMesh(soup); if(m.TriangleCount==0) return null;
+                System.Diagnostics.Debug.WriteLine($"[Splint] SDF for {m.TriangleCount} tris");
+                var sdf=new MeshSignedDistanceGrid(m,(float)VS){
+                    ExactBandWidth=(int)Math.Ceiling(Dil1/VS)+4,
+                    ComputeSigns=true,
+                    ComputeMode=MeshSignedDistanceGrid.ComputeModes.NarrowBand_SpatialFloodFill,
+                    InsideMode=MeshSignedDistanceGrid.InsideModes.ParityCount,
+                    UseParallel=true
+                };
+                sdf.Compute();
+                return new DenseGridTrilinearImplicit(sdf.Grid,sdf.GridOrigin,(float)VS);
+            }
+
+            float[] upCrop=Crop(upperMesh), loCrop=Crop(lowerMesh), hoCrop=Crop(horseshoeFlat);
+            System.Diagnostics.Debug.WriteLine($"[Splint] Cropped tris: up={upCrop.Length/9} lo={loCrop.Length/9} horse={hoCrop.Length/9}");
+            if(upCrop.Length<9||loCrop.Length<9||hoCrop.Length<9) return horseshoeFlat;
+
+            var horseBase = BaseSdf(hoCrop);
+            var upBase    = BaseSdf(upCrop);
+            var loBase    = BaseSdf(loCrop);
+            if(horseBase==null||upBase==null||loBase==null) return horseshoeFlat;
+
+            // Apply offsets lazily — zero extra cost, same underlying grid
+            var horseImpl = horseBase;
+            var upImpl1   = Offset(upBase,  -Dil1);
+            var loImpl1   = Offset(loBase,  -Dil1);
+            var upImpl01  = Offset(upBase,  -Dil01);
+            var loImpl01  = Offset(loBase,  -Dil01);
+
 
             // Boolean ops: blank = horse ∪ up1 ∪ lo1 ; final = blank − up01 − lo01
             BoundedImplicitFunction3d blank=new ImplicitUnion3d{A=horseImpl,B=new ImplicitUnion3d{A=upImpl1,B=loImpl1}};
