@@ -335,13 +335,27 @@ public static class SplintEngine
             var loImpl01  = Offset(loBase,  -Dil01);
 
 
-            // Boolean ops: blank = horse ∪ up1 ∪ lo1 ; final = blank − up01 − lo01
-            BoundedImplicitFunction3d blank=new ImplicitUnion3d{A=horseImpl,B=new ImplicitUnion3d{A=upImpl1,B=loImpl1}};
-            BoundedImplicitFunction3d final2=new ImplicitDifference3d{A=new ImplicitDifference3d{A=blank,B=upImpl01},B=loImpl01};
-
-            // MC bounds — reuse mnX/mnY/mxX/mxY already computed above in Crop()
+            // Clip box: caps the blank at the arch planes (user requirement):
+            //   Z top    = upperZ + 1.5mm  (1.5mm above upper arch curve)
+            //   Z bottom = lowerZ - 1.5mm  (1.5mm below lower arch curve)
+            //   XY       = arch footprint ± labiolingual pad (caps the back too)
+            const double CapAbove = 1.5;
+            const double CapBelow = 1.5;
             float pad=(float)(labiolingualMm*0.5+Dil1+3);
-            var mcBounds=new AxisAlignedBox3d(new Vector3d(mnX-pad,mnY-pad,lowerZ-CrownMm-Dil1),new Vector3d(mxX+pad,mxY+pad,upperZ+CrownMm+Dil1));
+            var clipAAB = new AxisAlignedBox3d(
+                new Vector3d(mnX-pad, mnY-pad, lowerZ-CapBelow),
+                new Vector3d(mxX+pad, mxY+pad, upperZ+CapAbove));
+            BoundedImplicitFunction3d clipBox = new ImplicitAxisAlignedBox3d { AABox = clipAAB };
+
+            // blank = (horse ∪ up1mm ∪ lo1mm) ∩ clipBox  → capped solid
+            BoundedImplicitFunction3d rawBlank = new ImplicitUnion3d{A=horseImpl,B=new ImplicitUnion3d{A=upImpl1,B=loImpl1}};
+            BoundedImplicitFunction3d blank    = new ImplicitIntersection3d{A=rawBlank, B=clipBox};
+
+            // final = blank − up0.1mm − lo0.1mm  → tooth pockets carved
+            BoundedImplicitFunction3d final2   = new ImplicitDifference3d{A=new ImplicitDifference3d{A=blank,B=upImpl01},B=loImpl01};
+
+            var mcBounds = new AxisAlignedBox3d(clipAAB.Min - new Vector3d(1,1,1), clipAAB.Max + new Vector3d(1,1,1));
+
 
             System.Diagnostics.Debug.WriteLine($"[Splint] bounds={mcBounds.Min:F1}..{mcBounds.Max:F1}  MC@{VS_MC}mm");
             var mc=new MarchingCubes{Implicit=final2,Bounds=mcBounds,CubeSize=VS_MC};
