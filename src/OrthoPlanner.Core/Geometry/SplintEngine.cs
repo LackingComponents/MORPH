@@ -253,61 +253,76 @@ public static class SplintEngine
 
         try
         {
-            const float VS      = 0.1f;
-            const float CrownMm = 10f;
-            const float Dil1    = 1.0f;
-            const float Dil01   = 0.1f;
+            const double VS      = 0.1;
+            const double CrownMm = 10.0;
+            const double Dil1    = 1.0;
+            const double Dil01   = 0.1;
 
             float upperZ = upper.Max(p => p.z);
             float lowerZ = lower.Min(p => p.z);
 
-            // Use ARCH CURVES for bounding box (NOT the CT mesh)
-            // CT meshes span the whole skull; curves trace only the dental arch.
-            float minX=float.MaxValue,minY=float.MaxValue;
-            float maxX=float.MinValue,maxY=float.MinValue;
-            foreach(var p in upper){if(p.x<minX)minX=p.x;if(p.x>maxX)maxX=p.x;if(p.y<minY)minY=p.y;if(p.y>maxY)maxY=p.y;}
-            foreach(var p in lower){if(p.x<minX)minX=p.x;if(p.x>maxX)maxX=p.x;if(p.y<minY)minY=p.y;if(p.y>maxY)maxY=p.y;}
-            float minZ=MathF.Min(upperZ,lowerZ)-CrownMm;
-            float maxZ=MathF.Max(upperZ,lowerZ)+CrownMm;
-            float xyM=labiolingualMm*0.5f+Dil1+5f; float zM=Dil1+3f;  // tight margins
-            float ox=minX-xyM,oy=minY-xyM,oz=minZ-zM;
-            int nx=(int)MathF.Ceiling((maxX+xyM-ox)/VS)+2;
-            int ny=(int)MathF.Ceiling((maxY+xyM-oy)/VS)+2;
-            int nz=(int)MathF.Ceiling((maxZ+zM-oz)/VS)+2;
-            long totalVox=(long)nx*ny*nz;
-            System.Diagnostics.Debug.WriteLine($"[SDF] Grid={nx}x{ny}x{nz}={totalVox/1_000_000}M  XY=[{minX:F0},{maxX:F0}]x[{minY:F0},{maxY:F0}]  Z=[{minZ:F0},{maxZ:F0}]  upperZ={upperZ:F1} lowerZ={lowerZ:F1}");
-            if(totalVox>300_000_000L){System.Diagnostics.Debug.WriteLine($"[SDF] Grid too large: {totalVox/1_000_000}M"); return horseshoeFlat;}
+            // BoundedImplicitFunction3d wrapper that shifts the iso by 'Offset'
+            // (positive Offset = shrink, negative = expand/dilate)
+            BoundedImplicitFunction3d Offset(BoundedImplicitFunction3d a, double off)
+                => new OffsetImpl(a, off);
 
+            // Convert flat triangle soup to indexed DMesh3
+            DMesh3 ToMesh(float[] s)
+            {
+                var dm=new DMesh3(); var vm=new Dictionary<(int,int,int),int>();
+                int GetV(float x,float y,float z){var k=((int)MathF.Round(x*100),(int)MathF.Round(y*100),(int)MathF.Round(z*100));if(!vm.TryGetValue(k,out int vi)){vi=dm.AppendVertex(new Vector3d(x,y,z));vm[k]=vi;}return vi;}
+                for(int i=0;i+8<s.Length;i+=9){int a=GetV(s[i],s[i+1],s[i+2]),b2=GetV(s[i+3],s[i+4],s[i+5]),c2=GetV(s[i+6],s[i+7],s[i+8]);if(a!=b2&&b2!=c2&&a!=c2)dm.AppendTriangle(a,b2,c2);}
+                return dm;
+            }
 
+            // Z-clip triangle soup by triangle centroid
+            float[] ClipZ(float[] s, float zMin, float zMax){var r=new List<float>();for(int i=0;i+8<s.Length;i+=9){float cz=(s[i+2]+s[i+5]+s[i+8])/3f;if(cz>=zMin&&cz<=zMax)for(int k=0;k<9;k++)r.Add(s[i+k]);}return r.ToArray();}
 
+            // Compute SDF → BoundedImplicitFunction3d with optional dilation offset
+            BoundedImplicitFunction3d? MeshImpl(float[] soup, double dilMm)
+            {
+                if(soup.Length<9) return null;
+                var m=ToMesh(soup); if(m.TriangleCount==0) return null;
+                var sdf=new MeshSignedDistanceGrid(m,(float)VS){ExactBandWidth=(int)Math.Ceiling(dilMm/VS)+3,ComputeSigns=true};
+                sdf.Compute();
+                BoundedImplicitFunction3d impl=new DenseGridTrilinearImplicit(sdf.Grid,sdf.GridOrigin,(float)VS);
+                return dilMm>1e-9 ? Offset(impl,-dilMm) : impl;
+            }
 
-            SdfGrid Sdf(float[] mesh, float dil)
-                => SdfOps.MeshToSdf(mesh, dil, float.NegativeInfinity, float.PositiveInfinity, ox, oy, oz, nx, ny, nz, VS);
+            // Clip to crown region and build implicits
+            float[] upCrown=ClipZ(upperMesh,upperZ-(float)CrownMm,upperZ+1f);
+            float[] loCrown=ClipZ(lowerMesh,lowerZ-1f,lowerZ+(float)CrownMm);
+            if(upCrown.Length<9||loCrown.Length<9) return horseshoeFlat;
 
-            // Union of both dilated dental surfaces â€” no z-clip, no horseshoe, no subtraction
-            var sdfDebug = Sdf(upperMesh, Dil1);
-            sdfDebug.UnionWith(Sdf(lowerMesh, Dil1));
+            var horseImpl = MeshImpl(horseshoeFlat, 0.0);
+            var upImpl1   = MeshImpl(upCrown,       Dil1);
+            var loImpl1   = MeshImpl(loCrown,       Dil1);
+            var upImpl01  = MeshImpl(upCrown,       Dil01);
+            var loImpl01  = MeshImpl(loCrown,       Dil01);
+            if(horseImpl==null||upImpl1==null||loImpl1==null||upImpl01==null||loImpl01==null) return horseshoeFlat;
 
-            float[] result = SdfOps.MarchingCubes(sdfDebug, 0f);
-            System.Diagnostics.Debug.WriteLine($"[SDF Debug] Marching Cubes â†’ {result.Length/9} triangles");
-            return result.Length >= 9 ? result : horseshoeFlat;
+            // Boolean ops: blank = horse ∪ up1 ∪ lo1 ; final = blank − up01 − lo01
+            BoundedImplicitFunction3d blank=new ImplicitUnion3d{A=horseImpl,B=new ImplicitUnion3d{A=upImpl1,B=loImpl1}};
+            BoundedImplicitFunction3d final2=new ImplicitDifference3d{A=new ImplicitDifference3d{A=blank,B=upImpl01},B=loImpl01};
 
-            /* â”€â”€ REAL PIPELINE (blocked for debug) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-            const float CrownMm = 10f;
-            const float Dil01   = 0.1f;
-            float upperZ = upper.Max(p => p.z);
-            float lowerZ = lower.Min(p => p.z);
-            // ... expand with horseshoe, z-clip, subtract ...
-            var sdfBlank=Sdf(horseshoeFlat,0f,float.NegativeInfinity,float.PositiveInfinity);
-            sdfBlank.UnionWith(Sdf(upperMesh,Dil1,upperZ-CrownMm,upperZ));
-            sdfBlank.UnionWith(Sdf(lowerMesh,Dil1,lowerZ,lowerZ+CrownMm));
-            sdfBlank.SubtractWith(Sdf(upperMesh,Dil01,upperZ-CrownMm,upperZ));
-            sdfBlank.SubtractWith(Sdf(lowerMesh,Dil01,lowerZ,lowerZ+CrownMm));
-            float[] result=SdfOps.MarchingCubes(sdfBlank,0f);
-            return result.Length>=9?result:horseshoeFlat;
-            â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+            // MC bounds from arch curves
+            float mnX=float.MaxValue,mnY=float.MaxValue,mxX=float.MinValue,mxY=float.MinValue;
+            foreach(var p in upper){if(p.x<mnX)mnX=p.x;if(p.x>mxX)mxX=p.x;if(p.y<mnY)mnY=p.y;if(p.y>mxY)mxY=p.y;}
+            foreach(var p in lower){if(p.x<mnX)mnX=p.x;if(p.x>mxX)mxX=p.x;if(p.y<mnY)mnY=p.y;if(p.y>mxY)mxY=p.y;}
+            float pad=(float)(labiolingualMm*0.5+Dil1+3);
+            var mcBounds=new AxisAlignedBox3d(new Vector3d(mnX-pad,mnY-pad,lowerZ-CrownMm-Dil1),new Vector3d(mxX+pad,mxY+pad,upperZ+CrownMm+Dil1));
+
+            System.Diagnostics.Debug.WriteLine($"[Splint] bounds={mcBounds.Min:F1}..{mcBounds.Max:F1}");
+            var mc=new MarchingCubes{Implicit=final2,Bounds=mcBounds,CubeSize=VS};
+            mc.Generate();
+            System.Diagnostics.Debug.WriteLine($"[Splint] MC → {mc.Mesh?.TriangleCount} tris");
+
+            if(mc.Mesh==null||mc.Mesh.TriangleCount==0) return horseshoeFlat;
+            var dm=mc.Mesh; var res=new float[dm.TriangleCount*9]; int ri=0;
+            foreach(int tid in dm.TriangleIndices()){var t=dm.GetTriangle(tid);var va=dm.GetVertex(t.a);var vb=dm.GetVertex(t.b);var vc=dm.GetVertex(t.c);res[ri++]=(float)va.x;res[ri++]=(float)va.y;res[ri++]=(float)va.z;res[ri++]=(float)vb.x;res[ri++]=(float)vb.y;res[ri++]=(float)vb.z;res[ri++]=(float)vc.x;res[ri++]=(float)vc.y;res[ri++]=(float)vc.z;}
+            return res.Length>=9?res:horseshoeFlat;
         }
-        catch(Exception ex){System.Diagnostics.Debug.WriteLine($"[SDF Error] {ex}"); return horseshoeFlat;}
+        catch(Exception ex){System.Diagnostics.Debug.WriteLine($"[Splint ERROR] {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}"); return horseshoeFlat;}
     }
 
     private static float Sq(float v) => v * v;
@@ -502,3 +517,26 @@ public static class SplintEngine
         return buf;
     }
 }
+
+/// <summary>
+/// Wraps a BoundedImplicitFunction3d and shifts its value by 'Offset'.
+/// Negative offset = dilation (expands the iso=0 surface outward).
+/// This makes ImplicitOffset behave as a BoundedImplicitFunction3d so it
+/// can be used as A/B in g3's ImplicitUnion3d / ImplicitDifference3d.
+/// </summary>
+internal sealed class OffsetImpl : BoundedImplicitFunction3d
+{
+    private readonly BoundedImplicitFunction3d _inner;
+    private readonly double _offset;
+    public OffsetImpl(BoundedImplicitFunction3d inner, double offset) { _inner=inner; _offset=offset; }
+    public double Value(ref Vector3d pt) => _inner.Value(ref pt) + _offset;
+
+    public AxisAlignedBox3d Bounds()
+    {
+        var b = _inner.Bounds();
+        double expand = _offset < 0 ? -_offset : 0;
+        b.Expand(expand + 1.0); // +1mm safety margin
+        return b;
+    }
+}
+
