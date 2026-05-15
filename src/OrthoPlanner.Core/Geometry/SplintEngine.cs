@@ -188,38 +188,36 @@ public static class SplintEngine
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  GENERATE SPLINT  — full boolean pipeline
-    //  1. Build watertight horseshoe
-    //  2. Dilate both tooth meshes 1mm outward (isotropic normal offset)
-    //  3. Close holes in all meshes → watertight for boolean
-    //  4. Union: horseshoe ∪ dilated_upper ∪ dilated_lower  = splint blank
-    //  5. Subtract original upper teeth  → upper tooth pockets
-    //  6. Subtract original lower teeth  → lower tooth pockets
+    //  GENERATE SPLINT — correct closed-solid boolean pipeline
+    //
+    //  Step A  Dilate upper mesh 1mm, clip below upperZ, cap at upperZ → closed solid
+    //  Step B  Same for lower (clip above lowerZ, cap at lowerZ)          → closed solid
+    //  Step C  horseshoe ∪ solidUpper1mm ∪ solidLower1mm (all closed)    → splint blank
+    //  Step D  Dilate 0.1mm versions, clip+cap → closed subtraction tools
+    //  Step E  blank − upper0.1mm − lower0.1mm                           → final splint
     // ═══════════════════════════════════════════════════════════════════════
     public static float[] GenerateSplint(
         List<(float x,float y,float z)> upperCurve,
         List<(float x,float y,float z)> lowerCurve,
         float labiolingualMm     = 8f,
-        float upperPenetrationMm = 0f,   // UI slider — kept for signature compat, not used here
-        float lowerPenetrationMm = 0f,   // UI slider — kept for signature compat, not used here
+        float upperPenetrationMm = 0f,   // UI only — not used here
+        float lowerPenetrationMm = 0f,   // UI only — not used here
         float[]? upperMesh       = null,
         float[]? lowerMesh       = null,
         int sampleCount          = 160)
     {
         if (upperCurve.Count < 2 || lowerCurve.Count < 2) return Array.Empty<float>();
 
-        // ── Resample + align curves ──────────────────────────────────────────
         var upper = ResampleByArcLength(upperCurve, sampleCount);
         var lower = ResampleByArcLength(lowerCurve, sampleCount);
         int n = upper.Count;
         if (n < 2) return Array.Empty<float>();
 
+        // Align direction
         {
-            var u0=upper[0]; var u1=upper[n-1];
-            var l0=lower[0]; var l1=lower[n-1];
-            float distSame = Sq(u0.x-l0.x)+Sq(u0.y-l0.y) + Sq(u1.x-l1.x)+Sq(u1.y-l1.y);
-            float distRev  = Sq(u0.x-l1.x)+Sq(u0.y-l1.y) + Sq(u1.x-l0.x)+Sq(u1.y-l0.y);
-            if (distRev < distSame) lower.Reverse();
+            var u0=upper[0]; var u1=upper[n-1]; var l0=lower[0]; var l1=lower[n-1];
+            if (Sq(u0.x-l1.x)+Sq(u0.y-l1.y)+Sq(u1.x-l0.x)+Sq(u1.y-l0.y) <
+                Sq(u0.x-l0.x)+Sq(u0.y-l0.y)+Sq(u1.x-l1.x)+Sq(u1.y-l1.y)) lower.Reverse();
         }
 
         float half = labiolingualMm * 0.5f;
@@ -228,7 +226,6 @@ public static class SplintEngine
 
         var TO = new (float x,float y,float z)[n]; var TI = new (float x,float y,float z)[n];
         var BO = new (float x,float y,float z)[n]; var BI = new (float x,float y,float z)[n];
-
         for (int i = 0; i < n; i++)
         {
             var u=upper[i]; var nu=norU[i]; var l=lower[i]; var nl=norL[i];
@@ -236,186 +233,220 @@ public static class SplintEngine
             BO[i]=(l.x+nl.x*half, l.y+nl.y*half, l.z); BI[i]=(l.x-nl.x*half, l.y-nl.y*half, l.z);
         }
 
-        // ── Step 1: Build horseshoe (watertight by construction) ─────────────
+        // ── Build horseshoe (closed by construction) ─────────────────────────
         var horseshoeTris = new List<float>(n * 6 * 2 * 9);
         for (int i = 0; i < n-1; i++)
         {
-            int j = i+1;
-            AddQuad(horseshoeTris, TO[i], TO[j], BO[j], BO[i]);
-            AddQuad(horseshoeTris, TI[j], TI[i], BI[i], BI[j]);
-            AddQuad(horseshoeTris, TI[i], TO[i], TO[j], TI[j]);
-            AddQuad(horseshoeTris, BO[i], BO[j], BI[j], BI[i]);
+            int j=i+1;
+            AddQuad(horseshoeTris, TO[i], TO[j], BO[j], BO[i]);   // outer wall
+            AddQuad(horseshoeTris, TI[j], TI[i], BI[i], BI[j]);   // inner wall
+            AddQuad(horseshoeTris, TI[i], TO[i], TO[j], TI[j]);   // top face
+            AddQuad(horseshoeTris, BO[i], BO[j], BI[j], BI[i]);   // bottom face
         }
         AddQuad(horseshoeTris, TO[0],   TI[0],   BI[0],   BO[0]);
         AddQuad(horseshoeTris, TI[n-1], TO[n-1], BO[n-1], BI[n-1]);
-
         float[] horseshoeFlat = horseshoeTris.ToArray();
 
-        // ── Early-out: no tooth meshes → return bare horseshoe ───────────────
         if (upperMesh == null || upperMesh.Length < 9 ||
             lowerMesh == null || lowerMesh.Length < 9)
             return horseshoeFlat;
 
         try
         {
-            // ── Step 2: Z-clip tooth meshes to the horseshoe span + 15mm margin ─
-            // The horseshoe occupies [lowerZ, upperZ].  We include 15mm of crown
-            // above upperZ (maxilla) and below lowerZ (mandible) so the full
-            // occlusal surface is captured.
             float upperZ = upper.Max(p => p.z);
             float lowerZ = lower.Min(p => p.z);
-            const float CrownMarginMm = 15f;
+            const float CrownMm   = 15f;   // how far into the crown to include
+            const float Dil1mm    = 1.0f;  // outer skin dilation
+            const float Dil01mm   = 0.1f;  // pocket clearance dilation
 
+            // ── Helpers ──────────────────────────────────────────────────────
+
+            // Z-clip: keep triangles whose centroid is in [zMin, zMax]
             float[] ClipZ(float[] mesh, float zMin, float zMax)
             {
-                var result = new List<float>(mesh.Length / 4);
+                var r = new List<float>(mesh.Length / 3);
                 for (int i = 0; i+8 < mesh.Length; i += 9)
                 {
-                    float cz = (mesh[i+2]+mesh[i+5]+mesh[i+8]) / 3f;
-                    if (cz < zMin || cz > zMax) continue;
-                    for (int k = 0; k < 9; k++) result.Add(mesh[i+k]);
+                    float cz=(mesh[i+2]+mesh[i+5]+mesh[i+8])/3f;
+                    if (cz >= zMin && cz <= zMax)
+                        for (int k=0;k<9;k++) r.Add(mesh[i+k]);
                 }
-                return result.ToArray();
+                return r.ToArray();
             }
 
-            // Maxilla: keep teeth above the lower horseshoe face (they live above upperZ)
-            // Include the full crown up to 15mm above, and 2mm below for connection
-            // Upper teeth: cusps point DOWN toward mandible → keep portion BELOW upper arch line
-            float[] upperClipped = ClipZ(upperMesh, upperZ - CrownMarginMm, upperZ + 2f);
-            // Mandible: keep teeth below the upper horseshoe face (they live below lowerZ)
-            // Lower teeth: cusps point UP toward maxilla → keep portion ABOVE lower arch line
-            float[] lowerClipped = ClipZ(lowerMesh, lowerZ - 2f, lowerZ + CrownMarginMm);
-
-            if (upperClipped.Length < 9 || lowerClipped.Length < 9) return horseshoeFlat;
-
-            // ── Step 3: Dilate tooth meshes 1mm outward ──────────────────────
-            const float DilateMm = 1.0f;
-            float[] dilatedUpper = OffsetMeshVertices(upperClipped, DilateMm);
-            float[] dilatedLower = OffsetMeshVertices(lowerClipped, DilateMm);
-
-            // ── Step 4: Make all meshes watertight (close boundary holes) ────
-            float[] Seal(float[] flat)
+            // Cap the open boundary of a clipped mesh at capZ with centroid-fan triangulation.
+            // Handles multiple disconnected boundary loops (one per tooth cusp area).
+            float[] CapAtZ(float[] mesh, float capZ)
             {
-                // Convert flat→List<float[]> format used by MeshOps.CloseHoles
-                var vList = new List<float[]>(flat.Length / 3);
-                for (int i = 0; i+2 < flat.Length; i += 3)
-                    vList.Add(new float[]{flat[i], flat[i+1], flat[i+2]});
-                var closed = MeshOps.CloseHoles(vList);
-                var result = new float[closed.Count * 3];
-                for (int i = 0; i < closed.Count; i++)
-                { result[i*3]=closed[i][0]; result[i*3+1]=closed[i][1]; result[i*3+2]=closed[i][2]; }
-                return result;
+                const float SnapEps = 0.6f;
+                // Snap vertices near capZ to exactly capZ
+                var arr = (float[])mesh.Clone();
+                for (int i=2; i<arr.Length; i+=3)
+                    if (MathF.Abs(arr[i]-capZ) < SnapEps) arr[i] = capZ;
+
+                // Build half-edge map for boundary detection
+                var fwd = new Dictionary<long,long>();   // directed edge start→end
+                var rev = new HashSet<long>();           // reversed edges that exist
+                var vpos = new Dictionary<long,(float x,float y)>();
+
+                long Qk(float x,float y,float z)
+                    => unchecked((long)Math.Round(x*200)*1_000_000_007L
+                               ^ (long)Math.Round(y*200)*999_999_937L
+                               ^ (long)Math.Round(z*200));
+                long Ek(long a,long b) => unchecked(a*1_000_000_007L ^ b);
+
+                for (int i=0; i+8<arr.Length; i+=9)
+                {
+                    long[] ks = { Qk(arr[i],arr[i+1],arr[i+2]),
+                                  Qk(arr[i+3],arr[i+4],arr[i+5]),
+                                  Qk(arr[i+6],arr[i+7],arr[i+8]) };
+                    for (int v=0;v<3;v++)
+                    {
+                        int b3=i+v*3;
+                        vpos[ks[v]]=(arr[b3],arr[b3+1]);
+                    }
+                    for (int e=0;e<3;e++)
+                    {
+                        long a=ks[e], b=ks[(e+1)%3];
+                        fwd[Ek(a,b)] = 0; // mark forward
+                        rev.Add(Ek(b,a));
+                    }
+                }
+
+                // boundary half-edges: forward exists but not reverse
+                // only keep edges where both verts are at capZ
+                var boundNext = new Dictionary<long,long>();
+                for (int i=0; i+8<arr.Length; i+=9)
+                {
+                    long[] ks = { Qk(arr[i],arr[i+1],arr[i+2]),
+                                  Qk(arr[i+3],arr[i+4],arr[i+5]),
+                                  Qk(arr[i+6],arr[i+7],arr[i+8]) };
+                    for (int e=0;e<3;e++)
+                    {
+                        long a=ks[e], b=ks[(e+1)%3];
+                        if (!rev.Contains(Ek(a,b)))              // boundary
+                        {
+                            float za=arr[i+e*3+2], zb=arr[i+((e+1)%3)*3+2];
+                            if (MathF.Abs(za-capZ)<0.01f && MathF.Abs(zb-capZ)<0.01f)
+                                boundNext[a]=b;
+                        }
+                    }
+                }
+
+                // Trace loops and fan-triangulate each
+                var capTris = new List<float>();
+                var visited = new HashSet<long>();
+                foreach (var startKey in boundNext.Keys)
+                {
+                    if (visited.Contains(startKey)) continue;
+                    var loop = new List<long>();
+                    long cur = startKey;
+                    while (!visited.Contains(cur) && boundNext.TryGetValue(cur, out long nxt))
+                    { visited.Add(cur); loop.Add(cur); cur=nxt; }
+                    if (loop.Count < 3) continue;
+
+                    float cx=0,cy=0;
+                    foreach (var k in loop) { cx+=vpos[k].x; cy+=vpos[k].y; }
+                    cx/=loop.Count; cy/=loop.Count;
+
+                    for (int i=0;i<loop.Count;i++)
+                    {
+                        var va=vpos[loop[i]]; var vb=vpos[loop[(i+1)%loop.Count]];
+                        // winding: cap normal should point outward (away from mesh interior)
+                        // at capZ for upper (keepBelow): normal points +Z
+                        // determined by cross product — let caller reverse if wrong
+                        capTris.Add(cx);   capTris.Add(cy);   capTris.Add(capZ);
+                        capTris.Add(va.x); capTris.Add(va.y); capTris.Add(capZ);
+                        capTris.Add(vb.x); capTris.Add(vb.y); capTris.Add(capZ);
+                    }
+                }
+                return arr.Concat(capTris).ToArray();
             }
 
-            float[] sealedHorseshoe    = Seal(horseshoeFlat);
-            float[] sealedDilatedUpper = Seal(dilatedUpper);
-            float[] sealedDilatedLower = Seal(dilatedLower);
-            float[] sealedUpperOrig    = Seal(upperClipped);
-            float[] sealedLowerOrig    = Seal(lowerClipped);
+            // Build closed dilated solid: dilate → clip → cap
+            float[] MakeSolid(float[] mesh, float dilMm, float capZ, bool keepBelow)
+            {
+                float[] dilated = OffsetMeshVertices(mesh, dilMm);
+                float[] clipped = keepBelow
+                    ? ClipZ(dilated, capZ - CrownMm, capZ + 0.1f)
+                    : ClipZ(dilated, capZ - 0.1f,    capZ + CrownMm);
+                if (clipped.Length < 9) return Array.Empty<float>();
+                return CapAtZ(clipped, capZ);
+            }
 
-            // ── Step 5: Boolean operations via g3Sharp ───────────────────────
+            // flat[] → indexed DMesh3
             DMesh3 ToDMesh(float[] flat)
             {
-                var dm = new DMesh3();
-                var vmap = new Dictionary<Vector3f, int>();
-                int GetV(float x, float y, float z)
-                {
-                    var k = new Vector3f(x, y, z);
-                    if (!vmap.TryGetValue(k, out int vi))
-                    { vi = dm.AppendVertex(new Vector3d(x,y,z)); vmap[k] = vi; }
-                    return vi;
-                }
-                for (int i = 0; i+8 < flat.Length; i += 9)
-                {
-                    int a=GetV(flat[i],flat[i+1],flat[i+2]);
-                    int b=GetV(flat[i+3],flat[i+4],flat[i+5]);
-                    int c=GetV(flat[i+6],flat[i+7],flat[i+8]);
-                    if (a!=b && b!=c && a!=c) dm.AppendTriangle(a,b,c);
-                }
+                var dm=new DMesh3();
+                var vm=new Dictionary<Vector3f,int>();
+                int GetV(float x,float y,float z)
+                { var k=new Vector3f(x,y,z); if(!vm.TryGetValue(k,out int vi)){vi=dm.AppendVertex(new Vector3d(x,y,z));vm[k]=vi;} return vi; }
+                for(int i=0;i+8<flat.Length;i+=9)
+                { int a=GetV(flat[i],flat[i+1],flat[i+2]),b=GetV(flat[i+3],flat[i+4],flat[i+5]),c=GetV(flat[i+6],flat[i+7],flat[i+8]);
+                  if(a!=b&&b!=c&&a!=c) dm.AppendTriangle(a,b,c); }
                 return dm;
             }
 
             float[] FromDMesh(DMesh3 dm)
             {
-                var result = new List<float>(dm.TriangleCount * 9);
-                foreach (int tid in dm.TriangleIndices())
-                {
-                    Index3i tri = dm.GetTriangle(tid);
-                    Vector3d va=dm.GetVertex(tri.a), vb=dm.GetVertex(tri.b), vc=dm.GetVertex(tri.c);
-                    result.Add((float)va.x); result.Add((float)va.y); result.Add((float)va.z);
-                    result.Add((float)vb.x); result.Add((float)vb.y); result.Add((float)vb.z);
-                    result.Add((float)vc.x); result.Add((float)vc.y); result.Add((float)vc.z);
-                }
-                return result.ToArray();
+                var r=new List<float>(dm.TriangleCount*9);
+                foreach(int tid in dm.TriangleIndices())
+                { var t=dm.GetTriangle(tid); var va=dm.GetVertex(t.a);var vb=dm.GetVertex(t.b);var vc=dm.GetVertex(t.c);
+                  r.Add((float)va.x);r.Add((float)va.y);r.Add((float)va.z);
+                  r.Add((float)vb.x);r.Add((float)vb.y);r.Add((float)vb.z);
+                  r.Add((float)vc.x);r.Add((float)vc.y);r.Add((float)vc.z); }
+                return r.ToArray();
             }
 
-            // Proper boolean union: A ∪ B = (A minus interior of B) + full B
-            // This removes the overlapping interior faces before appending B,
-            // giving a single connected solid instead of two overlapping shells.
-            DMesh3 MeshUnion(DMesh3 a, DMesh3 b)
+            DMesh3? BoolDiff(DMesh3 target, DMesh3 tool)
             {
-                try
-                {
-                    var mb = new MeshBoolean { Target = new DMesh3(a), Tool = b };
-                    if (mb.Compute() && mb.Result != null && mb.Result.TriangleCount > 0)
-                    {
-                        MeshEditor.Append(mb.Result, b);
-                        return mb.Result;
-                    }
-                }
-                catch { /* fall through to simple append */ }
-                var combined = new DMesh3(a);
-                MeshEditor.Append(combined, b);
-                return combined;
-            }
-
-            // Difference: Target minus Tool
-            DMesh3? MeshDiff(DMesh3 target, DMesh3 tool)
-            {
-                try
-                {
-                    var mb = new MeshBoolean { Target = target, Tool = tool };
-                    bool ok = mb.Compute();
-                    return (ok && mb.Result != null && mb.Result.TriangleCount > 0) ? mb.Result : null;
-                }
+                try { var mb=new MeshBoolean{Target=target,Tool=tool}; return mb.Compute()&&mb.Result?.TriangleCount>0?mb.Result:null; }
                 catch { return null; }
             }
 
-            var horseDM  = ToDMesh(sealedHorseshoe);
-            var dilUpDM  = ToDMesh(sealedDilatedUpper);
-            var dilLoDM  = ToDMesh(sealedDilatedLower);
-            var origUpDM = ToDMesh(sealedUpperOrig);
-            var origLoDM = ToDMesh(sealedLowerOrig);
+            // ── Step A/B: build closed 1mm-dilated solids ─────────────────────
+            float[] solidUpper1 = MakeSolid(upperMesh, Dil1mm, upperZ, keepBelow:true);
+            float[] solidLower1 = MakeSolid(lowerMesh, Dil1mm, lowerZ, keepBelow:false);
+            if (solidUpper1.Length < 9 || solidLower1.Length < 9) return horseshoeFlat;
 
-            // Union: horseshoe ∪ dilated_upper ∪ dilated_lower → single connected blank
-            var blank = MeshUnion(MeshUnion(horseDM, dilUpDM), dilLoDM);
+            // ── Step C: union of three closed solids ──────────────────────────
+            // horseshoe ∪ solidUpper1 ∪ solidLower1
+            // Each input is closed → MeshBoolean difference gives proper seam removal.
+            var horseDM = ToDMesh(horseshoeFlat);
+            var upDM    = ToDMesh(solidUpper1);
+            var loDM    = ToDMesh(solidLower1);
 
-            // Subtract original upper teeth → upper tooth pockets
-            var withUpper = MeshDiff(blank, origUpDM);
-            if (withUpper == null) return FromDMesh(blank);
-
-            // Subtract original lower teeth → lower tooth pockets
-            var result2 = MeshDiff(withUpper, origLoDM) ?? withUpper;
-
-            // ── Post-process: weld seams + repair ────────────────────────────
-            // The union operation leaves T-intersections at the seam boundary.
-            // MeshAutoRepair stitches coincident boundary edges, fills small holes,
-            // and removes degenerate triangles → moves toward a closed manifold.
-            try
+            // Union(A,B) = (A − B) + B  [removes A's interior face at the seam, appends B]
+            DMesh3 BoolUnion(DMesh3 a, DMesh3 b)
             {
-                var repair = new gs.MeshAutoRepair(result2);
-                repair.RepairTolerance = 0.01;     // 0.01mm snap tolerance for seam welding
-                repair.Apply();
+                var diff = BoolDiff(new DMesh3(a), b);
+                if (diff != null) { MeshEditor.Append(diff, b); return diff; }
+                var fb = new DMesh3(a); MeshEditor.Append(fb, b); return fb;
             }
-            catch { /* non-fatal — return best result available */ }
 
-            return FromDMesh(result2);
+            var blank = BoolUnion(BoolUnion(horseDM, upDM), loDM);
+
+            // ── Step D/E: 0.1mm clearance solids → subtract ───────────────────
+            float[] solidUpper01 = MakeSolid(upperMesh, Dil01mm, upperZ, keepBelow:true);
+            float[] solidLower01 = MakeSolid(lowerMesh, Dil01mm, lowerZ, keepBelow:false);
+
+            if (solidUpper01.Length >= 9)
+            {
+                var r = BoolDiff(blank, ToDMesh(solidUpper01));
+                if (r != null) blank = r;
+            }
+            if (solidLower01.Length >= 9)
+            {
+                var r = BoolDiff(blank, ToDMesh(solidLower01));
+                if (r != null) blank = r;
+            }
+
+            // Final repair pass
+            try { var rp=new gs.MeshAutoRepair(blank){RepairTolerance=0.01}; rp.Apply(); } catch {}
+
+            return FromDMesh(blank);
         }
-        catch
-        {
-            // Any failure → return the safe bare horseshoe
-            return horseshoeFlat;
-        }
+        catch { return horseshoeFlat; }
     }
 
     private static float Sq(float v) => v * v;
