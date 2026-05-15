@@ -520,8 +520,7 @@ public partial class SplintPlannerWindow : Window
     private void AcceptBtn_Click(object s, RoutedEventArgs e)
     {
         Accepted = true;
-        DialogResult = true;
-        Close();
+        Close();  // window was opened with Show(), not ShowDialog() — no DialogResult
     }
 
     private void CancelBtn_Click(object s, RoutedEventArgs e)
@@ -538,7 +537,6 @@ public partial class SplintPlannerWindow : Window
             return;
         }
         Accepted = false;
-        DialogResult = false;
         Close();
     }
 }

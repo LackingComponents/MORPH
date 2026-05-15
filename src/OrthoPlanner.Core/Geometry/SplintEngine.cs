@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using g3;
 
 namespace OrthoPlanner.Core.Geometry;
 
@@ -284,65 +285,68 @@ public static class SplintEngine
         return tris.ToArray();
     }
 
-    // ── Isotropic mesh offset (vertex normal direction) ───────────────────
+    // ── Isotropic mesh offset via geometry3Sharp ──────────────────────────
+    /// <summary>
+    /// Offsets every vertex of the triangle soup by <paramref name="offsetMm"/> mm
+    /// along its area-weighted vertex normal, using geometry3Sharp for robust
+    /// per-vertex normal computation on non-watertight meshes.
+    /// </summary>
     private static float[] OffsetMeshVertices(float[] mesh, float offsetMm)
     {
-        int tc = mesh.Length / 9;
-        // Build indexed structure
-        var verts   = new List<(float x,float y,float z)>();
-        var vmap    = new Dictionary<long,int>();
-        var indices = new List<(int a,int b,int c)>();
+        if (mesh == null || mesh.Length < 9) return mesh ?? Array.Empty<float>();
 
-        long VKey(float x,float y,float z)
+        // ── Build a DMesh3 (indexed) from the flat triangle soup ──────────
+        var dm = new DMesh3(MeshComponents.VertexNormals);
+        var vmap = new Dictionary<Vector3f, int>();
+
+        int GetV(float x, float y, float z)
         {
-            long ix=(long)Math.Round(x*200), iy=(long)Math.Round(y*200), iz=(long)Math.Round(z*200);
-            return ix*1_000_003_007L ^ iy*998_244_353L ^ iz*1_000_000_007L;
-        }
-        int VIdx(float x,float y,float z)
-        {
-            long k=VKey(x,y,z);
-            if(!vmap.TryGetValue(k,out int vi)){ vi=verts.Count; verts.Add((x,y,z)); vmap[k]=vi; }
+            var key = new Vector3f(x, y, z);
+            if (!vmap.TryGetValue(key, out int vi))
+            {
+                vi = dm.AppendVertex(new Vector3d(x, y, z));
+                vmap[key] = vi;
+            }
             return vi;
         }
-        for(int i=0;i+8<mesh.Length;i+=9)
-            indices.Add((VIdx(mesh[i],mesh[i+1],mesh[i+2]),
-                         VIdx(mesh[i+3],mesh[i+4],mesh[i+5]),
-                         VIdx(mesh[i+6],mesh[i+7],mesh[i+8])));
 
-        // Accumulate area-weighted vertex normals
-        var normals = new (float x,float y,float z)[verts.Count];
-        foreach(var(a,b,c) in indices)
+        int triCount = mesh.Length / 9;
+        for (int i = 0; i < triCount; i++)
         {
-            var va=verts[a]; var vb=verts[b]; var vc=verts[c];
-            float ex=vb.x-va.x,ey=vb.y-va.y,ez=vb.z-va.z;
-            float fx=vc.x-va.x,fy=vc.y-va.y,fz=vc.z-va.z;
-            float nx=ey*fz-ez*fy, ny=ez*fx-ex*fz, nz=ex*fy-ey*fx;
-            normals[a]=(normals[a].x+nx,normals[a].y+ny,normals[a].z+nz);
-            normals[b]=(normals[b].x+nx,normals[b].y+ny,normals[b].z+nz);
-            normals[c]=(normals[c].x+nx,normals[c].y+ny,normals[c].z+nz);
+            int b = i * 9;
+            int a_ = GetV(mesh[b],   mesh[b+1], mesh[b+2]);
+            int b_ = GetV(mesh[b+3], mesh[b+4], mesh[b+5]);
+            int c_ = GetV(mesh[b+6], mesh[b+7], mesh[b+8]);
+            if (a_ != b_ && b_ != c_ && a_ != c_)
+                dm.AppendTriangle(a_, b_, c_);
         }
 
-        // Offset vertices
-        var ov = new (float x,float y,float z)[verts.Count];
-        for(int i=0;i<verts.Count;i++)
+        // ── Compute per-vertex normals (area-weighted, handles open meshes) ─
+        MeshNormals.QuickCompute(dm);
+
+        // ── Offset each vertex along its normal ───────────────────────────
+        foreach (int vid in dm.VertexIndices())
         {
-            var n=normals[i]; float len=MathF.Sqrt(n.x*n.x+n.y*n.y+n.z*n.z);
-            if(len<1e-7f){ov[i]=verts[i];continue;}
-            n=(n.x/len,n.y/len,n.z/len);
-            var v=verts[i]; ov[i]=(v.x+n.x*offsetMm,v.y+n.y*offsetMm,v.z+n.z*offsetMm);
+            Vector3d pos = dm.GetVertex(vid);
+            Vector3f nor = dm.GetVertexNormal(vid);
+            dm.SetVertex(vid, pos + new Vector3d(nor.x, nor.y, nor.z) * offsetMm);
         }
 
-        // Rebuild flat array
-        var result=new float[indices.Count*9];
-        for(int i=0;i<indices.Count;i++)
+        // ── Rebuild flat triangle soup ────────────────────────────────────
+        var result = new float[triCount * 9];
+        int ri = 0;
+        foreach (int tid in dm.TriangleIndices())
         {
-            var(a,b,c)=indices[i];
-            var va=ov[a]; var vb=ov[b]; var vc=ov[c];
-            int bs=i*9;
-            result[bs]=va.x;result[bs+1]=va.y;result[bs+2]=va.z;
-            result[bs+3]=vb.x;result[bs+4]=vb.y;result[bs+5]=vb.z;
-            result[bs+6]=vc.x;result[bs+7]=vc.y;result[bs+8]=vc.z;
+            Index3i tri = dm.GetTriangle(tid);
+            Vector3d va = dm.GetVertex(tri.a);
+            Vector3d vb = dm.GetVertex(tri.b);
+            Vector3d vc = dm.GetVertex(tri.c);
+            result[ri++]=(float)va.x; result[ri++]=(float)va.y; result[ri++]=(float)va.z;
+            result[ri++]=(float)vb.x; result[ri++]=(float)vb.y; result[ri++]=(float)vb.z;
+            result[ri++]=(float)vc.x; result[ri++]=(float)vc.y; result[ri++]=(float)vc.z;
         }
+        // Trim if some degenerate tris were skipped
+        if (ri < result.Length) Array.Resize(ref result, ri);
         return result;
     }
 
@@ -400,24 +404,32 @@ public static class SplintEngine
             float zRef = NearestZ(pcx,pcy);
             if(isUpper)
             {
-                // Maxillary cusps hang below arch line (lower Z side)
-                if(pcz > zRef || pcz < zRef - penetrationMm) continue;
+                // Maxilla: arch line is the BOTTOM of the upper teeth (occlusal surface).
+                // Penetration wraps ABOVE the arch line (into the tooth body).
+                // Keep triangles where zRef ≤ pcz ≤ zRef + penetrationMm
+                if(pcz < zRef || pcz > zRef + penetrationMm) continue;
             }
             else
             {
-                // Mandibular cusps rise above arch line (higher Z side)
-                if(pcz < zRef || pcz > zRef + penetrationMm) continue;
+                // Mandible: arch line is the TOP of the lower teeth (occlusal surface).
+                // Penetration wraps BELOW the arch line (into the tooth body).
+                // Keep triangles where zRef - penetrationMm ≤ pcz ≤ zRef
+                if(pcz > zRef || pcz < zRef - penetrationMm) continue;
             }
 
-            // Add tooth-surface triangle (reversed winding = cavity face)
+            // Add tooth-surface triangle.
+            // For upper: tooth is ABOVE arch line, cavity face points DOWN → reverse winding
+            // For lower: tooth is BELOW arch line, cavity face points UP → keep winding
             if(isUpper)
             {
+                // Reversed: face the interior of the splint (downward)
                 tris.Add(ax);tris.Add(ay);tris.Add(az);
                 tris.Add(cx_);tris.Add(cy);tris.Add(cz);
                 tris.Add(bx);tris.Add(by);tris.Add(bz);
             }
             else
             {
+                // Normal winding: face the interior (upward)
                 tris.Add(ax);tris.Add(ay);tris.Add(az);
                 tris.Add(bx);tris.Add(by);tris.Add(bz);
                 tris.Add(cx_);tris.Add(cy);tris.Add(cz);
@@ -444,9 +456,11 @@ public static class SplintEngine
                 var p1r = (p1.x, p1.y, zRef);
                 var p2r = (p2.x, p2.y, zRef);
                 if(isUpper)
-                    AddQuad(tris, p1, p2, p2r, p1r);   // wall going down to ref
+                    // Tooth above arch; wall goes from tooth DOWN to zRef
+                    AddQuad(tris, p2, p1, p1r, p2r);
                 else
-                    AddQuad(tris, p2, p1, p1r, p2r);   // wall going up to ref
+                    // Tooth below arch; wall goes from tooth UP to zRef
+                    AddQuad(tris, p1, p2, p2r, p1r);
             }
             WallEdge((ax,ay,az),(bx,by,bz));
             WallEdge((bx,by,bz),(cx_,cy,cz));
