@@ -513,8 +513,16 @@ public partial class SplintPlannerWindow : Window
         AddIfNotNull(LowerGroup, _upperMesh, 200, 200, 195, 120, ref _upperInLower);
 
         StepTitle.Text = "Step 2: Review Splint";
-        StepInstructions.Text = "Teal ribbon = splint footprint. Blue solid = splint. Grey = opposing arch. Rotate to inspect. Click Accept.";
+        StepInstructions.Text = "Blue solid = splint. Grey = opposing arch. Rotate to inspect. Click Accept.";
+
+        float manifoldScore = SplintEngine.WatertightScore(splint);
+        int openPct = (int)(manifoldScore * 100);
         StatusText.Text = $"{splint.Length / 9:N0} triangles";
+        if (openPct == 0)
+            QualityText.Text = "✔ Splint is a closed manifold";
+        else
+            QualityText.Text = $"⚠ Splint: {openPct}% open edges — may need repair before printing";
+
         AcceptBtn.Visibility  = Visibility.Visible;
         GenerateBtn.IsEnabled = true;
     }

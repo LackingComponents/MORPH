@@ -392,11 +392,24 @@ public static class SplintEngine
 
             // Subtract original upper teeth → upper tooth pockets
             var withUpper = MeshDiff(blank, origUpDM);
-            if (withUpper == null) return FromDMesh(blank);  // fallback: blank without subtraction
+            if (withUpper == null) return FromDMesh(blank);
 
             // Subtract original lower teeth → lower tooth pockets
-            var result2 = MeshDiff(withUpper, origLoDM);
-            return result2 != null ? FromDMesh(result2) : FromDMesh(withUpper);
+            var result2 = MeshDiff(withUpper, origLoDM) ?? withUpper;
+
+            // ── Post-process: weld seams + repair ────────────────────────────
+            // The union operation leaves T-intersections at the seam boundary.
+            // MeshAutoRepair stitches coincident boundary edges, fills small holes,
+            // and removes degenerate triangles → moves toward a closed manifold.
+            try
+            {
+                var repair = new gs.MeshAutoRepair(result2);
+                repair.RepairTolerance = 0.01;     // 0.01mm snap tolerance for seam welding
+                repair.Apply();
+            }
+            catch { /* non-fatal — return best result available */ }
+
+            return FromDMesh(result2);
         }
         catch
         {
