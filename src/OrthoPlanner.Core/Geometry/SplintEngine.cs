@@ -253,8 +253,8 @@ public static class SplintEngine
 
         try
         {
-            const float VS      = 0.1f;
-            const float CrownMm = 15f;
+            const float VS      = 0.2f;  // 0.2mm = 8x fewer voxels than 0.1mm, still finer than any dental printer
+            const float CrownMm = 8f;   // 8mm crown depth is sufficient for splint pockets
             const float Dil1    = 1.0f;
             const float Dil01   = 0.1f;
 
@@ -269,14 +269,14 @@ public static class SplintEngine
             foreach(var p in lower){if(p.x<minX)minX=p.x;if(p.x>maxX)maxX=p.x;if(p.y<minY)minY=p.y;if(p.y>maxY)maxY=p.y;}
             float minZ=MathF.Min(upperZ,lowerZ)-CrownMm;
             float maxZ=MathF.Max(upperZ,lowerZ)+CrownMm;
-            float xyM=labiolingualMm*0.5f+Dil1+8f; float zM=Dil1+4f;
+            float xyM=labiolingualMm*0.5f+Dil1+5f; float zM=Dil1+3f;  // tight margins
             float ox=minX-xyM,oy=minY-xyM,oz=minZ-zM;
             int nx=(int)MathF.Ceiling((maxX+xyM-ox)/VS)+2;
             int ny=(int)MathF.Ceiling((maxY+xyM-oy)/VS)+2;
             int nz=(int)MathF.Ceiling((maxZ+zM-oz)/VS)+2;
             long totalVox=(long)nx*ny*nz;
             System.Diagnostics.Debug.WriteLine($"[SDF] Grid={nx}x{ny}x{nz}={totalVox/1_000_000}M  XY=[{minX:F0},{maxX:F0}]x[{minY:F0},{maxY:F0}]  Z=[{minZ:F0},{maxZ:F0}]  upperZ={upperZ:F1} lowerZ={lowerZ:F1}");
-            if(totalVox>600_000_000L){System.Diagnostics.Debug.WriteLine("[SDF] GRID TOO LARGE"); return horseshoeFlat;}
+            if(totalVox>80_000_000L){System.Diagnostics.Debug.WriteLine($"[SDF] GRID TOO LARGE: {totalVox/1_000_000}M"); return horseshoeFlat;}
 
 
 
@@ -293,7 +293,7 @@ public static class SplintEngine
             return result.Length >= 9 ? result : horseshoeFlat;
 
             /* â”€â”€ REAL PIPELINE (blocked for debug) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-            const float CrownMm = 15f;
+            const float CrownMm = 8f;   // 8mm crown depth is sufficient for splint pockets
             const float Dil01   = 0.1f;
             float upperZ = upper.Max(p => p.z);
             float lowerZ = lower.Min(p => p.z);
