@@ -296,22 +296,27 @@ public static class SplintEngine
                 return r.ToArray();
             }
 
-            // Compute SDF ONCE per mesh (at 0.2mm) — reuse via OffsetImpl for both offsets
+            // Compute SDF ONCE per mesh (at 0.2mm) — reuse via OffsetImpl for both offsets.
+            // UseParallel=true requires Spatial (AABB tree) + NarrowBandMaxDistance to be set.
             BoundedImplicitFunction3d? BaseSdf(float[] soup){
                 if(soup.Length<9) return null;
                 var m=ToMesh(soup); if(m.TriangleCount==0) return null;
-                System.Diagnostics.Debug.WriteLine($"[Splint] SDF {m.TriangleCount} tris @ 0.2mm");
+                System.Diagnostics.Debug.WriteLine($"[Splint] SDF {m.TriangleCount} tris @ {VS_SDF}mm");
+                var spatial = new DMeshAABBTree3(m, autoBuild:true);
                 var sdf=new MeshSignedDistanceGrid(m,(float)VS_SDF){
-                    ExactBandWidth=(int)Math.Ceiling(Dil1/VS_SDF)+4,
-                    ComputeSigns=true,
-                    ComputeMode=MeshSignedDistanceGrid.ComputeModes.NarrowBand_SpatialFloodFill,
-                    InsideMode=MeshSignedDistanceGrid.InsideModes.ParityCount,
-                    UseParallel=true
+                    Spatial              = spatial,
+                    NarrowBandMaxDistance= Dil1 + VS_SDF*5,
+                    ExactBandWidth       = (int)Math.Ceiling(Dil1/VS_SDF)+4,
+                    ComputeSigns         = true,
+                    ComputeMode          = MeshSignedDistanceGrid.ComputeModes.NarrowBand_SpatialFloodFill,
+                    InsideMode           = MeshSignedDistanceGrid.InsideModes.ParityCount,
+                    UseParallel          = true
                 };
                 sdf.Compute();
-                System.Diagnostics.Debug.WriteLine($"[Splint] SDF done, grid={sdf.Grid.size}");
+                System.Diagnostics.Debug.WriteLine($"[Splint] SDF done grid={sdf.Grid.size}");
                 return new DenseGridTrilinearImplicit(sdf.Grid,sdf.GridOrigin,(float)VS_SDF);
             }
+
 
             float[] upCrop=Crop(upperMesh), loCrop=Crop(lowerMesh), hoCrop=Crop(horseshoeFlat);
             System.Diagnostics.Debug.WriteLine($"[Splint] Cropped tris: up={upCrop.Length/9} lo={loCrop.Length/9} horse={hoCrop.Length/9}");
