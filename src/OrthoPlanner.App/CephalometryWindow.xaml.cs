@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -53,10 +53,8 @@ public partial class CephalometryWindow : UserControl
     private CephalometricLandmark? _draggingLandmark;
     private bool _isDraggingLandmark;
 
-    // ÔöÇÔöÇ 3D Mode ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // ── 3D Mode ───────────────────────────────────────────────────────────────
     private bool _is3DMode;
-    private HxGeom.DefaultEffectsManager? _effectsManager;
-    private readonly List<MeshGeometryModel3D> _boneModels3D = new();
     private readonly List<MeshGeometryModel3D> _landmarkSpheres3D = new();
     private Vector3? _pending3DHit;
     private System.Windows.Point _mouseDown3DScreenPos;
@@ -133,8 +131,10 @@ public partial class CephalometryWindow : UserControl
         // Default tool highlight
         UpdateToolButtonHighlights();
 
-        // 3D click detection and scroll-pan
-        Viewport3DBorder.PreviewMouseLeftButtonUp += OnViewport3DMouseLeftButtonUp;
+        // 3D click detection (no-op with VisualBrush, safe guards in each handler)
+        ViewportGrid.PreviewMouseLeftButtonUp += OnViewport3DMouseLeftButtonUp;
+        ViewportGrid.PreviewMouseLeftButtonDown += Viewport3D_PreviewMouseLeftButtonDown;
+        IsVisibleChanged += OnCephVisibilityChanged;
     }
 
     // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
@@ -532,58 +532,96 @@ public partial class CephalometryWindow : UserControl
 
         if (_is3DMode)
         {
-            if (CephViewport3D.EffectsManager == null)
-            {
-                _effectsManager = new HxGeom.DefaultEffectsManager();
-                CephViewport3D.EffectsManager = _effectsManager;
-            }
-
-            // Swap to 3D view
+            // Hide DRR overlay — 3D mirror (background) stays visible
             ViewportBorder.Visibility = Visibility.Collapsed;
-            Viewport3DBorder.Visibility = Visibility.Visible;
 
-            LoadModelsFromMainViewModel();
-
-            Dispatcher.InvokeAsync(CopyCameraFromMainWindow, System.Windows.Threading.DispatcherPriority.Loaded);
-
-            // Backfill Position3D for any landmark placed in 2D without a 3D coordinate
+            // Backfill Position3D for any landmark placed in 2D without a 3D coord
             if (_landmarks != null)
             {
                 foreach (var lm in _landmarks)
-                {
                     if (lm.IsPlaced && !lm.IsPlaced3D)
-                    {
                         if (Project2DTo3D(lm.Position!.Value.X, lm.Position!.Value.Y) is Vector3 v)
                             lm.Position3D = ((double)v.X, (double)v.Y, (double)v.Z);
-                    }
-                }
             }
 
             Refresh3DLandmarks();
             Refresh3DMeasurements();
 
             StatusLeft.Text = _toolState.ActiveTool == CephTool.Select
-                ? "3D Mode -- Click on bone to place landmark"
-                : "3D Mode -- Click to measure (Esc to cancel)";
+                ? "3D Mode — landmark spheres visible on model"
+                : "3D Mode — Click to measure (Esc to cancel)";
         }
         else
         {
-            foreach (var m in _boneModels3D) CephViewport3D.Items.Remove(m);
-            _boneModels3D.Clear();
-            foreach (var s in _landmarkSpheres3D) CephViewport3D.Items.Remove(s);
-            foreach (var v in _meas3DVisuals) CephViewport3D.Items.Remove(v);
-            foreach (var s in _pending3DSpheres) CephViewport3D.Items.Remove(s);
-            _landmarkSpheres3D.Clear();
+            // Remove pending/measurement 3D visuals; keep landmark spheres
+            var vp = SharedViewport3D;
+            if (vp != null)
+            {
+                foreach (var v in _meas3DVisuals) vp.Items.Remove(v);
+                foreach (var s in _pending3DSpheres) vp.Items.Remove(s);
+            }
             _meas3DVisuals.Clear();
             _pending3DSpheres.Clear();
             _pending3DPts.Clear();
 
-            // Swap back to DRR
+            // Show DRR overlay again
             ViewportBorder.Visibility = Visibility.Visible;
-            Viewport3DBorder.Visibility = Visibility.Collapsed;
             RefreshLandmarkOverlay();
-            StatusLeft.Text = "2D Mode -- Left-click to place landmark, right-drag for W/L";
+            StatusLeft.Text = "2D Mode — Left-click to place landmark, right-drag for W/L";
         }
+    }
+
+    private HelixToolkit.Wpf.SharpDX.Viewport3DX? SharedViewport3D =>
+        (Application.Current.MainWindow as MainWindow)?.MainViewport;
+
+    // ─── Ceph window visibility: start/stop mirror ───────────────────────────
+
+    private void OnCephVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if ((bool)e.NewValue)
+        {
+            // Became visible: start mirror and ensure spheres are showing
+            Show3DViewportMirror();
+            if (_initialized) Refresh3DLandmarks();
+        }
+        else
+        {
+            // Became hidden: respect the global "show in 3D" toggle
+            var vm = (Application.Current.MainWindow as MainWindow)?.DataContext as ViewModels.MainViewModel;
+            bool keepVisible = vm?.ShowCephLandmarksIn3D ?? false;
+            foreach (var s in _landmarkSpheres3D) s.IsRendering = keepVisible;
+            Hide3DViewportMirror();
+        }
+    }
+
+    private void Show3DViewportMirror()
+    {
+        var mainWindow = Application.Current.MainWindow as MainWindow;
+        if (mainWindow == null) return;
+        var source = mainWindow.Viewport3DHost;
+        if (source == null) return;
+        if (Viewport3DMirror.Fill is VisualBrush) return; // already set
+
+        var brush = new VisualBrush(source) { Stretch = Stretch.Uniform };
+        RenderOptions.SetBitmapScalingMode(Viewport3DMirror, BitmapScalingMode.HighQuality);
+        Viewport3DMirror.Fill = brush;
+    }
+
+    private void Hide3DViewportMirror()
+    {
+        Viewport3DMirror.Fill = null;
+    }
+
+    /// <summary>
+    /// Called by MainWindow when the ShowCephLandmarksIn3D toggle changes.
+    /// Updates landmark sphere IsRendering so they show/hide in the main 3D
+    /// viewport when the ceph panel is NOT open.
+    /// </summary>
+    public void UpdateLandmarkSphereVisibility(bool show)
+    {
+        // If ceph is currently visible, spheres are always on
+        if (IsVisible) return;
+        foreach (var s in _landmarkSpheres3D) s.IsRendering = show;
     }
 
     // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
@@ -592,147 +630,16 @@ public partial class CephalometryWindow : UserControl
     // 3D Mode: Center Camera
     // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
 
-    /// <summary>
-    /// Computes bounding box from segment vertices and positions the camera
-    /// looking from the right-lateral direction with the cranium centred.
-    /// </summary>
-    private void CenterCeph3DCamera()
-    {
-        var mainWindow = Window.GetWindow(this);
-        if (mainWindow?.DataContext is not MainViewModel vm) return;
-
-        float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
-        float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
-
-        foreach (var seg in vm.Segments)
-        {
-            if (seg.Vertices == null) continue;
-            for (int i = 0; i < seg.Vertices.Length; i += 3)
-            {
-                if (seg.Vertices[i] < minX) minX = seg.Vertices[i]; if (seg.Vertices[i] > maxX) maxX = seg.Vertices[i];
-                if (seg.Vertices[i + 1] < minY) minY = seg.Vertices[i + 1]; if (seg.Vertices[i + 1] > maxY) maxY = seg.Vertices[i + 1];
-                if (seg.Vertices[i + 2] < minZ) minZ = seg.Vertices[i + 2]; if (seg.Vertices[i + 2] > maxZ) maxZ = seg.Vertices[i + 2];
-            }
-        }
-
-        if (minX == float.MaxValue)
-        {
-            CephViewport3D.ZoomExtents();
-            return;
-        }
-
-        double cx = (minX + maxX) / 2.0;
-        double cy = (minY + maxY) / 2.0;
-        double cz = (minZ + maxZ) / 2.0;
-        double diag = Math.Sqrt(
-            (maxX - minX) * (maxX - minX) +
-            (maxY - minY) * (maxY - minY) +
-            (maxZ - minZ) * (maxZ - minZ));
-        double dist = Math.Max(diag * 1.0, 100.0);
-
-        // Look from the front (Anterior view, neutral NHP position)
-        if (CephViewport3D.Camera is HelixToolkit.Wpf.SharpDX.PerspectiveCamera cam)
-        {
-            cam.Position        = new System.Windows.Media.Media3D.Point3D(cx, cy - dist, cz);
-            cam.LookDirection   = new System.Windows.Media.Media3D.Vector3D(0, 1, 0);
-            cam.UpDirection     = new System.Windows.Media.Media3D.Vector3D(0, 0, 1);
-            cam.FieldOfView     = 40;
-            cam.NearPlaneDistance = 0.1;
-            cam.FarPlaneDistance  = diag * 10;
-        }
-    }
-
-    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
-    // 3D Mode: Copy Camera from MainWindow
-    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
-
-    private void CopyCameraFromMainWindow()
-    {
-        var mainWin = Window.GetWindow(this) as MainWindow;
-        if (mainWin == null) { CenterCeph3DCamera(); return; }
-
-        var srcCam = mainWin.MainViewport.Camera;
-        if (srcCam == null) { CenterCeph3DCamera(); return; }
-
-        if (CephViewport3D.Camera is HelixToolkit.Wpf.SharpDX.PerspectiveCamera dstCam
-            && srcCam is HelixToolkit.Wpf.SharpDX.PerspectiveCamera srcPersp)
-        {
-            dstCam.Position          = srcPersp.Position;
-            dstCam.LookDirection     = srcPersp.LookDirection;
-            dstCam.UpDirection       = srcPersp.UpDirection;
-            dstCam.FieldOfView       = srcPersp.FieldOfView;
-            dstCam.NearPlaneDistance = srcPersp.NearPlaneDistance;
-            dstCam.FarPlaneDistance  = srcPersp.FarPlaneDistance;
-        }
-        else if (CephViewport3D.Camera is HelixToolkit.Wpf.SharpDX.OrthographicCamera dstOrtho
-                 && srcCam is HelixToolkit.Wpf.SharpDX.OrthographicCamera srcOrtho)
-        {
-            dstOrtho.Position      = srcOrtho.Position;
-            dstOrtho.LookDirection = srcOrtho.LookDirection;
-            dstOrtho.UpDirection   = srcOrtho.UpDirection;
-            dstOrtho.Width         = srcOrtho.Width;
-        }
-        else
-        {
-            CenterCeph3DCamera();
-        }
-    }
-
-    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
-    // 3D Mode: Load Models from MainViewModel
-    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
-
-    private void LoadModelsFromMainViewModel()
-    {
-        foreach (var m in _boneModels3D) CephViewport3D.Items.Remove(m);
-        _boneModels3D.Clear();
-
-        var mainWin = Window.GetWindow(this) as MainWindow;
-        if (mainWin?.DataContext is not MainViewModel vm) return;
-
-        foreach (var seg in vm.Segments)
-        {
-            if (seg.Geometry == null) continue;
-
-            var model = new MeshGeometryModel3D
-            {
-                Geometry = seg.Geometry,
-                Material = seg.Material ?? new PhongMaterial
-                {
-                    DiffuseColor = new HelixToolkit.Maths.Color4(0.8f, 0.7f, 0.6f, 1f)
-                },
-                IsHitTestVisible = true
-            };
-            _boneModels3D.Add(model);
-            CephViewport3D.Items.Add(model);
-        }
-
-        if (vm.SoftTissueModel?.Geometry != null)
-        {
-            var stModel = new MeshGeometryModel3D
-            {
-                Geometry = vm.SoftTissueModel.Geometry,
-                Material = vm.SoftTissueModel.Material,
-                IsHitTestVisible = false,
-                IsRendering = false
-            };
-            _boneModels3D.Add(stModel);
-            CephViewport3D.Items.Add(stModel);
-        }
-    }
-
-    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
-    // 3D Mode: Click-to-place landmark
-    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
-
     private void Viewport3D_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (!_is3DMode) return;
-        var hit = CephViewport3D.FindHits(e.GetPosition(CephViewport3D)).FirstOrDefault();
+        var vp = SharedViewport3D;
+        if (vp == null) return;
+        var hit = vp.FindHits(e.GetPosition(vp)).FirstOrDefault();
         if (hit != null && hit.IsValid)
         {
             _pending3DHit = (Vector3)hit.PointHit;
-            _mouseDown3DScreenPos = e.GetPosition(Viewport3DBorder);
+            _mouseDown3DScreenPos = e.GetPosition(ViewportGrid);
         }
     }
 
@@ -744,7 +651,7 @@ public partial class CephalometryWindow : UserControl
             return;
         }
 
-        var upPos = e.GetPosition(Viewport3DBorder);
+        var upPos = e.GetPosition(ViewportGrid);
         var delta = upPos - _mouseDown3DScreenPos;
         if (delta.Length > 5) { _pending3DHit = null; return; }
 
@@ -868,7 +775,7 @@ public partial class CephalometryWindow : UserControl
     {
         // Remove old spheres
         foreach (var sphere in _landmarkSpheres3D)
-            CephViewport3D.Items.Remove(sphere);
+            SharedViewport3D?.Items.Remove(sphere);
         _landmarkSpheres3D.Clear();
 
         if (_landmarks == null) return;
@@ -900,7 +807,7 @@ public partial class CephalometryWindow : UserControl
             };
 
             _landmarkSpheres3D.Add(sphere);
-            CephViewport3D.Items.Add(sphere);
+            SharedViewport3D?.Items.Add(sphere);
         }
     }
 
@@ -1719,7 +1626,7 @@ public partial class CephalometryWindow : UserControl
 
     private void Viewport3D_MouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if (CephViewport3D.Camera is not HelixToolkit.Wpf.SharpDX.PerspectiveCamera cam) return;
+        if (SharedViewport3D?.Camera is not HelixToolkit.Wpf.SharpDX.PerspectiveCamera cam) return;
 
         double steps = e.Delta / 120.0;
 
@@ -1761,7 +1668,7 @@ public partial class CephalometryWindow : UserControl
         // Show pending sphere at hit point
         var pendingSphere = Make3DSphere(hit, 1.5f, System.Windows.Media.Colors.White);
         _pending3DSpheres.Add(pendingSphere);
-        CephViewport3D.Items.Add(pendingSphere);
+        SharedViewport3D?.Items.Add(pendingSphere);
 
         switch (_toolState.ActiveTool)
         {
@@ -1859,7 +1766,7 @@ public partial class CephalometryWindow : UserControl
 
     private void Refresh3DMeasurements()
     {
-        foreach (var v in _meas3DVisuals) CephViewport3D.Items.Remove(v);
+        foreach (var v in _meas3DVisuals) SharedViewport3D?.Items.Remove(v);
         _meas3DVisuals.Clear();
 
         foreach (var m in _measurements3D)
@@ -1893,7 +1800,7 @@ public partial class CephalometryWindow : UserControl
     private void Add3DVisual(Element3D el)
     {
         _meas3DVisuals.Add(el);
-        CephViewport3D.Items.Add(el);
+        SharedViewport3D?.Items.Add(el);
     }
 
     private MeshGeometryModel3D Make3DSphere(Vector3 center, float radius, System.Windows.Media.Color col)
@@ -1927,7 +1834,7 @@ public partial class CephalometryWindow : UserControl
 
     private void ClearPending3DSpheres()
     {
-        foreach (var s in _pending3DSpheres) CephViewport3D.Items.Remove(s);
+        foreach (var s in _pending3DSpheres) SharedViewport3D?.Items.Remove(s);
         _pending3DSpheres.Clear();
         _pending3DPts.Clear();
     }

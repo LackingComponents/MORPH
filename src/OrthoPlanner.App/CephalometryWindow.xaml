@@ -1,7 +1,6 @@
 <UserControl x:Class="OrthoPlanner.App.CephalometryWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:hx="http://helix-toolkit.org/wpf/SharpDX"
         xmlns:ctrl="clr-namespace:OrthoPlanner.App.Controls"
         Background="#FF0D1117"
         Foreground="#FFD0D8E0"
@@ -176,9 +175,12 @@
             </Border>
         </StackPanel>
 
-        <!-- == Viewport Area: DRR 2D / 3D Swap == -->
+        <!-- == Viewport Area: 3D mirror (background) + DRR 2D overlay (foreground) == -->
         <Grid Grid.Row="1" Grid.Column="0" x:Name="ViewportGrid">
-            <!-- DRR 2D Panel -->
+            <!-- Always-on 3D viewport mirror (VisualBrush of MainWindow's viewport) -->
+            <Rectangle x:Name="Viewport3DMirror" Stretch="Uniform"/>
+
+            <!-- DRR 2D Panel (overlay; Collapsed when 3D mode is active) -->
             <Border x:Name="ViewportBorder" Background="#FF000000" ClipToBounds="True">
                 <Grid>
                     <Canvas x:Name="ImageCanvas"
@@ -242,71 +244,6 @@
                 </Grid>
             </Border>
 
-            <!-- 3D Panel -->
-            <Border x:Name="Viewport3DBorder"
-                    Background="{StaticResource BgMediumBrush}"
-                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="0" CornerRadius="0"
-                    Visibility="Collapsed">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-
-                    <hx:Viewport3DX x:Name="CephViewport3D" Grid.Row="1"
-                                    BackgroundColor="#FF0C1018"
-                                    ShowCoordinateSystem="True"
-                                    CoordinateSystemLabelForeground="#00000000"
-                                    ZoomExtentsWhenLoaded="False"
-                                    IsRotationEnabled="True"
-                                    IsPanEnabled="True"
-                                    IsZoomEnabled="True"
-                                    RotateAroundMouseDownPoint="False"
-                                    CameraRotationMode="Turnball"
-                                    ModelUpDirection="0,0,1"
-                                    ShowViewCube="False"
-                                    IsViewCubeEdgeClicksEnabled="True"
-                                    IsInertiaEnabled="False"
-                                    PreviewMouseLeftButtonDown="Viewport3D_PreviewMouseLeftButtonDown">
-                        <hx:Viewport3DX.InputBindings>
-                            <MouseBinding Gesture="MiddleClick" Command="hx:ViewportCommands.Pan" />
-                        </hx:Viewport3DX.InputBindings>
-                        <hx:Viewport3DX.Camera>
-                            <hx:PerspectiveCamera x:Name="CephCamera"
-                                                  Position="0,-300,0" LookDirection="0,1,0"
-                                                  UpDirection="0,0,1" FieldOfView="45"
-                                                  NearPlaneDistance="0.1" FarPlaneDistance="10000" />
-                        </hx:Viewport3DX.Camera>
-
-                        <hx:AmbientLight3D Color="#505050" />
-                        <hx:DirectionalLight3D Direction="0,-1,0" Color="#D0D0D0" />
-                        <hx:DirectionalLight3D Direction="0,1,0" Color="#A0A0A0" />
-
-                        <!-- Segments -->
-                        <hx:ItemsModel3D ItemsSource="{Binding Segments}">
-                            <hx:ItemsModel3D.ItemTemplate>
-                                <DataTemplate>
-                                    <hx:MeshGeometryModel3D Geometry="{Binding Geometry}" Material="{Binding Material}" IsRendering="{Binding IsVisible}" Transform="{Binding Transform}" IsHitTestVisible="True" />
-                                </DataTemplate>
-                            </hx:ItemsModel3D.ItemTemplate>
-                        </hx:ItemsModel3D>
-                        
-                        <!-- ImportedMeshes -->
-                        <hx:ItemsModel3D ItemsSource="{Binding ImportedMeshes}">
-                            <hx:ItemsModel3D.ItemTemplate>
-                                <DataTemplate>
-                                    <hx:MeshGeometryModel3D Geometry="{Binding Geometry}" Material="{Binding Material}" IsRendering="{Binding IsVisible}" Transform="{Binding Transform}" IsHitTestVisible="True" />
-                                </DataTemplate>
-                            </hx:ItemsModel3D.ItemTemplate>
-                        </hx:ItemsModel3D>
-                    </hx:Viewport3DX>
-
-                    <ctrl:NavCubeControl Grid.Row="1"
-                                         HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                         Margin="0,0,8,8" Opacity="0.92"
-                                         Visibility="Visible" />
-                </Grid>
-            </Border>
         </Grid>
 
         <!-- == Sidebar (Landmarks + Measurements) == -->
