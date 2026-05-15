@@ -333,10 +333,7 @@ public static class SplintEngine
             BoundedImplicitFunction3d blank=new ImplicitUnion3d{A=horseImpl,B=new ImplicitUnion3d{A=upImpl1,B=loImpl1}};
             BoundedImplicitFunction3d final2=new ImplicitDifference3d{A=new ImplicitDifference3d{A=blank,B=upImpl01},B=loImpl01};
 
-            // MC bounds from arch curves
-            float mnX=float.MaxValue,mnY=float.MaxValue,mxX=float.MinValue,mxY=float.MinValue;
-            foreach(var p in upper){if(p.x<mnX)mnX=p.x;if(p.x>mxX)mxX=p.x;if(p.y<mnY)mnY=p.y;if(p.y>mxY)mxY=p.y;}
-            foreach(var p in lower){if(p.x<mnX)mnX=p.x;if(p.x>mxX)mxX=p.x;if(p.y<mnY)mnY=p.y;if(p.y>mxY)mxY=p.y;}
+            // MC bounds — reuse mnX/mnY/mxX/mxY already computed above in Crop()
             float pad=(float)(labiolingualMm*0.5+Dil1+3);
             var mcBounds=new AxisAlignedBox3d(new Vector3d(mnX-pad,mnY-pad,lowerZ-CrownMm-Dil1),new Vector3d(mxX+pad,mxY+pad,upperZ+CrownMm+Dil1));
 
