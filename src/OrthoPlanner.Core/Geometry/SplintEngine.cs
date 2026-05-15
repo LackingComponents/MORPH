@@ -280,9 +280,11 @@ public static class SplintEngine
 
             // Maxilla: keep teeth above the lower horseshoe face (they live above upperZ)
             // Include the full crown up to 15mm above, and 2mm below for connection
-            float[] upperClipped = ClipZ(upperMesh, upperZ - 2f, upperZ + CrownMarginMm);
+            // Upper teeth: cusps point DOWN toward mandible → keep portion BELOW upper arch line
+            float[] upperClipped = ClipZ(upperMesh, upperZ - CrownMarginMm, upperZ + 2f);
             // Mandible: keep teeth below the upper horseshoe face (they live below lowerZ)
-            float[] lowerClipped = ClipZ(lowerMesh, lowerZ - CrownMarginMm, lowerZ + 2f);
+            // Lower teeth: cusps point UP toward maxilla → keep portion ABOVE lower arch line
+            float[] lowerClipped = ClipZ(lowerMesh, lowerZ - 2f, lowerZ + CrownMarginMm);
 
             if (upperClipped.Length < 9 || lowerClipped.Length < 9) return horseshoeFlat;
 
