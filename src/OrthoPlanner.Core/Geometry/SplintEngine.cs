@@ -278,27 +278,27 @@ public static class SplintEngine
             // Z-clip triangle soup by triangle centroid
             float[] ClipZ(float[] s, float zMin, float zMax){var r=new List<float>();for(int i=0;i+8<s.Length;i+=9){float cz=(s[i+2]+s[i+5]+s[i+8])/3f;if(cz>=zMin&&cz<=zMax)for(int k=0;k<9;k++)r.Add(s[i+k]);}return r.ToArray();}
 
-            // Compute SDF → BoundedImplicitFunction3d with optional dilation offset
-            BoundedImplicitFunction3d? MeshImpl(float[] soup, double dilMm)
+            // Compute SDF. signed=true for CLOSED solids (horseshoe), signed=false for OPEN crown meshes
+            BoundedImplicitFunction3d? MeshImpl(float[] soup, double dilMm, bool signed)
             {
                 if(soup.Length<9) return null;
                 var m=ToMesh(soup); if(m.TriangleCount==0) return null;
-                var sdf=new MeshSignedDistanceGrid(m,(float)VS){ExactBandWidth=(int)Math.Ceiling(dilMm/VS)+3,ComputeSigns=true};
+                int band = signed ? 60 : (int)Math.Ceiling(dilMm/VS)+4;
+                var sdf=new MeshSignedDistanceGrid(m,(float)VS){ExactBandWidth=band,ComputeSigns=signed};
                 sdf.Compute();
                 BoundedImplicitFunction3d impl=new DenseGridTrilinearImplicit(sdf.Grid,sdf.GridOrigin,(float)VS);
                 return dilMm>1e-9 ? Offset(impl,-dilMm) : impl;
             }
 
-            // Clip to crown region and build implicits
             float[] upCrown=ClipZ(upperMesh,upperZ-(float)CrownMm,upperZ+1f);
             float[] loCrown=ClipZ(lowerMesh,lowerZ-1f,lowerZ+(float)CrownMm);
             if(upCrown.Length<9||loCrown.Length<9) return horseshoeFlat;
 
-            var horseImpl = MeshImpl(horseshoeFlat, 0.0);
-            var upImpl1   = MeshImpl(upCrown,       Dil1);
-            var loImpl1   = MeshImpl(loCrown,       Dil1);
-            var upImpl01  = MeshImpl(upCrown,       Dil01);
-            var loImpl01  = MeshImpl(loCrown,       Dil01);
+            var horseImpl = MeshImpl(horseshoeFlat, 0.0,  signed:true);
+            var upImpl1   = MeshImpl(upCrown,       Dil1, signed:false);
+            var loImpl1   = MeshImpl(loCrown,       Dil1, signed:false);
+            var upImpl01  = MeshImpl(upCrown,       Dil01,signed:false);
+            var loImpl01  = MeshImpl(loCrown,       Dil01,signed:false);
             if(horseImpl==null||upImpl1==null||loImpl1==null||upImpl01==null||loImpl01==null) return horseshoeFlat;
 
             // Boolean ops: blank = horse ∪ up1 ∪ lo1 ; final = blank − up01 − lo01
