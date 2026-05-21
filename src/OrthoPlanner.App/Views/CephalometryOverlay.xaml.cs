@@ -11,9 +11,9 @@ using OrthoPlanner.App.ViewModels;
 using HelixToolkit.Wpf.SharpDX;
 using HxGeom = HelixToolkit.SharpDX;
 
-namespace OrthoPlanner.App;
+namespace OrthoPlanner.App.Views;
 
-public partial class CephalometryWindow : UserControl
+public partial class CephalometryOverlay : UserControl
 {
     // ÔöÇÔöÇ Reusable Brushes ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     private static readonly SolidColorBrush CyanBrush = new(Color.FromRgb(0x00, 0xE5, 0xFF));
@@ -86,7 +86,7 @@ public partial class CephalometryWindow : UserControl
     // Constructor
     // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
 
-    public CephalometryWindow()
+    public CephalometryOverlay()
     {
         InitializeComponent();
 
@@ -131,7 +131,9 @@ public partial class CephalometryWindow : UserControl
         // Default tool highlight
         UpdateToolButtonHighlights();
 
-        // 3D click detection (no-op with VisualBrush, safe guards in each handler)
+        // 3D click detection: ViewportGrid has Background="Transparent" so it is hit-test
+        // visible. Clicks are tunnelled here and forwarded to the underlying shared
+        // MainViewport via FindHits in the handlers below.
         ViewportGrid.PreviewMouseLeftButtonUp += OnViewport3DMouseLeftButtonUp;
         ViewportGrid.PreviewMouseLeftButtonDown += Viewport3D_PreviewMouseLeftButtonDown;
         IsVisibleChanged += OnCephVisibilityChanged;
@@ -532,7 +534,8 @@ public partial class CephalometryWindow : UserControl
 
         if (_is3DMode)
         {
-            // Hide DRR overlay — 3D mirror (background) stays visible
+            // Hide DRR overlay so the live HelixViewport3D in MainWindow shows through
+            // the transparent ViewportGrid behind this overlay.
             ViewportBorder.Visibility = Visibility.Collapsed;
 
             // Backfill Position3D for any landmark placed in 2D without a 3D coord
@@ -574,42 +577,24 @@ public partial class CephalometryWindow : UserControl
     private HelixToolkit.Wpf.SharpDX.Viewport3DX? SharedViewport3D =>
         (Application.Current.MainWindow as MainWindow)?.MainViewport;
 
-    // ─── Ceph window visibility: start/stop mirror ───────────────────────────
+    // ─── Ceph overlay visibility: refresh spheres on enter, hide on exit ────
 
     private void OnCephVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
         if ((bool)e.NewValue)
         {
-            // Became visible: start mirror and ensure spheres are showing
-            Show3DViewportMirror();
+            // Became visible: rebuild landmark spheres on the shared viewport
             if (_initialized) Refresh3DLandmarks();
         }
         else
         {
-            // Became hidden: respect the global "show in 3D" toggle
+            // Became hidden: respect the global "show in 3D" toggle on MainWindow's
+            // Measurements tab — landmark data stays in the ViewModel but visuals
+            // disappear from the 3D viewport unless explicitly kept visible.
             var vm = (Application.Current.MainWindow as MainWindow)?.DataContext as ViewModels.MainViewModel;
             bool keepVisible = vm?.ShowCephLandmarksIn3D ?? false;
             foreach (var s in _landmarkSpheres3D) s.IsRendering = keepVisible;
-            Hide3DViewportMirror();
         }
-    }
-
-    private void Show3DViewportMirror()
-    {
-        var mainWindow = Application.Current.MainWindow as MainWindow;
-        if (mainWindow == null) return;
-        var source = mainWindow.Viewport3DHost;
-        if (source == null) return;
-        if (Viewport3DMirror.Fill is VisualBrush) return; // already set
-
-        var brush = new VisualBrush(source) { Stretch = Stretch.Uniform };
-        RenderOptions.SetBitmapScalingMode(Viewport3DMirror, BitmapScalingMode.HighQuality);
-        Viewport3DMirror.Fill = brush;
-    }
-
-    private void Hide3DViewportMirror()
-    {
-        Viewport3DMirror.Fill = null;
     }
 
     /// <summary>

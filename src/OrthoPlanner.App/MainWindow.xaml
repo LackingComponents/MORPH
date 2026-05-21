@@ -761,10 +761,14 @@
             </Border>
 
             <GridSplitter Grid.Column="3" Width="4" Background="{StaticResource BgDarkBrush}"
-                          HorizontalAlignment="Center" VerticalAlignment="Stretch" />
+                          HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                          Visibility="{Binding IsCephalometryOpen, Converter={StaticResource InverseBoolToVisibility}}" />
 
-            <!-- ═══ RIGHT: 3-TAB LAYOUT ═══ -->
-            <Grid Grid.Column="4">
+            <!-- ═══ RIGHT: 3-TAB LAYOUT ═══
+                 Hidden while Cephalometry is active so the overlay's landmark sidebar
+                 replaces it without peek-through. -->
+            <Grid Grid.Column="4"
+                  Visibility="{Binding IsCephalometryOpen, Converter={StaticResource InverseBoolToVisibility}}">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
@@ -1143,12 +1147,16 @@
                 <v:PhotogrammetryView DataContext="{Binding PhotogrammetrySpace}" />
             </Border>
 
-            <!-- ═══ FULLSCREEN CEPHALOMETRY OVERLAY ═══ -->
-            <Border Grid.Column="2" Grid.ColumnSpan="3" Background="#E50C1018"
+            <!-- ═══ CEPHALOMETRY OVERLAY ═══
+                 Sits on top of the center 3D viewport (and the splitter + right tab column)
+                 in the same Grid cell, but is TRANSPARENT so the live HelixViewport3D in
+                 the column behind shows through in 3D mode. In DRR mode, the overlay's
+                 internal ViewportBorder paints an opaque DRR image that covers the viewport.
+                 The right tab column is hidden via Visibility binding when ceph is active so
+                 the overlay's landmark sidebar visually REPLACES the CT MPR panel. -->
+            <v:CephalometryOverlay Grid.Column="2" Grid.ColumnSpan="3" x:Name="CephalometryPanel"
                     Visibility="{Binding IsCephalometryOpen, Converter={StaticResource BoolToVisibility}}"
-                    Margin="-4,0,0,0">
-                <local:CephalometryWindow x:Name="CephalometryPanel" />
-            </Border>
+                    Margin="-4,0,0,0" />
         </Grid>
 
         <!-- ═══ STATUS BAR ═══ -->
