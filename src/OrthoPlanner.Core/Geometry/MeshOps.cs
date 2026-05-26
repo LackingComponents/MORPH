@@ -825,8 +825,10 @@ public static class MeshOps
             return side;
         }
 
-        // Intersection edge midpoints collected for capping
-        var capPoints = new List<float[]>();
+        // Directed cut edges collected for loop-based capping.
+        // Convention: each entry (A, B) is the boundary edge of the "above" half
+        // at that cut — the directed segment as it appears in the above mesh boundary.
+        var cutEdges = new List<(float[] A, float[] B)>();
 
         // ── 2. Process each triangle ──────────────────────────────────────────
         for (int i = 0; i < nTri; i++)
@@ -845,28 +847,17 @@ public static class MeshOps
             if (aboveCount == 0) { below.Add(v0); below.Add(v1); below.Add(v2); continue; }
 
             // ── Straddling triangle: split at polyplane crossing ───────────────
-            // Find which edges cross the polyplane and compute intersection points.
-            // Edges: 0-1, 1-2, 2-0
             float[]? p01 = EdgeCross(polyplane, v0, v1, s0 != s1);
             float[]? p12 = EdgeCross(polyplane, v1, v2, s1 != s2);
             float[]? p20 = EdgeCross(polyplane, v2, v0, s2 != s0);
 
-            if (p01 != null) capPoints.Add(p01);
-            if (p12 != null) capPoints.Add(p12);
-            if (p20 != null) capPoints.Add(p20);
-
-            // Distribute sub-triangles to correct halves
-            SplitStraddlingTriangle(v0, s0, v1, s1, v2, s2, p01, p12, p20, above, below);
+            // Distribute sub-triangles and record the directed cut edge
+            SplitStraddlingTriangle(v0, s0, v1, s1, v2, s2, p01, p12, p20, above, below, cutEdges);
         }
 
-        // ── 3. Cap open boundaries ────────────────────────────────────────────
-        if (capEnds && capPoints.Count >= 3)
-        {
-            // Fan-triangulate the cut perimeter around its centroid.
-            // This produces a rough fill; for curved polyplanes it will not be
-            // perfectly planar, but it is always topologically correct.
-            FanFillCapPoints(capPoints, above, below, polyplane, aboveReference);
-        }
+        // ── 3. Cap open boundaries with proper loop-based fill ────────────────
+        if (capEnds && cutEdges.Count >= 2)
+            CapFromEdgeLoops(cutEdges, above, below);
 
         return (above, below);
     }
@@ -901,46 +892,54 @@ public static class MeshOps
     /// to the correct (above/below) output lists.
     /// p01, p12, p20 are the edge-crossing points on edges (v0-v1), (v1-v2), (v2-v0).
     /// </summary>
+    /// <summary>
+    /// Splits a straddling triangle into sub-triangles routed to the correct halves,
+    /// and records the directed cut edge (boundary of the "above" half) in cutEdges.
+    /// </summary>
     private static void SplitStraddlingTriangle(
         float[] v0, bool s0, float[] v1, bool s1, float[] v2, bool s2,
         float[]? p01, float[]? p12, float[]? p20,
-        List<float[]> above, List<float[]> below)
+        List<float[]> above, List<float[]> below,
+        List<(float[], float[])> cutEdges)
     {
-        // Collect the 2 or 3 crossing points that are actually set
-        // (exactly 2 edges cross for a proper straddling triangle)
-        // Gather each vertex's destination and route sub-tris accordingly.
-
-        // Pattern: one vertex alone on one side → 1 triangle on that side + 2 on the other
         if (s0 == s1 && s0 != s2)
         {
-            // v0, v1 same side; v2 alone
-            // p12 and p20 are the crossing points
+            // v0, v1 same side; v2 alone  → crossing points p12, p20
             if (p12 == null || p20 == null) { Fallback(v0,s0,v1,s1,v2,s2,above,below); return; }
             var same  = s0 ? above : below;
             var other = s0 ? below : above;
             same.Add(v0);  same.Add(v1);  same.Add(p12);
             same.Add(v0);  same.Add(p12); same.Add(p20);
             other.Add(v2); other.Add(p20); other.Add(p12);
+            // Cut edge as boundary of "above": in same=(above) triangles, p12→p20 is the boundary edge;
+            // for other=(above) triangles, p20→p12 is the boundary edge.
+            // Record oriented as boundary of above:
+            if (s0) cutEdges.Add((p12, p20));
+            else     cutEdges.Add((p20, p12));
         }
         else if (s1 == s2 && s1 != s0)
         {
-            // v1, v2 same side; v0 alone
+            // v1, v2 same side; v0 alone  → crossing points p01, p20
             if (p01 == null || p20 == null) { Fallback(v0,s0,v1,s1,v2,s2,above,below); return; }
             var same  = s1 ? above : below;
             var other = s1 ? below : above;
             same.Add(v1);  same.Add(v2);  same.Add(p20);
             same.Add(v1);  same.Add(p20); same.Add(p01);
             other.Add(v0); other.Add(p01); other.Add(p20);
+            if (s1) cutEdges.Add((p20, p01));
+            else     cutEdges.Add((p01, p20));
         }
         else if (s0 == s2 && s0 != s1)
         {
-            // v0, v2 same side; v1 alone
+            // v0, v2 same side; v1 alone  → crossing points p01, p12
             if (p01 == null || p12 == null) { Fallback(v0,s0,v1,s1,v2,s2,above,below); return; }
             var same  = s0 ? above : below;
             var other = s0 ? below : above;
             same.Add(v0);  same.Add(p01); same.Add(p12);
             same.Add(v0);  same.Add(p12); same.Add(v2);
             other.Add(v1); other.Add(p12); other.Add(p01);
+            if (s0) cutEdges.Add((p01, p12));
+            else     cutEdges.Add((p12, p01));
         }
         else
         {
@@ -952,61 +951,103 @@ public static class MeshOps
         float[] v0, bool s0, float[] v1, bool s1, float[] v2, bool s2,
         List<float[]> above, List<float[]> below)
     {
-        // Majority side wins for degenerate cases
         int n = (s0?1:0)+(s1?1:0)+(s2?1:0);
         var t = n >= 2 ? above : below;
         t.Add(v0); t.Add(v1); t.Add(v2);
     }
 
+    // ── Proper loop-based cap fill ─────────────────────────────────────────────
+
     /// <summary>
-    /// Builds a cap polygon from the collected cut-edge intersection points.
-    /// Finds the centroid, sorts points around it, and fan-triangulates.
-    /// The cap is added to both halves (it lies on the cut surface itself).
+    /// Builds cap triangles from directed cut edges by:
+    ///   1. Chaining edges into closed boundary loops (one per disconnected region).
+    ///   2. Fan-triangulating each loop around its centroid.
+    ///   3. Adding the cap to both halves with opposing windings.
+    ///
+    /// Convention: each (A, B) in cutEdges is oriented as the boundary of "above",
+    /// so the cap for "above" uses the reversed sequence: (centroid, B, A) per edge.
+    /// The cap for "below" uses (centroid, A, B).
     /// </summary>
-    private static void FanFillCapPoints(
-        List<float[]> pts,
-        List<float[]> above, List<float[]> below,
-        Polyplane pp, double[] aboveRef)
+    private static void CapFromEdgeLoops(
+        List<(float[] A, float[] B)> cutEdges,
+        List<float[]> above,
+        List<float[]> below)
     {
-        if (pts.Count < 3) return;
+        if (cutEdges.Count == 0) return;
 
-        // Centroid of all cap points
-        double cx = 0, cy = 0, cz = 0;
-        foreach (var p in pts) { cx += p[0]; cy += p[1]; cz += p[2]; }
-        cx /= pts.Count; cy /= pts.Count; cz /= pts.Count;
+        // ── 1. Build adjacency: start-vertex-key → list of edge indices ──────
+        static string VK(float[] v)
+            => $"{Math.Round(v[0], 1)},{Math.Round(v[1], 1)},{Math.Round(v[2], 1)}";
 
-        // Build a local 2-D coordinate system in the cut plane.
-        // Basis U: from centroid to first point.
-        double ux = pts[0][0]-cx, uy = pts[0][1]-cy, uz = pts[0][2]-cz;
-        double ul = Math.Sqrt(ux*ux+uy*uy+uz*uz); if (ul < 1e-9) return;
-        ux/=ul; uy/=ul; uz/=ul;
-
-        // Basis V: perpendicular to U in the average plane normal
-        // (use the normal of the polyplane's first triangle as approximate plane normal)
-        double vx = uy*uz - uz*uy, vy = uz*ux - ux*uz, vz = ux*uy - uy*ux;
-        if (Math.Sqrt(vx*vx+vy*vy+vz*vz) < 1e-9) { vx=0; vy=1; vz=0; }
-        else { double vl=Math.Sqrt(vx*vx+vy*vy+vz*vz); vx/=vl;vy/=vl;vz/=vl; }
-
-        // Sort by angle around centroid
-        var sorted = pts
-            .Select(p => {
-                double dx=p[0]-cx, dy=p[1]-cy, dz=p[2]-cz;
-                double au = dx*ux+dy*uy+dz*uz;
-                double av = dx*vx+dy*vy+dz*vz;
-                return (p, angle: Math.Atan2(av, au));
-            })
-            .OrderBy(x => x.angle)
-            .Select(x => x.p)
-            .ToList();
-
-        var cen = new float[] { (float)cx, (float)cy, (float)cz };
-        for (int i = 0; i < sorted.Count; i++)
+        var adj = new Dictionary<string, Queue<int>>();
+        for (int i = 0; i < cutEdges.Count; i++)
         {
-            var a = sorted[i];
-            var b = sorted[(i+1) % sorted.Count];
-            // Add to both halves (cap lies on the boundary between them)
-            above.Add(cen); above.Add(a); above.Add(b);
-            below.Add(cen); below.Add(b); below.Add(a); // reversed winding for below
+            string ka = VK(cutEdges[i].A);
+            if (!adj.TryGetValue(ka, out var q)) { q = new Queue<int>(); adj[ka] = q; }
+            q.Enqueue(i);
+        }
+
+        // ── 2. Walk chains into loops ─────────────────────────────────────────
+        var visited = new bool[cutEdges.Count];
+        var loops = new List<List<float[]>>();
+
+        for (int start = 0; start < cutEdges.Count; start++)
+        {
+            if (visited[start]) continue;
+
+            var loop = new List<float[]>();
+            int cur = start;
+
+            for (int guard = 0; guard <= cutEdges.Count; guard++)
+            {
+                if (visited[cur]) break;
+                visited[cur] = true;
+                loop.Add(cutEdges[cur].A);
+
+                // Follow the edge: next edge starts at B of current edge
+                string kb = VK(cutEdges[cur].B);
+                int next = -1;
+                if (adj.TryGetValue(kb, out var nexts))
+                {
+                    // Dequeue next unvisited edge from this start key
+                    while (nexts.Count > 0)
+                    {
+                        int ni = nexts.Peek();
+                        if (!visited[ni]) { next = ni; break; }
+                        nexts.Dequeue();
+                    }
+                }
+
+                if (next == -1)
+                {
+                    // Open chain: include final B and stop
+                    loop.Add(cutEdges[cur].B);
+                    break;
+                }
+                cur = next;
+            }
+
+            if (loop.Count >= 3) loops.Add(loop);
+        }
+
+        // ── 3. Fan-triangulate each loop ──────────────────────────────────────
+        foreach (var loop in loops)
+        {
+            double cx = 0, cy = 0, cz = 0;
+            foreach (var p in loop) { cx += p[0]; cy += p[1]; cz += p[2]; }
+            cx /= loop.Count; cy /= loop.Count; cz /= loop.Count;
+            var cen = new float[] { (float)cx, (float)cy, (float)cz };
+
+            int n = loop.Count;
+            for (int i = 0; i < n; i++)
+            {
+                var a = loop[i];
+                var b = loop[(i + 1) % n];
+                // above cap: cut edge (A→B) is the above boundary, so cap = (cen, B, A)
+                above.Add(cen); above.Add(b); above.Add(a);
+                // below cap: reversed winding = (cen, A, B)
+                below.Add(cen); below.Add(a); below.Add(b);
+            }
         }
     }
 
