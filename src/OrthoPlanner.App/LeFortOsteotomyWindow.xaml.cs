@@ -551,66 +551,28 @@ public partial class LeFortOsteotomyWindow : Window
         Cursor = Cursors.Wait;
         CutBtn.IsEnabled = false;
 
-        // Snapshot control-point state for background thread
-        var craniumVerts   = _craniumVerts;
-        var controlPoints  = _controlPoints.ToList();
-        var leftPost       = _leftPost;
-        var leftDrop       = _leftDrop;
-        var rightPost      = _rightPost;
-        var rightDrop      = _rightDrop;
+        // Build the exact polyplane the user sees, then snapshot for the background thread
+        var polyplane    = GetMathPolyplane();
+        var craniumVerts = _craniumVerts;
 
         List<float[]> upper, lower;
         try
         {
             (upper, lower) = await System.Threading.Tasks.Task.Run(() =>
             {
-                // ── Fit a best-fit plane through all control points ────────────────
-                // The LeFort I cut is nearly planar; a single infinite plane through the
-                // centroid of the control points (normal = PCA minor axis ≈ Z-up) gives
-                // a correct split. The BFS approach used the Polyplane only to handle
-                // the slight anterior-posterior slope — the true-cut plane handles this
-                // geometrically by splitting straddling triangles at their exact crossing.
+                // Reference point firmly on the cranium/upper side: highest Z vertex
+                double bestZ = double.MinValue;
+                double[] crRef = { 0, 0, 0 };
+                foreach (var v in craniumVerts)
+                    if (v[2] > bestZ) { bestZ = v[2]; crRef = new double[]{ v[0], v[1], v[2] }; }
 
-                // Centroid of all defined points (control + posterior drop corners)
-                var allPts = new List<Point3D>(controlPoints) { leftPost, leftDrop, rightPost, rightDrop };
+                // True polyplane slice: splits each boundary triangle exactly at the
+                // Möller-Trumbore intersection of its edges with the polyplane mesh.
+                var (abovePts, belowPts) = MeshOps.TrueSliceByPolyplane(
+                    craniumVerts, polyplane, crRef, capEnds: true);
 
-                double cx = allPts.Average(p => p.X);
-                double cy = allPts.Average(p => p.Y);
-                double cz = allPts.Average(p => p.Z);
-
-                // Covariance matrix → find normal via cross of two longest in-plane vectors
-                // Simple approximation: normal = cross(right-left, post-ant) then normalise
-                var leftMid  = new Point3D((leftPost.X  + leftDrop.X)  / 2, (leftPost.Y  + leftDrop.Y)  / 2, (leftPost.Z  + leftDrop.Z)  / 2);
-                var rightMid = new Point3D((rightPost.X + rightDrop.X) / 2, (rightPost.Y + rightDrop.Y) / 2, (rightPost.Z + rightDrop.Z) / 2);
-                var frontMid = new Point3D(controlPoints.Average(p => p.X), controlPoints.Average(p => p.Y), controlPoints.Average(p => p.Z));
-
-                double vLRx = rightMid.X - leftMid.X, vLRy = rightMid.Y - leftMid.Y, vLRz = rightMid.Z - leftMid.Z;
-                double vAPx = frontMid.X - cx,         vAPy = frontMid.Y - cy,         vAPz = frontMid.Z - cz;
-
-                // Normal = LR × AP
-                double nx = vLRy * vAPz - vLRz * vAPy;
-                double ny = vLRz * vAPx - vLRx * vAPz;
-                double nz = vLRx * vAPy - vLRy * vAPx;
-                double nLen = Math.Sqrt(nx*nx + ny*ny + nz*nz);
-
-                if (nLen < 1e-6)
-                {
-                    // Degenerate: fall back to horizontal plane (Z-normal) through centroid
-                    nx = 0; ny = 0; nz = 1;
-                }
-                else { nx /= nLen; ny /= nLen; nz /= nLen; }
-
-                // Make normal point upward (toward cranium, higher Z)
-                if (nz < 0) { nx = -nx; ny = -ny; nz = -nz; }
-
-                double d = -(nx * cx + ny * cy + nz * cz);
-
-                // ── True triangle slicing ──────────────────────────────────────────
-                var (abovePts, belowPts) = MeshOps.TrueSliceByPlane(
-                    craniumVerts, nx, ny, nz, d, capEnds: true);
-
-                // "above" (nx·x+ny·y+nz·z+d ≥ 0) = cranium / upper
-                // "below"                          = maxilla / lower
+                // "above" = cranium (same parity as crRef) = Upper
+                // "below" = maxilla = Lower
                 return (abovePts, belowPts);
             });
         }

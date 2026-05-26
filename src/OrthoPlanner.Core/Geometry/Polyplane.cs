@@ -211,46 +211,73 @@ public class Polyplane
         return DistanceSq(p, new double[] { a[0] + ab[0]*v_final + ac[0]*w_final, a[1] + ab[1]*v_final + ac[1]*w_final, a[2] + ab[2]*v_final + ac[2]*w_final });
     }
 
-    public bool SegmentIntersects(double[] p1, double[] p2)
+    // ─── Parametric Möller-Trumbore: returns t ∈ [0,1] or NaN ───────────────────
+
+    /// <summary>Boolean wrapper kept for BFS compatibility.</summary>
+    public bool SegmentIntersects(double[] p1, double[] p2) =>
+        !double.IsNaN(SegmentIntersectT(p1, p2));
+
+    /// <summary>
+    /// Returns the first intersection parameter t along segment (p→q) where it crosses
+    /// any triangle of the polyplane mesh, or double.NaN if no intersection.
+    /// </summary>
+    public double SegmentIntersectT(double[] p, double[] q)
     {
+        double best = double.NaN;
         for (int i = 0; i + 2 < MeshVertices.Count; i += 3)
         {
-            float[] a = MeshVertices[i];
-            float[] b = MeshVertices[i+1];
-            float[] c = MeshVertices[i+2];
-            if (SegmentTriangleIntersect(p1, p2, a, b, c)) return true;
+            double t = SegmentTriangleT(p, q, MeshVertices[i], MeshVertices[i+1], MeshVertices[i+2]);
+            if (!double.IsNaN(t) && (double.IsNaN(best) || t < best))
+                best = t;
         }
-        return false;
+        return best;
     }
 
-    private bool SegmentTriangleIntersect(double[] p, double[] q, float[] a, float[] b, float[] c)
+    private static double SegmentTriangleT(double[] p, double[] q, float[] a, float[] b, float[] c)
     {
-        double[] dir = { q[0]-p[0], q[1]-p[1], q[2]-p[2] };
-        double[] edge1 = { b[0]-a[0], b[1]-a[1], b[2]-a[2] };
-        double[] edge2 = { c[0]-a[0], c[1]-a[1], c[2]-a[2] };
-        
+        double[] dir    = { q[0]-p[0], q[1]-p[1], q[2]-p[2] };
+        double[] edge1  = { b[0]-a[0], b[1]-a[1], b[2]-a[2] };
+        double[] edge2  = { c[0]-a[0], c[1]-a[1], c[2]-a[2] };
+
         double[] h = { dir[1]*edge2[2] - dir[2]*edge2[1],
                        dir[2]*edge2[0] - dir[0]*edge2[2],
                        dir[0]*edge2[1] - dir[1]*edge2[0] };
-                       
-        double a_dot = edge1[0]*h[0] + edge1[1]*h[1] + edge1[2]*h[2];
-        if (a_dot > -1e-6 && a_dot < 1e-6) return false;
-        
-        double f = 1.0 / a_dot;
+
+        double aDot = edge1[0]*h[0] + edge1[1]*h[1] + edge1[2]*h[2];
+        if (aDot > -1e-9 && aDot < 1e-9) return double.NaN;
+
+        double f = 1.0 / aDot;
         double[] s = { p[0]-a[0], p[1]-a[1], p[2]-a[2] };
         double u = f * (s[0]*h[0] + s[1]*h[1] + s[2]*h[2]);
-        if (u < 0.0 || u > 1.0) return false;
-        
-        double[] q_vec = { s[1]*edge1[2] - s[2]*edge1[1],
-                           s[2]*edge1[0] - s[0]*edge1[2],
-                           s[0]*edge1[1] - s[1]*edge1[0] };
-                           
-        double v = f * (dir[0]*q_vec[0] + dir[1]*q_vec[1] + dir[2]*q_vec[2]);
-        if (v < 0.0 || u + v > 1.0) return false;
-        
-        double t = f * (edge2[0]*q_vec[0] + edge2[1]*q_vec[1] + edge2[2]*q_vec[2]);
-        if (t >= 0.0 && t <= 1.0) return true;
-        
-        return false;
+        if (u < 0.0 || u > 1.0) return double.NaN;
+
+        double[] qv = { s[1]*edge1[2] - s[2]*edge1[1],
+                        s[2]*edge1[0] - s[0]*edge1[2],
+                        s[0]*edge1[1] - s[1]*edge1[0] };
+        double v = f * (dir[0]*qv[0] + dir[1]*qv[1] + dir[2]*qv[2]);
+        if (v < 0.0 || u + v > 1.0) return double.NaN;
+
+        double t = f * (edge2[0]*qv[0] + edge2[1]*qv[1] + edge2[2]*qv[2]);
+        return (t >= 0.0 && t <= 1.0) ? t : double.NaN;
+    }
+
+    // ─── Side test via parity (ray-casting) ──────────────────────────────────────
+    /// <summary>
+    /// Returns true if point <paramref name="pt"/> is on the same side as a reference
+    /// point that is known to be "above" the polyplane (e.g. the highest-Z seed).
+    /// Uses parity of ray-polyplane crossings: even = same side, odd = opposite.
+    /// </summary>
+    public bool SameSideAs(double[] pt, double[] reference)
+    {
+        // Shoot a segment from pt to reference; count polyplane triangle crossings.
+        // Even → same side. Odd → opposite side.
+        int crossings = 0;
+        for (int i = 0; i + 2 < MeshVertices.Count; i += 3)
+        {
+            double t = SegmentTriangleT(pt, reference,
+                MeshVertices[i], MeshVertices[i+1], MeshVertices[i+2]);
+            if (!double.IsNaN(t)) crossings++;
+        }
+        return (crossings % 2) == 0;
     }
 }

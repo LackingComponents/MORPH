@@ -525,54 +525,22 @@ public partial class GenioplastyOsteotomyWindow : Window
         Cursor = Cursors.Wait;
         CutBtn.IsEnabled = false;
 
-        // Snapshot all WPF state needed by background thread
-        var mandibleVerts    = _mandibleVerts;
-        var controlPoints    = _controlPoints.ToList();
-        var posteriorPoints  = _posteriorPoints.ToList();
+        // Build the exact polyplane the user sees, then snapshot for the background thread
+        var polyplane     = GetMathPolyplane();
+        var mandibleVerts = _mandibleVerts;
 
         List<float[]> above, below;
         try
         {
             (above, below) = await System.Threading.Tasks.Task.Run(() =>
             {
-                // ── Best-fit plane through all user-placed points ──────────────────
-                // Combine anterior control points with posterior extension points
-                var allPts = new List<Point3D>(controlPoints);
-                allPts.AddRange(posteriorPoints);
-                if (allPts.Count < 2) allPts.Add(new Point3D(0, 0, 0)); // degenerate guard
+                // Reference: highest-Z vertex = mandible body (always superior to chin)
+                double bestZ = double.MinValue;
+                double[] bodyRef = { 0, 0, 0 };
+                foreach (var v in mandibleVerts)
+                    if (v[2] > bestZ) { bestZ = v[2]; bodyRef = new double[]{ v[0], v[1], v[2] }; }
 
-                double cx = allPts.Average(p => p.X);
-                double cy = allPts.Average(p => p.Y);
-                double cz = allPts.Average(p => p.Z);
-
-                // Use SVD-lite: form two spanning vectors from the point cloud
-                // Vector 1: mediolateral (L-R extremes of the point set)
-                var ptsByX = allPts.OrderBy(p => p.X).ToList();
-                var ptsByY = allPts.OrderBy(p => p.Y).ToList();
-                double v1x = ptsByX.Last().X - ptsByX.First().X;
-                double v1y = ptsByX.Last().Y - ptsByX.First().Y;
-                double v1z = ptsByX.Last().Z - ptsByX.First().Z;
-                // Vector 2: anteroposterior (front-back extremes)
-                double v2x = ptsByY.Last().X - ptsByY.First().X;
-                double v2y = ptsByY.Last().Y - ptsByY.First().Y;
-                double v2z = ptsByY.Last().Z - ptsByY.First().Z;
-
-                // Normal = V1 × V2
-                double nx = v1y * v2z - v1z * v2y;
-                double ny = v1z * v2x - v1x * v2z;
-                double nz = v1x * v2y - v1y * v2x;
-                double nLen = Math.Sqrt(nx*nx + ny*ny + nz*nz);
-
-                if (nLen < 1e-6) { nx = 0; ny = 0; nz = 1; } // fallback: horizontal
-                else { nx /= nLen; ny /= nLen; nz /= nLen; }
-
-                // Make normal point upward (toward mandible body, higher Z)
-                if (nz < 0) { nx = -nx; ny = -ny; nz = -nz; }
-
-                double d = -(nx * cx + ny * cy + nz * cz);
-
-                // ── True triangle slicing ──────────────────────────────────────────
-                return MeshOps.TrueSliceByPlane(mandibleVerts, nx, ny, nz, d, capEnds: true);
+                return MeshOps.TrueSliceByPolyplane(mandibleVerts, polyplane, bodyRef, capEnds: true);
             });
         }
         catch (Exception ex)
@@ -583,7 +551,7 @@ public partial class GenioplastyOsteotomyWindow : Window
             return;
         }
 
-        // "above" = mandible body (higher Z), "below" = chin segment
+        // "above" = mandible body (same parity as bodyRef), "below" = chin segment
         UpperMandibleResult = above;
         ChinSegmentResult   = below;
 

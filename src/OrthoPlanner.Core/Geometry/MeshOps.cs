@@ -780,6 +780,236 @@ public static class MeshOps
         return result;
     }
 
+    // ── Polyplane true-slice (BFS-classification + edge splitting) ────────────
+
+    /// <summary>
+    /// Splits <paramref name="soup"/> into two meshes ("above" and "below") by the
+    /// given <paramref name="polyplane"/>.  Unlike the centroid-only BFS approach,
+    /// any mesh triangle whose edges cross the polyplane is split at the exact
+    /// Möller-Trumbore intersection points, producing a clean straight edge.
+    /// Both halves are always returned; the open boundary loops are capped with
+    /// flat fan-triangulations that approximate the polyplane surface.
+    /// </summary>
+    /// <param name="soup">Input triangle soup.</param>
+    /// <param name="polyplane">The Polyplane whose mesh is used as the cutting surface.</param>
+    /// <param name="aboveReference">A world-space point known to be on the "above" side
+    ///   (e.g. highest-Z centroid of the mesh). Used to orient the parity test.</param>
+    /// <param name="capEnds">When true, open boundary loops are fan-filled.</param>
+    public static (List<float[]> Above, List<float[]> Below) TrueSliceByPolyplane(
+        List<float[]> soup,
+        Polyplane polyplane,
+        double[] aboveReference,
+        bool capEnds = true)
+    {
+        var above = new List<float[]>();
+        var below = new List<float[]>();
+
+        // ── 1. Classify every vertex as above (true) or below (false) ─────────
+        // We use parity ray-casting (SameSideAs) from each vertex to aboveReference.
+        // A vertex is "above" iff the polyplane is crossed an even number of times
+        // on the segment from that vertex to aboveReference.
+        int nTri = soup.Count / 3;
+
+        // Cache vertex-side classification; use quantised key to avoid re-testing
+        // shared vertices multiple times.
+        var vertSide = new Dictionary<string, bool>(nTri * 2);
+        bool VertexAbove(float[] v)
+        {
+            string key = $"{Math.Round(v[0],2)},{Math.Round(v[1],2)},{Math.Round(v[2],2)}";
+            if (!vertSide.TryGetValue(key, out bool side))
+            {
+                double[] vd = { v[0], v[1], v[2] };
+                side = polyplane.SameSideAs(vd, aboveReference);
+                vertSide[key] = side;
+            }
+            return side;
+        }
+
+        // Intersection edge midpoints collected for capping
+        var capPoints = new List<float[]>();
+
+        // ── 2. Process each triangle ──────────────────────────────────────────
+        for (int i = 0; i < nTri; i++)
+        {
+            float[] v0 = soup[i * 3];
+            float[] v1 = soup[i * 3 + 1];
+            float[] v2 = soup[i * 3 + 2];
+
+            bool s0 = VertexAbove(v0);
+            bool s1 = VertexAbove(v1);
+            bool s2 = VertexAbove(v2);
+
+            int aboveCount = (s0 ? 1 : 0) + (s1 ? 1 : 0) + (s2 ? 1 : 0);
+
+            if (aboveCount == 3) { above.Add(v0); above.Add(v1); above.Add(v2); continue; }
+            if (aboveCount == 0) { below.Add(v0); below.Add(v1); below.Add(v2); continue; }
+
+            // ── Straddling triangle: split at polyplane crossing ───────────────
+            // Find which edges cross the polyplane and compute intersection points.
+            // Edges: 0-1, 1-2, 2-0
+            float[]? p01 = EdgeCross(polyplane, v0, v1, s0 != s1);
+            float[]? p12 = EdgeCross(polyplane, v1, v2, s1 != s2);
+            float[]? p20 = EdgeCross(polyplane, v2, v0, s2 != s0);
+
+            if (p01 != null) capPoints.Add(p01);
+            if (p12 != null) capPoints.Add(p12);
+            if (p20 != null) capPoints.Add(p20);
+
+            // Distribute sub-triangles to correct halves
+            SplitStraddlingTriangle(v0, s0, v1, s1, v2, s2, p01, p12, p20, above, below);
+        }
+
+        // ── 3. Cap open boundaries ────────────────────────────────────────────
+        if (capEnds && capPoints.Count >= 3)
+        {
+            // Fan-triangulate the cut perimeter around its centroid.
+            // This produces a rough fill; for curved polyplanes it will not be
+            // perfectly planar, but it is always topologically correct.
+            FanFillCapPoints(capPoints, above, below, polyplane, aboveReference);
+        }
+
+        return (above, below);
+    }
+
+    // ── Triangle splitting helpers ────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns the intersection point of segment (a→b) with the polyplane,
+    /// or null if the edge does not cross (crossEdge=false) or no hit is found.
+    /// </summary>
+    private static float[]? EdgeCross(Polyplane pp, float[] a, float[] b, bool crossEdge)
+    {
+        if (!crossEdge) return null;
+        double[] ad = { a[0], a[1], a[2] };
+        double[] bd = { b[0], b[1], b[2] };
+        double t = pp.SegmentIntersectT(ad, bd);
+        if (double.IsNaN(t))
+        {
+            // Fallback: midpoint (edge must cross but SegmentIntersectT missed)
+            return new float[] { (a[0]+b[0])*0.5f, (a[1]+b[1])*0.5f, (a[2]+b[2])*0.5f };
+        }
+        return new float[]
+        {
+            (float)(a[0] + t*(b[0]-a[0])),
+            (float)(a[1] + t*(b[1]-a[1])),
+            (float)(a[2] + t*(b[2]-a[2]))
+        };
+    }
+
+    /// <summary>
+    /// Splits a straddling triangle into 2 or 3 sub-triangles and routes them
+    /// to the correct (above/below) output lists.
+    /// p01, p12, p20 are the edge-crossing points on edges (v0-v1), (v1-v2), (v2-v0).
+    /// </summary>
+    private static void SplitStraddlingTriangle(
+        float[] v0, bool s0, float[] v1, bool s1, float[] v2, bool s2,
+        float[]? p01, float[]? p12, float[]? p20,
+        List<float[]> above, List<float[]> below)
+    {
+        // Collect the 2 or 3 crossing points that are actually set
+        // (exactly 2 edges cross for a proper straddling triangle)
+        // Gather each vertex's destination and route sub-tris accordingly.
+
+        // Pattern: one vertex alone on one side → 1 triangle on that side + 2 on the other
+        if (s0 == s1 && s0 != s2)
+        {
+            // v0, v1 same side; v2 alone
+            // p12 and p20 are the crossing points
+            if (p12 == null || p20 == null) { Fallback(v0,s0,v1,s1,v2,s2,above,below); return; }
+            var same  = s0 ? above : below;
+            var other = s0 ? below : above;
+            same.Add(v0);  same.Add(v1);  same.Add(p12);
+            same.Add(v0);  same.Add(p12); same.Add(p20);
+            other.Add(v2); other.Add(p20); other.Add(p12);
+        }
+        else if (s1 == s2 && s1 != s0)
+        {
+            // v1, v2 same side; v0 alone
+            if (p01 == null || p20 == null) { Fallback(v0,s0,v1,s1,v2,s2,above,below); return; }
+            var same  = s1 ? above : below;
+            var other = s1 ? below : above;
+            same.Add(v1);  same.Add(v2);  same.Add(p20);
+            same.Add(v1);  same.Add(p20); same.Add(p01);
+            other.Add(v0); other.Add(p01); other.Add(p20);
+        }
+        else if (s0 == s2 && s0 != s1)
+        {
+            // v0, v2 same side; v1 alone
+            if (p01 == null || p12 == null) { Fallback(v0,s0,v1,s1,v2,s2,above,below); return; }
+            var same  = s0 ? above : below;
+            var other = s0 ? below : above;
+            same.Add(v0);  same.Add(p01); same.Add(p12);
+            same.Add(v0);  same.Add(p12); same.Add(v2);
+            other.Add(v1); other.Add(p12); other.Add(p01);
+        }
+        else
+        {
+            Fallback(v0, s0, v1, s1, v2, s2, above, below);
+        }
+    }
+
+    private static void Fallback(
+        float[] v0, bool s0, float[] v1, bool s1, float[] v2, bool s2,
+        List<float[]> above, List<float[]> below)
+    {
+        // Majority side wins for degenerate cases
+        int n = (s0?1:0)+(s1?1:0)+(s2?1:0);
+        var t = n >= 2 ? above : below;
+        t.Add(v0); t.Add(v1); t.Add(v2);
+    }
+
+    /// <summary>
+    /// Builds a cap polygon from the collected cut-edge intersection points.
+    /// Finds the centroid, sorts points around it, and fan-triangulates.
+    /// The cap is added to both halves (it lies on the cut surface itself).
+    /// </summary>
+    private static void FanFillCapPoints(
+        List<float[]> pts,
+        List<float[]> above, List<float[]> below,
+        Polyplane pp, double[] aboveRef)
+    {
+        if (pts.Count < 3) return;
+
+        // Centroid of all cap points
+        double cx = 0, cy = 0, cz = 0;
+        foreach (var p in pts) { cx += p[0]; cy += p[1]; cz += p[2]; }
+        cx /= pts.Count; cy /= pts.Count; cz /= pts.Count;
+
+        // Build a local 2-D coordinate system in the cut plane.
+        // Basis U: from centroid to first point.
+        double ux = pts[0][0]-cx, uy = pts[0][1]-cy, uz = pts[0][2]-cz;
+        double ul = Math.Sqrt(ux*ux+uy*uy+uz*uz); if (ul < 1e-9) return;
+        ux/=ul; uy/=ul; uz/=ul;
+
+        // Basis V: perpendicular to U in the average plane normal
+        // (use the normal of the polyplane's first triangle as approximate plane normal)
+        double vx = uy*uz - uz*uy, vy = uz*ux - ux*uz, vz = ux*uy - uy*ux;
+        if (Math.Sqrt(vx*vx+vy*vy+vz*vz) < 1e-9) { vx=0; vy=1; vz=0; }
+        else { double vl=Math.Sqrt(vx*vx+vy*vy+vz*vz); vx/=vl;vy/=vl;vz/=vl; }
+
+        // Sort by angle around centroid
+        var sorted = pts
+            .Select(p => {
+                double dx=p[0]-cx, dy=p[1]-cy, dz=p[2]-cz;
+                double au = dx*ux+dy*uy+dz*uz;
+                double av = dx*vx+dy*vy+dz*vz;
+                return (p, angle: Math.Atan2(av, au));
+            })
+            .OrderBy(x => x.angle)
+            .Select(x => x.p)
+            .ToList();
+
+        var cen = new float[] { (float)cx, (float)cy, (float)cz };
+        for (int i = 0; i < sorted.Count; i++)
+        {
+            var a = sorted[i];
+            var b = sorted[(i+1) % sorted.Count];
+            // Add to both halves (cap lies on the boundary between them)
+            above.Add(cen); above.Add(a); above.Add(b);
+            below.Add(cen); below.Add(b); below.Add(a); // reversed winding for below
+        }
+    }
+
     // ── Public slicing API ────────────────────────────────────────────────────
 
     /// <summary>
