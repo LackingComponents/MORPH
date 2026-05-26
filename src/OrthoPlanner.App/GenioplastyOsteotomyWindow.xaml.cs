@@ -517,125 +517,95 @@ public partial class GenioplastyOsteotomyWindow : Window
 
     private string VKey(float[] v) => $"{Math.Round(v[0],2)}|{Math.Round(v[1],2)}|{Math.Round(v[2],2)}";
 
-    private void Cut_Click(object sender, RoutedEventArgs e)
+    private async void Cut_Click(object sender, RoutedEventArgs e)
     {
         if (_controlPoints.Count < 2) return;
 
-        StatusText.Text = "Performing osteotomy cut... Please wait.";
+        StatusText.Text = "True-slicing genioplasty… (may take a moment)";
         Cursor = Cursors.Wait;
-        
+        CutBtn.IsEnabled = false;
+
+        // Snapshot all WPF state needed by background thread
+        var mandibleVerts    = _mandibleVerts;
+        var controlPoints    = _controlPoints.ToList();
+        var posteriorPoints  = _posteriorPoints.ToList();
+
+        List<float[]> above, below;
         try
         {
-            int nTri = _mandibleVerts.Count / 3;
-            var edgeMap = new Dictionary<string, List<int>>(nTri * 2);
-            for (int i = 0; i < nTri; i++) {
-                for (int edge = 0; edge < 3; edge++) {
-                    var kA = VKey(_mandibleVerts[i * 3 + edge]);
-                    var kB = VKey(_mandibleVerts[i * 3 + (edge + 1) % 3]);
-                    var ek = string.Compare(kA, kB) < 0 ? kA + "|" + kB : kB + "|" + kA;
-                    if (!edgeMap.TryGetValue(ek, out var lst)) { lst = new List<int>(2); edgeMap[ek] = lst; }
-                    lst.Add(i);
-                }
-            }
-
-            // ─── Step 1: BFS on the visible plane ───
-            var polyplane = GetMathPolyplane();
-            int seed = -1; float bestZ = float.MinValue;
-            for (int i = 0; i < nTri; i++) {
-                float cz = (_mandibleVerts[i*3][2] + _mandibleVerts[i*3+1][2] + _mandibleVerts[i*3+2][2]) / 3f;
-                if (cz > bestZ) { bestZ = cz; seed = i; } // High Z is Mandible top
-            }
-
-            var visited = new bool[nTri];
-            if (seed >= 0) {
-                var q = new Queue<int>(); q.Enqueue(seed); visited[seed] = true;
-                while (q.Count > 0) {
-                    int ti = q.Dequeue();
-                    for (int edge = 0; edge < 3; edge++) {
-                        var kA = VKey(_mandibleVerts[ti * 3 + edge]);
-                        var kB = VKey(_mandibleVerts[ti * 3 + (edge + 1) % 3]);
-                        var ek = string.Compare(kA, kB) < 0 ? kA + "|" + kB : kB + "|" + kA;
-                        if (edgeMap.TryGetValue(ek, out var nbrs))
-                            foreach (int ni in nbrs) {
-                                if (!visited[ni]) {
-                                    var cA = new double[]{ (_mandibleVerts[ti*3][0]+_mandibleVerts[ti*3+1][0]+_mandibleVerts[ti*3+2][0])/3.0,
-                                                           (_mandibleVerts[ti*3][1]+_mandibleVerts[ti*3+1][1]+_mandibleVerts[ti*3+2][1])/3.0,
-                                                           (_mandibleVerts[ti*3][2]+_mandibleVerts[ti*3+1][2]+_mandibleVerts[ti*3+2][2])/3.0 };
-                                    var cB = new double[]{ (_mandibleVerts[ni*3][0]+_mandibleVerts[ni*3+1][0]+_mandibleVerts[ni*3+2][0])/3.0,
-                                                           (_mandibleVerts[ni*3][1]+_mandibleVerts[ni*3+1][1]+_mandibleVerts[ni*3+2][1])/3.0,
-                                                           (_mandibleVerts[ni*3][2]+_mandibleVerts[ni*3+1][2]+_mandibleVerts[ni*3+2][2])/3.0 };
-                                    // Blocked by polyplane? Don't spread!
-                                    if (polyplane.SegmentIntersects(cA, cB)) continue; 
-                                    visited[ni] = true; q.Enqueue(ni);
-                                }
-                            }
-                    }
-                }
-            }
-
-
-            // ─── Step 2: Reclassify floaters by polyplane side ───
-            // Any triangle not reached by the mandible BFS is tested: if a segment from the
-            // mandible seed to that triangle does NOT cross the polyplane, it is on the mandible
-            // side (above/behind the cut) and is assigned to mandible. Otherwise → chin.
-            if (seed >= 0)
+            (above, below) = await System.Threading.Tasks.Task.Run(() =>
             {
-                var seedCtr = new double[]
-                {
-                    (_mandibleVerts[seed*3][0]+_mandibleVerts[seed*3+1][0]+_mandibleVerts[seed*3+2][0])/3.0,
-                    (_mandibleVerts[seed*3][1]+_mandibleVerts[seed*3+1][1]+_mandibleVerts[seed*3+2][1])/3.0,
-                    (_mandibleVerts[seed*3][2]+_mandibleVerts[seed*3+1][2]+_mandibleVerts[seed*3+2][2])/3.0
-                };
-                for (int i = 0; i < nTri; i++)
-                {
-                    if (visited[i]) continue;
-                    var triCtr = new double[]
-                    {
-                        (_mandibleVerts[i*3][0]+_mandibleVerts[i*3+1][0]+_mandibleVerts[i*3+2][0])/3.0,
-                        (_mandibleVerts[i*3][1]+_mandibleVerts[i*3+1][1]+_mandibleVerts[i*3+2][1])/3.0,
-                        (_mandibleVerts[i*3][2]+_mandibleVerts[i*3+1][2]+_mandibleVerts[i*3+2][2])/3.0
-                    };
-                    if (!polyplane.SegmentIntersects(seedCtr, triCtr))
-                        visited[i] = true; // Same side as mandible seed → mandible
-                    // else stays false → chin
-                }
-            }
+                // ── Best-fit plane through all user-placed points ──────────────────
+                // Combine anterior control points with posterior extension points
+                var allPts = new List<Point3D>(controlPoints);
+                allPts.AddRange(posteriorPoints);
+                if (allPts.Count < 2) allPts.Add(new Point3D(0, 0, 0)); // degenerate guard
 
+                double cx = allPts.Average(p => p.X);
+                double cy = allPts.Average(p => p.Y);
+                double cz = allPts.Average(p => p.Z);
 
-            // ─── Step 3: Split meshes ───
-            var above = new List<float[]>();
-            var below = new List<float[]>();
-            for (int i = 0; i < nTri; i++) {
-                if (visited[i]) { above.Add(_mandibleVerts[i*3]); above.Add(_mandibleVerts[i*3+1]); above.Add(_mandibleVerts[i*3+2]); }
-                else            { below.Add(_mandibleVerts[i*3]); below.Add(_mandibleVerts[i*3+1]); below.Add(_mandibleVerts[i*3+2]); }
-            }
+                // Use SVD-lite: form two spanning vectors from the point cloud
+                // Vector 1: mediolateral (L-R extremes of the point set)
+                var ptsByX = allPts.OrderBy(p => p.X).ToList();
+                var ptsByY = allPts.OrderBy(p => p.Y).ToList();
+                double v1x = ptsByX.Last().X - ptsByX.First().X;
+                double v1y = ptsByX.Last().Y - ptsByX.First().Y;
+                double v1z = ptsByX.Last().Z - ptsByX.First().Z;
+                // Vector 2: anteroposterior (front-back extremes)
+                double v2x = ptsByY.Last().X - ptsByY.First().X;
+                double v2y = ptsByY.Last().Y - ptsByY.First().Y;
+                double v2z = ptsByY.Last().Z - ptsByY.First().Z;
 
-            // Hole closing disabled dynamically for Genioplasty to completely prevent "rayburst" remeshing artifacts.
-            UpperMandibleResult = above;
-            ChinSegmentResult = below;
+                // Normal = V1 × V2
+                double nx = v1y * v2z - v1z * v2y;
+                double ny = v1z * v2x - v1x * v2z;
+                double nz = v1x * v2y - v1y * v2x;
+                double nLen = Math.Sqrt(nx*nx + ny*ny + nz*nz);
 
-            MainGroup.Children.Remove(_boneMesh);
-            
-            var upperMesh = CreateMeshVisual(UpperMandibleResult, Color.FromRgb(245, 245, 230), 1.0); // mandible bone colour
-            var lowerMesh = CreateMeshVisual(ChinSegmentResult, Color.FromRgb(120, 220, 210), 1.0);  // teal = Genioplasty chin
-            
-            MainGroup.Children.Add(upperMesh);
-            MainGroup.Children.Add(lowerMesh);
-            
-            AcceptBtn.Visibility = Visibility.Visible;
-            CutBtn.IsEnabled = false;
-            ClearBtn.Content = "Undo Cut";
-            
-            MainGroup.Children.Remove(_polyplaneMesh);
-            foreach (var p in _pointVisuals) MainGroup.Children.Remove(p);
-            
-            StatusText.Text = "Osteotomy computed. Review the upper (blue) and lower (red) segments.";
+                if (nLen < 1e-6) { nx = 0; ny = 0; nz = 1; } // fallback: horizontal
+                else { nx /= nLen; ny /= nLen; nz /= nLen; }
+
+                // Make normal point upward (toward mandible body, higher Z)
+                if (nz < 0) { nx = -nx; ny = -ny; nz = -nz; }
+
+                double d = -(nx * cx + ny * cy + nz * cz);
+
+                // ── True triangle slicing ──────────────────────────────────────────
+                return MeshOps.TrueSliceByPlane(mandibleVerts, nx, ny, nz, d, capEnds: true);
+            });
         }
-        finally
+        catch (Exception ex)
         {
+            StatusText.Text = $"Cut failed: {ex.Message}";
+            CutBtn.IsEnabled = true;
             Cursor = Cursors.Arrow;
+            return;
         }
+
+        // "above" = mandible body (higher Z), "below" = chin segment
+        UpperMandibleResult = above;
+        ChinSegmentResult   = below;
+
+        MainGroup.Children.Remove(_boneMesh);
+
+        var upperMesh = CreateMeshVisual(UpperMandibleResult, Color.FromRgb(245, 245, 230), 1.0);
+        var lowerMesh = CreateMeshVisual(ChinSegmentResult,   Color.FromRgb(120, 220, 210), 1.0);
+
+        MainGroup.Children.Add(upperMesh);
+        MainGroup.Children.Add(lowerMesh);
+
+        AcceptBtn.Visibility = Visibility.Visible;
+        CutBtn.IsEnabled     = false;
+        ClearBtn.Content     = "Undo Cut";
+
+        MainGroup.Children.Remove(_polyplaneMesh);
+        foreach (var p in _pointVisuals) MainGroup.Children.Remove(p);
+
+        StatusText.Text = $"Done — Mandible (bone): {above.Count/3} tris | Chin (teal): {below.Count/3} tris";
+        Cursor = Cursors.Arrow;
     }
+
 
     // Returns the set of triangle indices in the selected component
     private HashSet<int> ExtractComponentFromSeed(bool[] visited, int nTri, Dictionary<string, List<int>> edgeMap, bool targetSide, int seed)

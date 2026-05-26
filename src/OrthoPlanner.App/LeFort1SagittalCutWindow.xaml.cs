@@ -29,17 +29,17 @@ public partial class LeFort1SagittalCutWindow : Window
 
     // Plane bounds (world units)
     // X = mediolateral split position
-    // Y = anterior(front) → posterior(back) dimension
-    // Z = inferior(bot)  → superior(top) dimension
+    // Y = anterior(front) -> posterior(back) dimension
+    // Z = inferior(bot)  -> superior(top) dimension
     private double _xMid, _yFront, _yBack, _zTop, _zBot;
     // Two AP-direction section dividers (vertical lines on the plane)
     private double _yDiv1, _yDiv2;
 
     // 8 handles:
-    //  [0] FrontTop  [1] FrontBot   – anterior edge corners  (cyan)
-    //  [2] BackTop   [3] BackBot    – posterior edge corners  (cyan)
-    //  [4] Div1Top   [5] Div1Bot    – first  divider          (orange)
-    //  [6] Div2Top   [7] Div2Bot    – second divider          (orange)
+    //  [0] FrontTop  [1] FrontBot   - anterior edge corners  (cyan)
+    //  [2] BackTop   [3] BackBot    - posterior edge corners  (cyan)
+    //  [4] Div1Top   [5] Div1Bot    - first  divider          (orange)
+    //  [6] Div2Top   [7] Div2Bot    - second divider          (orange)
     private const int NH = 8;
     private readonly MeshGeometryModel3D[] _hm = new MeshGeometryModel3D[NH];
     private readonly Point3D[]             _hp = new Point3D[NH];
@@ -75,7 +75,7 @@ public partial class LeFort1SagittalCutWindow : Window
         };
     }
 
-    // ── Mouse ──────────────────────────────────────────────────────────────────
+    // -- Mouse -------------------------------------------------------------------------
 
     private void Viewport_PreviewMouseLeftButtonDown(object s, MouseButtonEventArgs e)
     {
@@ -138,7 +138,7 @@ public partial class LeFort1SagittalCutWindow : Window
         MainViewport.ReleaseMouseCapture();
     }
 
-    // ── Control point placement ────────────────────────────────────────────────
+    // -- Control point placement -------------------------------------------------------
 
     private void PlaceCtrl(Point3D pt)
     {
@@ -173,7 +173,7 @@ public partial class LeFort1SagittalCutWindow : Window
         _yDiv2 = Math.Clamp(_yDiv2, _yDiv1  + 1, _yBack - 1);
     }
 
-    // ── Plane rendering ────────────────────────────────────────────────────────
+    // -- Plane rendering ---------------------------------------------------------------
 
     private void RebuildPlane()
     {
@@ -201,10 +201,10 @@ public partial class LeFort1SagittalCutWindow : Window
 
         // Outline + 2 vertical divider lines
         var lb = new HelixToolkit.SharpDX.LineBuilder();
-        lb.AddLine(Nv3f(x, yf,  zt), Nv3f(x, yb,  zt));  // top edge    (anterior→posterior)
-        lb.AddLine(Nv3f(x, yb,  zt), Nv3f(x, yb,  zb));  // back edge   (top→bottom)
-        lb.AddLine(Nv3f(x, yb,  zb), Nv3f(x, yf,  zb));  // bottom edge (posterior→anterior)
-        lb.AddLine(Nv3f(x, yf,  zb), Nv3f(x, yf,  zt));  // front edge  (bottom→top)
+        lb.AddLine(Nv3f(x, yf,  zt), Nv3f(x, yb,  zt));  // top edge    (anterior->posterior)
+        lb.AddLine(Nv3f(x, yb,  zt), Nv3f(x, yb,  zb));  // back edge   (top->bottom)
+        lb.AddLine(Nv3f(x, yb,  zb), Nv3f(x, yf,  zb));  // bottom edge (posterior->anterior)
+        lb.AddLine(Nv3f(x, yf,  zb), Nv3f(x, yf,  zt));  // front edge  (bottom->top)
         lb.AddLine(Nv3f(x, yd1, zt), Nv3f(x, yd1, zb));  // divider 1   (vertical)
         lb.AddLine(Nv3f(x, yd2, zt), Nv3f(x, yd2, zb));  // divider 2   (vertical)
         _linesGroup.Children.Clear();
@@ -218,49 +218,59 @@ public partial class LeFort1SagittalCutWindow : Window
         _handlesGroup.Children.Clear();
         for (int i = 0; i < NH; i++)
         {
-            var col = new HelixToolkit.Maths.Color4(0f, 1f, 1f, 1f); // all handles = cyan
+            var col = new HelixToolkit.Maths.Color4(0f, 1f, 1f, 1f);
             _hm[i] = Sphere(_hp[i], 1.0f, col);
             _handlesGroup.Children.Add(_hm[i]);
         }
     }
 
-    // ── Buttons ────────────────────────────────────────────────────────────────
+    // -- Buttons -----------------------------------------------------------------------
 
     private void Next_Click(object s, RoutedEventArgs e)
     {
-        StepTitle.Text = "LeFort 1 — 2-Piece: Adjust Plane & Cut";
-        StepInstructions.Text = "Drag cyan handles to adjust extent, orange handles to slide section dividers (AP). Click Perform Cut when ready.";
+        StepTitle.Text = "LeFort 1 -- 2-Piece: Adjust Plane & Cut";
+        StepInstructions.Text = "Drag cyan handles to adjust extent. Click Perform Cut when ready.";
         NextBtn.Visibility = Visibility.Collapsed;
         CutBtn.Visibility  = Visibility.Visible;
         CutBtn.IsEnabled   = true;
     }
 
-    private void Cut_Click(object s, RoutedEventArgs e)
+    private async void Cut_Click(object s, RoutedEventArgs e)
     {
-        StatusText.Text = "Cutting..."; Cursor = Cursors.Wait;
+        StatusText.Text = "True-slicing Le Fort 1 2-piece sagittal... (may take a moment)";
+        Cursor = Cursors.Wait;
+        CutBtn.IsEnabled = false;
+
+        var maxillaVerts = _maxillaVerts;
+        double xMid = _xMid;
+
+        List<float[]> L, R;
         try
         {
-            int nTri = _maxillaVerts.Count / 3;
-            var L = new List<float[]>(); var R = new List<float[]>();
-
-            // Classify every triangle by which side of X = _xMid its centroid falls.
-            // Simple centroid test works for both connected and disconnected components.
-            for (int i = 0; i < nTri; i++)
+            (R, L) = await System.Threading.Tasks.Task.Run(() =>
             {
-                double cx = (_maxillaVerts[i*3][0] + _maxillaVerts[i*3+1][0] + _maxillaVerts[i*3+2][0]) / 3.0;
-                var tgt = cx >= _xMid ? R : L;
-                tgt.Add(_maxillaVerts[i*3]); tgt.Add(_maxillaVerts[i*3+1]); tgt.Add(_maxillaVerts[i*3+2]);
-            }
-
-            LeftResult = L; RightResult = R;
-            MainGroup.Children.Remove(_boneMesh);
-            MainGroup.Children.Add(MakeMesh(L, Color.FromRgb(100, 200, 255), 1.0));   // left  = blue
-            MainGroup.Children.Add(MakeMesh(R, Color.FromRgb(120, 220, 210), 1.0));   // right = teal (original bone colour)
-            AcceptBtn.Visibility = Visibility.Visible;
-            CutBtn.IsEnabled = false;
-            StatusText.Text = $"Cut complete — L: {L.Count/3} / R: {R.Count/3} triangles. Accept or Clear to redo.";
+                // Vertical sagittal plane: normal = (1,0,0), offset d = -xMid
+                // "above" (x >= xMid) => R, "below" (x < xMid) => L
+                return MeshOps.TrueSliceByPlane(maxillaVerts, 1.0, 0.0, 0.0, -xMid, capEnds: true);
+            });
         }
-        finally { Cursor = Cursors.Arrow; }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Cut failed: {ex.Message}";
+            CutBtn.IsEnabled = true;
+            Cursor = Cursors.Arrow;
+            return;
+        }
+
+        LeftResult  = L;
+        RightResult = R;
+        MainGroup.Children.Remove(_boneMesh);
+        MainGroup.Children.Add(MakeMesh(L, Color.FromRgb(100, 200, 255), 1.0));
+        MainGroup.Children.Add(MakeMesh(R, Color.FromRgb(120, 220, 210), 1.0));
+        AcceptBtn.Visibility = Visibility.Visible;
+        CutBtn.IsEnabled = false;
+        StatusText.Text = $"Done -- L: {L.Count/3} tris | R: {R.Count/3} tris";
+        Cursor = Cursors.Arrow;
     }
 
     private void Clear_Click(object s, RoutedEventArgs e)
@@ -270,7 +280,7 @@ public partial class LeFort1SagittalCutWindow : Window
         _ctrlVis.Clear();
         _planeVisible = false; _planeMesh.Geometry = null;
         _linesGroup.Children.Clear(); _handlesGroup.Children.Clear();
-        StepTitle.Text = "LeFort 1 — 2-Piece: Place 2 Vestibular Points";
+        StepTitle.Text = "LeFort 1 -- 2-Piece: Place 2 Vestibular Points";
         StepInstructions.Text = "Left-click on the vestibular surface to place 2 points.";
         NextBtn.Visibility = Visibility.Visible; NextBtn.IsEnabled = false;
         CutBtn.Visibility = Visibility.Collapsed; CutBtn.IsEnabled = false;
@@ -281,7 +291,7 @@ public partial class LeFort1SagittalCutWindow : Window
     private void Accept_Click(object s, RoutedEventArgs e) { Accepted = true; DialogResult = true; Close(); }
     private void Cancel_Click(object s, RoutedEventArgs e) { DialogResult = false; Close(); }
 
-    // ── Helpers ────────────────────────────────────────────────────────────────
+    // -- Helpers -----------------------------------------------------------------------
 
     private bool HitSphere(Point screenPos, Point3D center, double radius)
     {

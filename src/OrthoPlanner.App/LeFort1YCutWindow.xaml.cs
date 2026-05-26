@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using HelixToolkit.Wpf.SharpDX;
+using OrthoPlanner.Core.Geometry;
 
 namespace OrthoPlanner.App;
 
@@ -215,73 +216,110 @@ public partial class LeFort1YCutWindow : Window
     }
 
 
-    private void Cut_Click(object s,RoutedEventArgs e)
+    private async void Cut_Click(object s, RoutedEventArgs e)
     {
-        StatusText.Text="Cutting...";Cursor=Cursors.Wait;
+        StatusText.Text = "True-slicing Le Fort 1 3-piece… (may take a moment)";
+        Cursor = Cursors.Wait;
+        CutBtn.IsEnabled = false;
+
+        // Snapshot handle positions for background thread
+        var maxillaVerts = _maxillaVerts;
+        var rFT = _rFT; var rFB = _rFB;
+        var lFT = _lFT; var lFB = _lFB;
+        var jT  = _jT;  var jB  = _jB;
+        var sBT = _sBT; var sBB = _sBB;
+
+        List<float[]> L, R, C;
         try
         {
-            int nT=_maxillaVerts.Count/3;
-            var L=new List<float[]>();var R=new List<float[]>();var C=new List<float[]>();
-
-            var lMid=Lerp(_lFT,_lFB,0.5); var rMid=Lerp(_rFT,_rFB,0.5);
-
-            // Right arm triangles (T1, T2) and their normals
-            var nR1=TriNorm(_rFT,_jT,_jB,lMid); var nR2=TriNorm(_rFT,_jB,_rFB,lMid);
-            // Left arm triangles
-            var nL1=TriNorm(_lFT,_jT,_jB,rMid); var nL2=TriNorm(_lFT,_jB,_lFB,rMid);
-            // Stem triangles (oriented toward right arm)
-            var nS1=TriNorm(_jT,_sBT,_sBB,lMid); var nS2=TriNorm(_jT,_sBB,_jB,lMid);
-
-            var juncMid=Lerp(_jT,_jB,0.5);
-            var stemFwd=Sub(Lerp(_sBT,_sBB,0.5),juncMid);
-
-            // Classify P against one arm: returns signed distance using FINITE plane logic.
-            // Only uses a triangle's plane if P projects inside it; otherwise uses nearest.
-            static double ArmDist(Point3D P,
-                Point3D ft,Point3D jt,Point3D jb,Point3D fb,
-                Vector3D n1,Vector3D n2)
-            {
-                bool in1=InsideTri(P,ft,jt,jb,n1);
-                bool in2=InsideTri(P,ft,jb,fb,n2);
-                if(in1&&!in2) return PlaneD(P,ft,n1);
-                if(in2&&!in1) return PlaneD(P,ft,n2);
-                // Inside both or neither: use average of both planes weighted by inverse distance
-                double d1=PlaneD(P,ft,n1), d2=PlaneD(P,ft,n2);
-                return (d1+d2)*0.5;
-            }
-
-            for(int i=0;i<nT;i++)
-            {
-                double cx=(_maxillaVerts[i*3][0]+(double)_maxillaVerts[i*3+1][0]+_maxillaVerts[i*3+2][0])/3;
-                double cy=(_maxillaVerts[i*3][1]+(double)_maxillaVerts[i*3+1][1]+_maxillaVerts[i*3+2][1])/3;
-                double cz=(_maxillaVerts[i*3][2]+(double)_maxillaVerts[i*3+1][2]+_maxillaVerts[i*3+2][2])/3;
-                var P=new Point3D(cx,cy,cz);
-                List<float[]> t;
-
-                bool isPosterior=Dot(Sub(P,juncMid),stemFwd)>0;
-                if(isPosterior)
+            // PlaneEq defined outside Task.Run so it can be used as a Func inside the lambda
+            Func<Point3D, Point3D, Point3D, (double nx, double ny, double nz, double d)> PlaneEq =
+                (p0, p1, p2) =>
                 {
-                    double dS=ArmDist(P,_jT,_sBT,_sBB,_jB,nS1,nS2);
-                    t=dS>0?R:L;
-                }
-                else
+                    double ax = p1.X-p0.X, ay = p1.Y-p0.Y, az = p1.Z-p0.Z;
+                    double bx = p2.X-p0.X, by = p2.Y-p0.Y, bz = p2.Z-p0.Z;
+                    double nx_ = ay*bz - az*by, ny_ = az*bx - ax*bz, nz_ = ax*by - ay*bx;
+                    double len = Math.Sqrt(nx_*nx_ + ny_*ny_ + nz_*nz_);
+                    if (len < 1e-9) return (0, 1, 0, 0);
+                    nx_ /= len; ny_ /= len; nz_ /= len;
+                    return (nx_, ny_, nz_, -(nx_*p0.X + ny_*p0.Y + nz_*p0.Z));
+                };
+
+            (L, R, C) = await System.Threading.Tasks.Task.Run(() =>
+            {
+                var planeR = PlaneEq(rFT, jT, jB);  // Right arm plane
+                var planeL = PlaneEq(lFT, jT, jB);  // Left arm plane
+
+                // Apply both planes sequentially via true triangle slicing
+                var components = OrthoPlanner.Core.Geometry.MeshOps.TrueSliceByMultiplePlanes(
+                    maxillaVerts,
+                    new[] { (planeR.nx, planeR.ny, planeR.nz, planeR.d),
+                            (planeL.nx, planeL.ny, planeL.nz, planeL.d) },
+                    capEnds: true);
+
+                // ── Classify components into Left / Right / Central ─────────────
+                // The junction centroid tells us which side each arm expects:
+                var juncMid = new Point3D((jT.X+jB.X)/2, (jT.Y+jB.Y)/2, (jT.Z+jB.Z)/2);
+
+                var leftList    = new List<float[]>();
+                var rightList   = new List<float[]>();
+                var centralList = new List<float[]>();
+
+                foreach (var comp in components)
                 {
-                    double dR=ArmDist(P,_rFT,_jT,_jB,_rFB,nR1,nR2);
-                    double dL=ArmDist(P,_lFT,_jT,_jB,_lFB,nL1,nL2);
-                    t=dR>0?R:dL>0?L:C;
+                    if (comp.Mesh.Count == 0) continue;
+
+                    // Component centroid
+                    double sumX = 0, sumY = 0, sumZ = 0;
+                    foreach (var v in comp.Mesh) { sumX += v[0]; sumY += v[1]; sumZ += v[2]; }
+                    double inv = 1.0 / comp.Mesh.Count;
+                    var cPt = new Point3D(sumX * inv, sumY * inv, sumZ * inv);
+
+                    // Side flags relative to each plane
+                    bool aboveR = comp.AbovePlanes[0]; // true = same side as positive normal of right arm plane
+                    bool aboveL = comp.AbovePlanes[1]; // true = same side as positive normal of left arm plane
+
+                    // Determine which side of the right arm the rFT handle falls on
+                    // (to set the canonical "right" direction)
+                    double rFT_sideR = planeR.nx * rFT.X + planeR.ny * rFT.Y + planeR.nz * rFT.Z + planeR.d;
+                    double lFT_sideL = planeL.nx * lFT.X + planeL.ny * lFT.Y + planeL.nz * lFT.Z + planeL.d;
+
+                    bool isRightSide   = aboveR == (rFT_sideR >= 0);
+                    bool isLeftSide    = aboveL == (lFT_sideL >= 0);
+
+                    if (isRightSide && !isLeftSide)
+                        rightList.AddRange(comp.Mesh);
+                    else if (isLeftSide && !isRightSide)
+                        leftList.AddRange(comp.Mesh);
+                    else
+                        centralList.AddRange(comp.Mesh); // between the two planes = central piece
                 }
-                t.Add(_maxillaVerts[i*3]);t.Add(_maxillaVerts[i*3+1]);t.Add(_maxillaVerts[i*3+2]);
-            }
-            LeftResult=L;RightResult=R;CentralResult=C;
-            MainGroup.Children.Remove(_boneMesh);
-            MainGroup.Children.Add(MkMesh(L,Color.FromRgb(100,200,255),1.0));
-            MainGroup.Children.Add(MkMesh(R,Color.FromRgb(120,220,210),1.0));
-            MainGroup.Children.Add(MkMesh(C,Color.FromRgb(220,180,255),1.0));
-            AcceptBtn.Visibility=Visibility.Visible;CutBtn.IsEnabled=false;
-            StatusText.Text=$"Done — L:{L.Count/3} R:{R.Count/3} C:{C.Count/3}";
+
+                return (leftList, rightList, centralList);
+            });
         }
-        finally{Cursor=Cursors.Arrow;}
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Cut failed: {ex.Message}";
+            CutBtn.IsEnabled = true;
+            Cursor = Cursors.Arrow;
+            return;
+        }
+
+        LeftResult    = L;
+        RightResult   = R;
+        CentralResult = C;
+
+        MainGroup.Children.Remove(_boneMesh);
+        MainGroup.Children.Add(MkMesh(L, Color.FromRgb(100, 200, 255), 1.0));
+        MainGroup.Children.Add(MkMesh(R, Color.FromRgb(120, 220, 210), 1.0));
+        MainGroup.Children.Add(MkMesh(C, Color.FromRgb(220, 180, 255), 1.0));
+        AcceptBtn.Visibility = Visibility.Visible;
+        CutBtn.IsEnabled = false;
+        StatusText.Text = $"Done — L:{L.Count/3} R:{R.Count/3} C:{C.Count/3}";
+        Cursor = Cursors.Arrow;
     }
+
 
 
     private void Clear_Click(object s,RoutedEventArgs e)

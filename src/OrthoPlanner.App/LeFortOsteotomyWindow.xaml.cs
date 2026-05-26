@@ -543,125 +543,107 @@ public partial class LeFortOsteotomyWindow : Window
 
     private string VKey(float[] v) => $"{Math.Round(v[0],2)}|{Math.Round(v[1],2)}|{Math.Round(v[2],2)}";
 
-    private void Cut_Click(object sender, RoutedEventArgs e)
+    private async void Cut_Click(object sender, RoutedEventArgs e)
     {
         if (_controlPoints.Count < 2) return;
 
-        StatusText.Text = "Performing osteotomy cut... Please wait.";
+        StatusText.Text = "True-slicing Le Fort I osteotomy… (may take a moment)";
         Cursor = Cursors.Wait;
-        
+        CutBtn.IsEnabled = false;
+
+        // Snapshot control-point state for background thread
+        var craniumVerts   = _craniumVerts;
+        var controlPoints  = _controlPoints.ToList();
+        var leftPost       = _leftPost;
+        var leftDrop       = _leftDrop;
+        var rightPost      = _rightPost;
+        var rightDrop      = _rightDrop;
+
+        List<float[]> upper, lower;
         try
         {
-            int nTri = _craniumVerts.Count / 3;
-            var edgeMap = new Dictionary<string, List<int>>(nTri * 2);
-            for (int i = 0; i < nTri; i++) {
-                for (int edge = 0; edge < 3; edge++) {
-                    var kA = VKey(_craniumVerts[i * 3 + edge]);
-                    var kB = VKey(_craniumVerts[i * 3 + (edge + 1) % 3]);
-                    var ek = string.Compare(kA, kB) < 0 ? kA + "|" + kB : kB + "|" + kA;
-                    if (!edgeMap.TryGetValue(ek, out var lst)) { lst = new List<int>(2); edgeMap[ek] = lst; }
-                    lst.Add(i);
-                }
-            }
-
-            // ─── Step 1: BFS on the padded math polyplane ───
-            var polyplane = GetMathPolyplane();
-            int seed = -1; float bestZ = float.MinValue;
-            for (int i = 0; i < nTri; i++) {
-                float cz = (_craniumVerts[i*3][2] + _craniumVerts[i*3+1][2] + _craniumVerts[i*3+2][2]) / 3f;
-                if (cz > bestZ) { bestZ = cz; seed = i; } // High Z is Cranium top
-            }
-
-            var visited = new bool[nTri];
-            if (seed >= 0) {
-                var q = new Queue<int>(); q.Enqueue(seed); visited[seed] = true;
-                while (q.Count > 0) {
-                    int ti = q.Dequeue();
-                    for (int edge = 0; edge < 3; edge++) {
-                        var kA = VKey(_craniumVerts[ti * 3 + edge]);
-                        var kB = VKey(_craniumVerts[ti * 3 + (edge + 1) % 3]);
-                        var ek = string.Compare(kA, kB) < 0 ? kA + "|" + kB : kB + "|" + kA;
-                        if (edgeMap.TryGetValue(ek, out var nbrs))
-                            foreach (int ni in nbrs) {
-                                if (!visited[ni]) {
-                                    var cA = new double[]{ (_craniumVerts[ti*3][0]+_craniumVerts[ti*3+1][0]+_craniumVerts[ti*3+2][0])/3.0,
-                                                           (_craniumVerts[ti*3][1]+_craniumVerts[ti*3+1][1]+_craniumVerts[ti*3+2][1])/3.0,
-                                                           (_craniumVerts[ti*3][2]+_craniumVerts[ti*3+1][2]+_craniumVerts[ti*3+2][2])/3.0 };
-                                    var cB = new double[]{ (_craniumVerts[ni*3][0]+_craniumVerts[ni*3+1][0]+_craniumVerts[ni*3+2][0])/3.0,
-                                                           (_craniumVerts[ni*3][1]+_craniumVerts[ni*3+1][1]+_craniumVerts[ni*3+2][1])/3.0,
-                                                           (_craniumVerts[ni*3][2]+_craniumVerts[ni*3+1][2]+_craniumVerts[ni*3+2][2])/3.0 };
-                                    // Blocked by polyplane? Don't spread!
-                                    if (polyplane.SegmentIntersects(cA, cB)) continue; 
-                                    visited[ni] = true; q.Enqueue(ni);
-                                }
-                            }
-                    }
-                }
-            }
-
-
-            // ─── Step 2: Reclassify floaters by polyplane side ───
-            // Any triangle not reached by the cranium BFS is tested: if a segment from the
-            // cranium seed to that triangle does NOT cross the polyplane, it is on the cranium
-            // side (above/behind the cut) and is assigned to cranium. Otherwise → maxilla.
-            if (seed >= 0)
+            (upper, lower) = await System.Threading.Tasks.Task.Run(() =>
             {
-                var seedCtr = new double[]
+                // ── Fit a best-fit plane through all control points ────────────────
+                // The LeFort I cut is nearly planar; a single infinite plane through the
+                // centroid of the control points (normal = PCA minor axis ≈ Z-up) gives
+                // a correct split. The BFS approach used the Polyplane only to handle
+                // the slight anterior-posterior slope — the true-cut plane handles this
+                // geometrically by splitting straddling triangles at their exact crossing.
+
+                // Centroid of all defined points (control + posterior drop corners)
+                var allPts = new List<Point3D>(controlPoints) { leftPost, leftDrop, rightPost, rightDrop };
+
+                double cx = allPts.Average(p => p.X);
+                double cy = allPts.Average(p => p.Y);
+                double cz = allPts.Average(p => p.Z);
+
+                // Covariance matrix → find normal via cross of two longest in-plane vectors
+                // Simple approximation: normal = cross(right-left, post-ant) then normalise
+                var leftMid  = new Point3D((leftPost.X  + leftDrop.X)  / 2, (leftPost.Y  + leftDrop.Y)  / 2, (leftPost.Z  + leftDrop.Z)  / 2);
+                var rightMid = new Point3D((rightPost.X + rightDrop.X) / 2, (rightPost.Y + rightDrop.Y) / 2, (rightPost.Z + rightDrop.Z) / 2);
+                var frontMid = new Point3D(controlPoints.Average(p => p.X), controlPoints.Average(p => p.Y), controlPoints.Average(p => p.Z));
+
+                double vLRx = rightMid.X - leftMid.X, vLRy = rightMid.Y - leftMid.Y, vLRz = rightMid.Z - leftMid.Z;
+                double vAPx = frontMid.X - cx,         vAPy = frontMid.Y - cy,         vAPz = frontMid.Z - cz;
+
+                // Normal = LR × AP
+                double nx = vLRy * vAPz - vLRz * vAPy;
+                double ny = vLRz * vAPx - vLRx * vAPz;
+                double nz = vLRx * vAPy - vLRy * vAPx;
+                double nLen = Math.Sqrt(nx*nx + ny*ny + nz*nz);
+
+                if (nLen < 1e-6)
                 {
-                    (_craniumVerts[seed*3][0]+_craniumVerts[seed*3+1][0]+_craniumVerts[seed*3+2][0])/3.0,
-                    (_craniumVerts[seed*3][1]+_craniumVerts[seed*3+1][1]+_craniumVerts[seed*3+2][1])/3.0,
-                    (_craniumVerts[seed*3][2]+_craniumVerts[seed*3+1][2]+_craniumVerts[seed*3+2][2])/3.0
-                };
-                for (int i = 0; i < nTri; i++)
-                {
-                    if (visited[i]) continue;
-                    var triCtr = new double[]
-                    {
-                        (_craniumVerts[i*3][0]+_craniumVerts[i*3+1][0]+_craniumVerts[i*3+2][0])/3.0,
-                        (_craniumVerts[i*3][1]+_craniumVerts[i*3+1][1]+_craniumVerts[i*3+2][1])/3.0,
-                        (_craniumVerts[i*3][2]+_craniumVerts[i*3+1][2]+_craniumVerts[i*3+2][2])/3.0
-                    };
-                    if (!polyplane.SegmentIntersects(seedCtr, triCtr))
-                        visited[i] = true; // Same side as cranium seed → cranium
-                    // else stays false → maxilla
+                    // Degenerate: fall back to horizontal plane (Z-normal) through centroid
+                    nx = 0; ny = 0; nz = 1;
                 }
-            }
+                else { nx /= nLen; ny /= nLen; nz /= nLen; }
 
+                // Make normal point upward (toward cranium, higher Z)
+                if (nz < 0) { nx = -nx; ny = -ny; nz = -nz; }
 
-            // ─── Step 3: Split meshes ───
-            var above = new List<float[]>();
-            var below = new List<float[]>();
-            for (int i = 0; i < nTri; i++) {
-                if (visited[i]) { above.Add(_craniumVerts[i*3]); above.Add(_craniumVerts[i*3+1]); above.Add(_craniumVerts[i*3+2]); }
-                else            { below.Add(_craniumVerts[i*3]); below.Add(_craniumVerts[i*3+1]); below.Add(_craniumVerts[i*3+2]); }
-            }
+                double d = -(nx * cx + ny * cy + nz * cz);
 
-            // Hole closing disabled dynamically for LeFort 1 to completely prevent "rayburst" remeshing artifacts.
-            UpperMaxillaResult = above;
-            LowerMaxillaResult = below;
+                // ── True triangle slicing ──────────────────────────────────────────
+                var (abovePts, belowPts) = MeshOps.TrueSliceByPlane(
+                    craniumVerts, nx, ny, nz, d, capEnds: true);
 
-            MainGroup.Children.Remove(_boneMesh);
-            
-            var upperMesh = CreateMeshVisual(UpperMaxillaResult, Color.FromRgb(245, 245, 230), 1.0); // cranium bone colour
-            var lowerMesh = CreateMeshVisual(LowerMaxillaResult, Color.FromRgb(120, 220, 210), 1.0);  // teal = LeFort maxilla
-            
-            MainGroup.Children.Add(upperMesh);
-            MainGroup.Children.Add(lowerMesh);
-            
-            AcceptBtn.Visibility = Visibility.Visible;
-            CutBtn.IsEnabled = false;
-            ClearBtn.Content = "Undo Cut";
-            
-            MainGroup.Children.Remove(_polyplaneMesh);
-            foreach (var p in _pointVisuals) MainGroup.Children.Remove(p);
-            
-            StatusText.Text = "Osteotomy computed. Review the upper (blue) and lower (red) segments.";
+                // "above" (nx·x+ny·y+nz·z+d ≥ 0) = cranium / upper
+                // "below"                          = maxilla / lower
+                return (abovePts, belowPts);
+            });
         }
-        finally
+        catch (Exception ex)
         {
+            StatusText.Text = $"Cut failed: {ex.Message}";
+            CutBtn.IsEnabled = true;
             Cursor = Cursors.Arrow;
+            return;
         }
+
+        UpperMaxillaResult = upper;
+        LowerMaxillaResult = lower;
+
+        MainGroup.Children.Remove(_boneMesh);
+
+        var upperMesh = CreateMeshVisual(UpperMaxillaResult, Color.FromRgb(245, 245, 230), 1.0);
+        var lowerMesh = CreateMeshVisual(LowerMaxillaResult, Color.FromRgb(120, 220, 210), 1.0);
+
+        MainGroup.Children.Add(upperMesh);
+        MainGroup.Children.Add(lowerMesh);
+
+        AcceptBtn.Visibility = Visibility.Visible;
+        CutBtn.IsEnabled     = false;
+        ClearBtn.Content     = "Undo Cut";
+
+        MainGroup.Children.Remove(_polyplaneMesh);
+        foreach (var p in _pointVisuals) MainGroup.Children.Remove(p);
+
+        StatusText.Text = $"Done — Upper (bone): {upper.Count/3} tris | Lower (teal): {lower.Count/3} tris";
+        Cursor = Cursors.Arrow;
     }
+
 
     // Returns the set of triangle indices in the selected component
     private HashSet<int> ExtractComponentFromSeed(bool[] visited, int nTri, Dictionary<string, List<int>> edgeMap, bool targetSide, int seed)
