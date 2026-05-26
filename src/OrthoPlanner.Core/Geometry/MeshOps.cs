@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using g3;
 
 namespace OrthoPlanner.Core.Geometry;
 
@@ -704,5 +705,269 @@ public static class MeshOps
         long qz = (long)Math.Round(z * 100);
         // Pack into a single long with enough range
         return qx * 10000000000L + qy * 100000L + qz;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  TRUE GEOMETRY SLICING  (geometry3Sharp – MeshPlaneCut)
+    //
+    //  Triangles that straddle the cutting plane are split at the intersection
+    //  line; new vertices are inserted so both halves are proper closed meshes.
+    //  When capEnds = true the resulting open boundary loops are filled with
+    //  flat triangulated caps (the osteotomy cut face).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Carries one connected component produced by <see cref="TrueSliceByMultiplePlanes"/>.
+    /// </summary>
+    public class PlaneSliceComponent
+    {
+        /// <summary>Triangle soup for this component.</summary>
+        public List<float[]> Mesh { get; set; } = new();
+        /// <summary>
+        /// For each input plane: <c>true</c> when the component centroid lies on
+        /// the positive side (nx·x + ny·y + nz·z + d ≥ 0).
+        /// </summary>
+        public bool[] AbovePlanes { get; set; } = Array.Empty<bool>();
+    }
+
+    // ── Conversion helpers ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Converts a triangle-soup (every 3 consecutive float[3] = one triangle)
+    /// to an indexed <see cref="DMesh3"/>. Vertices within 0.01 mm are merged.
+    /// </summary>
+    public static DMesh3 ToIndexedMesh(List<float[]> soup)
+    {
+        var dm   = new DMesh3();
+        var vmap = new Dictionary<(int, int, int), int>();
+
+        int GetV(float x, float y, float z)
+        {
+            var key = ((int)Math.Round(x * 100), (int)Math.Round(y * 100), (int)Math.Round(z * 100));
+            if (!vmap.TryGetValue(key, out int vi))
+            {
+                vi = dm.AppendVertex(new Vector3d(x, y, z));
+                vmap[key] = vi;
+            }
+            return vi;
+        }
+
+        for (int i = 0; i + 2 < soup.Count; i += 3)
+        {
+            int a = GetV(soup[i][0],   soup[i][1],   soup[i][2]);
+            int b = GetV(soup[i+1][0], soup[i+1][1], soup[i+1][2]);
+            int c = GetV(soup[i+2][0], soup[i+2][1], soup[i+2][2]);
+            if (a != b && b != c && a != c)
+                dm.AppendTriangle(a, b, c);
+        }
+        return dm;
+    }
+
+    /// <summary>Converts a <see cref="DMesh3"/> back to flat triangle-soup.</summary>
+    public static List<float[]> ToTriangleSoup(DMesh3 dm)
+    {
+        var result = new List<float[]>(dm.TriangleCount * 3);
+        foreach (int tid in dm.TriangleIndices())
+        {
+            var tri = dm.GetTriangle(tid);
+            var va  = dm.GetVertex(tri.a);
+            var vb  = dm.GetVertex(tri.b);
+            var vc  = dm.GetVertex(tri.c);
+            result.Add(new float[] { (float)va.x, (float)va.y, (float)va.z });
+            result.Add(new float[] { (float)vb.x, (float)vb.y, (float)vb.z });
+            result.Add(new float[] { (float)vc.x, (float)vc.y, (float)vc.z });
+        }
+        return result;
+    }
+
+    // ── Public slicing API ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Performs a single true plane cut on the input mesh using geometry3Sharp's
+    /// <c>MeshPlaneCut</c>. Triangles straddling the plane are split at their
+    /// intersection edges; open boundary loops are optionally capped with flat
+    /// triangulated fills.<br/>
+    /// Falls back to centroid classification if the cut fails.
+    /// </summary>
+    /// <param name="soup">Input mesh as triangle soup.</param>
+    /// <param name="nx">Plane normal X.</param>
+    /// <param name="ny">Plane normal Y.</param>
+    /// <param name="nz">Plane normal Z.</param>
+    /// <param name="d">Plane offset: nx·x + ny·y + nz·z + d = 0.</param>
+    /// <param name="capEnds">Cap open cut boundaries with flat polygon fills.</param>
+    public static (List<float[]> Above, List<float[]> Below) TrueSliceByPlane(
+        List<float[]> soup,
+        double nx, double ny, double nz, double d,
+        bool capEnds = true)
+    {
+        try
+        {
+            var dm = ToIndexedMesh(soup);
+            ApplyMeshPlaneCut(dm, nx, ny, nz, d, capEnds);
+            var comps = FindConnectedComponents(dm);
+
+            var above = new List<float[]>();
+            var below = new List<float[]>();
+
+            foreach (var comp in comps)
+            {
+                if (comp.Count == 0) continue;
+                var tri0 = dm.GetTriangle(comp[0]);
+                var c    = (dm.GetVertex(tri0.a) + dm.GetVertex(tri0.b) + dm.GetVertex(tri0.c)) / 3.0;
+                bool isAbove = nx * c.x + ny * c.y + nz * c.z + d >= 0;
+
+                var target = isAbove ? above : below;
+                AppendComponentToSoup(dm, comp, target);
+            }
+            return (above, below);
+        }
+        catch
+        {
+            // Graceful fallback: centroid-only split (no triangle splitting)
+            return SplitByPlaneCentroid(soup, nx, ny, nz, d);
+        }
+    }
+
+    /// <summary>
+    /// Applies <paramref name="planes"/> sequentially to the mesh using true
+    /// triangle slicing, then returns each resulting connected component together
+    /// with per-plane side metadata for downstream classification.
+    /// Open boundary loops are optionally capped after each cut.
+    /// </summary>
+    public static List<PlaneSliceComponent> TrueSliceByMultiplePlanes(
+        List<float[]> soup,
+        (double Nx, double Ny, double Nz, double D)[] planes,
+        bool capEnds = true)
+    {
+        try
+        {
+            var dm = ToIndexedMesh(soup);
+
+            // Apply each plane cut in sequence; caps from earlier cuts are re-sliced
+            // if a later plane intersects them — this is correct and desired behaviour.
+            foreach (var (nx, ny, nz, d) in planes)
+                ApplyMeshPlaneCut(dm, nx, ny, nz, d, capEnds);
+
+            var comps   = FindConnectedComponents(dm);
+            var results = new List<PlaneSliceComponent>(comps.Count);
+
+            foreach (var comp in comps)
+            {
+                if (comp.Count == 0) continue;
+
+                // Classify this component against every plane using its first-triangle centroid.
+                var tri0     = dm.GetTriangle(comp[0]);
+                var centroid = (dm.GetVertex(tri0.a) + dm.GetVertex(tri0.b) + dm.GetVertex(tri0.c)) / 3.0;
+
+                var abovePlanes = new bool[planes.Length];
+                for (int pi = 0; pi < planes.Length; pi++)
+                    abovePlanes[pi] = planes[pi].Nx * centroid.x
+                                    + planes[pi].Ny * centroid.y
+                                    + planes[pi].Nz * centroid.z
+                                    + planes[pi].D  >= 0;
+
+                var mesh = new List<float[]>(comp.Count * 3);
+                AppendComponentToSoup(dm, comp, mesh);
+
+                results.Add(new PlaneSliceComponent { Mesh = mesh, AbovePlanes = abovePlanes });
+            }
+            return results;
+        }
+        catch
+        {
+            // Fallback: return the whole mesh as one unsplit component
+            return new List<PlaneSliceComponent>
+            {
+                new PlaneSliceComponent
+                {
+                    Mesh        = new List<float[]>(soup),
+                    AbovePlanes = new bool[planes.Length]
+                }
+            };
+        }
+    }
+
+    // ── Internal helpers ──────────────────────────────────────────────────────
+
+    /// <summary>Applies one infinite MeshPlaneCut to <paramref name="dm"/> in-place.</summary>
+    private static void ApplyMeshPlaneCut(
+        DMesh3 dm, double nx, double ny, double nz, double d, bool capEnds)
+    {
+        double lenSq = nx*nx + ny*ny + nz*nz;
+        if (lenSq < 1e-12) return;
+
+        // Point on the plane closest to the origin: P = -N * d / |N|²
+        var origin = new Vector3d(-nx * d / lenSq, -ny * d / lenSq, -nz * d / lenSq);
+        var normal = new Vector3d(nx, ny, nz);
+
+        var cut = new MeshPlaneCut(dm, origin, normal);
+        cut.Cut();
+        if (capEnds) cut.FillHoles();
+
+    }
+
+    /// <summary>
+    /// BFS over edge-adjacency of <paramref name="dm"/> to find connected
+    /// components. Each component is returned as a list of triangle IDs.
+    /// </summary>
+    private static List<List<int>> FindConnectedComponents(DMesh3 dm)
+    {
+        var visited    = new HashSet<int>();
+        var components = new List<List<int>>();
+
+        foreach (int tid in dm.TriangleIndices())
+        {
+            if (visited.Contains(tid)) continue;
+
+            var comp = new List<int>();
+            var q    = new Queue<int>();
+            q.Enqueue(tid); visited.Add(tid);
+
+            while (q.Count > 0)
+            {
+                int t = q.Dequeue(); comp.Add(t);
+                Index3i eids = dm.GetTriEdges(t);
+                foreach (int eid in new[] { eids.a, eids.b, eids.c })
+                {
+                    Index2i nbrs = dm.GetEdgeT(eid);
+                    if (nbrs.a >= 0 && !visited.Contains(nbrs.a)) { visited.Add(nbrs.a); q.Enqueue(nbrs.a); }
+                    if (nbrs.b >= 0 && !visited.Contains(nbrs.b)) { visited.Add(nbrs.b); q.Enqueue(nbrs.b); }
+                }
+            }
+            components.Add(comp);
+        }
+        return components;
+    }
+
+    /// <summary>Appends the triangles of one component to a triangle-soup list.</summary>
+    private static void AppendComponentToSoup(DMesh3 dm, List<int> comp, List<float[]> target)
+    {
+        foreach (int t in comp)
+        {
+            var tri = dm.GetTriangle(t);
+            var va  = dm.GetVertex(tri.a);
+            var vb  = dm.GetVertex(tri.b);
+            var vc  = dm.GetVertex(tri.c);
+            target.Add(new float[] { (float)va.x, (float)va.y, (float)va.z });
+            target.Add(new float[] { (float)vb.x, (float)vb.y, (float)vb.z });
+            target.Add(new float[] { (float)vc.x, (float)vc.y, (float)vc.z });
+        }
+    }
+
+    /// <summary>Centroid-only split — used as fallback when MeshPlaneCut fails.</summary>
+    private static (List<float[]> Above, List<float[]> Below) SplitByPlaneCentroid(
+        List<float[]> soup, double nx, double ny, double nz, double d)
+    {
+        var above = new List<float[]>();
+        var below = new List<float[]>();
+        for (int i = 0; i + 2 < soup.Count; i += 3)
+        {
+            double cx = (soup[i][0] + soup[i+1][0] + soup[i+2][0]) / 3.0;
+            double cy = (soup[i][1] + soup[i+1][1] + soup[i+2][1]) / 3.0;
+            double cz = (soup[i][2] + soup[i+1][2] + soup[i+2][2]) / 3.0;
+            var target = nx*cx + ny*cy + nz*cz + d >= 0 ? above : below;
+            target.Add(soup[i]); target.Add(soup[i+1]); target.Add(soup[i+2]);
+        }
+        return (above, below);
     }
 }

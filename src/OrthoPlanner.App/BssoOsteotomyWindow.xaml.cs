@@ -373,232 +373,152 @@ public partial class BssoOsteotomyWindow : Window
         StatusText.Text="Place 2 lingual points…";
     }
 
-    private void Cut_Click(object s, RoutedEventArgs e)
+    private async void Cut_Click(object s, RoutedEventArgs e)
     {
-        StatusText.Text="Cutting…"; Cursor=Cursors.Wait;
-        try {
-            // Pre-filter: operated-side triangles (other side → distal)
-            float midX = _mandibleVerts.Count > 0 ? _mandibleVerts.Average(v => v[0]) : 0f;
-            float cutCX = (float)((_lc[0].X+_lc[1].X+_bc[0].X+_bc[1].X)/4.0);
-            float cutSide = Math.Sign(cutCX - midX);
-            var operated = new List<float[]>(); var other = new List<float[]>();
-            for(int i = 0; i+2 < _mandibleVerts.Count; i += 3) {
-                float cx = (_mandibleVerts[i][0]+_mandibleVerts[i+1][0]+_mandibleVerts[i+2][0])/3f;
-                if(Math.Sign(cx - midX) == cutSide || cx == midX) {
-                    operated.Add(_mandibleVerts[i]); operated.Add(_mandibleVerts[i+1]); operated.Add(_mandibleVerts[i+2]);
-                } else {
-                    other.Add(_mandibleVerts[i]); other.Add(_mandibleVerts[i+1]); other.Add(_mandibleVerts[i+2]);
-                }
-            }
+        StatusText.Text = "True-slicing osteotomy… (may take a moment)";
+        Cursor = Cursors.Wait;
+        CutBtn.IsEnabled = false;
 
-            // Build polyplane with 2.0mm precise influence — extruding cuts into marrow
-            var bSup = _bc[0]; var bInf = _bc[1];
-            // armBot is now a stored draggable field (initialized in InitSagittal)
-            
-            float medX = -cutSide * 20f; // medial extrusion
-            float latX =  cutSide * 20f; // lateral extrusion
-            var quads = new List<(float[],float[],float[],float[])>();
-            
-            // Lingual: extrude medially
-            for(int i=0; i<3; i++) {
-                var p0 = Fv(_lc[i]); var p1 = Fv(_lc[i+1]);
-                var p0_ex = new float[]{p0[0]+medX, p0[1], p0[2]};
-                var p1_ex = new float[]{p1[0]+medX, p1[1], p1[2]};
-                quads.Add((p0_ex, p1_ex, p1, p0));
-            }
-            
-            // Buccal: extrude laterally
-            for(int i=0; i<3; i++) {
-                var p0 = Fv(_bc[i]); var p1 = Fv(_bc[i+1]);
-                var p0_ex = new float[]{p0[0]+latX, p0[1], p0[2]};
-                var p1_ex = new float[]{p1[0]+latX, p1[1], p1[2]};
-                quads.Add((p0, p1, p1_ex, p0_ex));
-            }
-            
-            // Sagittal (Vertical sheet)
-            quads.Add((Fv(_sagTop[0]),Fv(_sagTop[1]),Fv(_sagBot[1]),Fv(_sagBot[0])));
-            quads.Add((Fv(_sagTop[1]),Fv(_sagTop[2]),Fv(bInf),Fv(_sagBot[1])));
-            // Anterior border of sagittal split
-            quads.Add((Fv(_sagTop[2]),Fv(bSup),Fv(bInf),Fv(_sagTop[2])));
-            // Posterior arm
-            quads.Add((Fv(_sagTop[0]),Fv(_postArmTip),Fv(_armBot),Fv(_sagBot[0])));
-            
-            var poly = new Polyplane(0.0); // No distance barrier needed anymore, using exact intersection
-            poly.SetMeshFromQuads(quads);
+        // Snapshot all WPF state needed by the background thread
+        var mandibleVerts = _mandibleVerts;
+        var lc     = (System.Windows.Media.Media3D.Point3D[])_lc.Clone();
+        var bc     = (System.Windows.Media.Media3D.Point3D[])_bc.Clone();
+        var sagTop = (System.Windows.Media.Media3D.Point3D[])_sagTop.Clone();
+        var sagBot = (System.Windows.Media.Media3D.Point3D[])_sagBot.Clone();
 
-            int nTri = operated.Count / 3;
-
-            var ctrs  = new double[nTri][];
-            for(int i = 0; i < nTri; i++) {
-                ctrs[i] = new double[] {
-                    (operated[i*3][0]+operated[i*3+1][0]+operated[i*3+2][0])/3.0,
-                    (operated[i*3][1]+operated[i*3+1][1]+operated[i*3+2][1])/3.0,
-                    (operated[i*3][2]+operated[i*3+1][2]+operated[i*3+2][2])/3.0 };
-            }
-
-            // Edge adjacency
-            var edgeMap = new Dictionary<string, List<int>>(nTri * 2);
-            for(int i = 0; i < nTri; i++) {
-                for(int edge = 0; edge < 3; edge++) {
-                    var kA = VKey(operated[i*3+edge]);
-                    var kB = VKey(operated[i*3+(edge+1)%3]);
-                    var ek = string.Compare(kA,kB)<0 ? kA+"|"+kB : kB+"|"+kA;
-                    if(!edgeMap.TryGetValue(ek, out var lst)) { lst = new List<int>(2); edgeMap[ek]=lst; }
-                    lst.Add(i);
-                }
-            }
-
-            // Determine condyle seed from highest Y+Z (Most Posterior + Superior)
-            int seed = -1; float bestScore = float.MinValue;
-            for(int i = 0; i < nTri; i++) {
-                float cy = (float)ctrs[i][1];
-                float cz = (float)ctrs[i][2];
-                float score = cy + cz; // Y+ is posterior, Z+ is superior
-                if(score > bestScore) { bestScore=score; seed=i; }
-            }
-
-            // BFS from condyle — stop EXACTLY when edge crosses kerf polyplane
-            var visited = new bool[nTri];
-            if(seed >= 0) {
-                var q = new Queue<int>(); q.Enqueue(seed); visited[seed]=true;
-                while(q.Count > 0) {
-                    int ti = q.Dequeue();
-                    for(int edge = 0; edge < 3; edge++) {
-                        var kA = VKey(operated[ti*3+edge]);
-                        var kB = VKey(operated[ti*3+(edge+1)%3]);
-                        var ek = string.Compare(kA,kB)<0 ? kA+"|"+kB : kB+"|"+kA;
-                        if(edgeMap.TryGetValue(ek, out var nbrs))
-                            foreach(int ni in nbrs) if(!visited[ni]) { 
-                                // Exact graph cut: if the line connecting the two centroids crosses the cutting surface, the boundary is blocked
-                                if (poly.SegmentIntersects(ctrs[ti], ctrs[ni])) continue;
-                                visited[ni]=true; q.Enqueue(ni); 
-                            }
-                    }
-                }
-            }
-
-
-            // ─── Floater reclassification: connected-component approach ───
-            // Find all connected components of unvisited (distal) triangles.
-            // The LARGEST component = the main mandible body → leave it alone.
-            // All smaller orphan components get classified by their centroid against the 3 planes.
-
-            // Helper: signed distance from a point to a plane defined by 3 reference points.
-            static double PlaneSide(double[] pt, double[] p0, double[] p1, double[] p2)
+        List<float[]> proximal, distal;
+        try
+        {
+            (proximal, distal) = await System.Threading.Tasks.Task.Run(() =>
             {
-                double ax = p1[0]-p0[0], ay = p1[1]-p0[1], az = p1[2]-p0[2];
-                double bx = p2[0]-p0[0], by = p2[1]-p0[1], bz = p2[2]-p0[2];
-                double nx = ay*bz-az*by, ny = az*bx-ax*bz, nz = ax*by-ay*bx;
-                return nx*(pt[0]-p0[0]) + ny*(pt[1]-p0[1]) + nz*(pt[2]-p0[2]);
-            }
+                // ── Step 1: Pre-filter operated side vs. contralateral ─────────────
+                // The contralateral side receives no osteotomy; it goes straight to Distal.
+                float midX    = mandibleVerts.Count > 0 ? mandibleVerts.Average(v => v[0]) : 0f;
+                float cutCX   = (float)((lc[0].X + lc[1].X + bc[0].X + bc[1].X) / 4.0);
+                float cutSide = Math.Sign(cutCX - midX);
 
-            // Build connected components of unvisited triangles
-            var compMark = new int[nTri]; // 0 = unprocessed
-            var components = new List<List<int>>();
-            for (int i = 0; i < nTri; i++)
-            {
-                if (visited[i] || compMark[i] != 0) continue;
-                var comp = new List<int>();
-                var compQ = new Queue<int>();
-                compQ.Enqueue(i); compMark[i] = components.Count + 1;
-                while (compQ.Count > 0)
+                var operated = new List<float[]>();
+                var other    = new List<float[]>();
+                for (int i = 0; i + 2 < mandibleVerts.Count; i += 3)
                 {
-                    int ti = compQ.Dequeue();
-                    comp.Add(ti);
-                    for (int edge = 0; edge < 3; edge++)
-                    {
-                        var kA = VKey(operated[ti*3+edge]);
-                        var kB = VKey(operated[ti*3+(edge+1)%3]);
-                        var ek = string.Compare(kA,kB)<0 ? kA+"|"+kB : kB+"|"+kA;
-                        if (edgeMap.TryGetValue(ek, out var nbrs))
-                            foreach (int ni in nbrs)
-                                if (!visited[ni] && compMark[ni] == 0)
-                                    { compMark[ni] = components.Count + 1; compQ.Enqueue(ni); }
-                    }
+                    float cx = (mandibleVerts[i][0] + mandibleVerts[i+1][0] + mandibleVerts[i+2][0]) / 3f;
+                    bool isOperated = Math.Sign(cx - midX) == cutSide || cx == midX;
+                    var bucket = isOperated ? operated : other;
+                    bucket.Add(mandibleVerts[i]);
+                    bucket.Add(mandibleVerts[i+1]);
+                    bucket.Add(mandibleVerts[i+2]);
                 }
-                components.Add(comp);
-            }
 
-            // Find largest component (main mandible body)
-            int largestIdx = 0;
-            for (int ci = 1; ci < components.Count; ci++)
-                if (components[ci].Count > components[largestIdx].Count) largestIdx = ci;
+                // ── Step 2: Compute the 3 BSSO cutting-plane equations ─────────────
+                //   Plane equation: nx·x + ny·y + nz·z + d = 0
+                //   Each plane is defined by 3 anatomical points; the normal direction
+                //   is determined by the cross-product of two edge vectors in that plane.
+                (double nx, double ny, double nz, double d) PlaneEq(
+                    System.Windows.Media.Media3D.Point3D p0,
+                    System.Windows.Media.Media3D.Point3D p1,
+                    System.Windows.Media.Media3D.Point3D p2)
+                {
+                    double ax = p1.X-p0.X, ay = p1.Y-p0.Y, az = p1.Z-p0.Z;
+                    double bx = p2.X-p0.X, by = p2.Y-p0.Y, bz = p2.Z-p0.Z;
+                    double nx_ = ay*bz - az*by, ny_ = az*bx - ax*bz, nz_ = ax*by - ay*bx;
+                    double len = Math.Sqrt(nx_*nx_ + ny_*ny_ + nz_*nz_);
+                    if (len < 1e-9) return (0, 0, 1, 0);
+                    nx_ /= len; ny_ /= len; nz_ /= len;
+                    return (nx_, ny_, nz_, -(nx_*p0.X + ny_*p0.Y + nz_*p0.Z));
+                }
 
-            // Compute ramus centroid (all BFS-visited triangles)
-            double ramusCx = 0, ramusCy = 0, ramusCz = 0; int ramusN = 0;
-            for (int i = 0; i < nTri; i++) { if (!visited[i]) continue; ramusCx += ctrs[i][0]; ramusCy += ctrs[i][1]; ramusCz += ctrs[i][2]; ramusN++; }
-            if (ramusN > 0) { ramusCx /= ramusN; ramusCy /= ramusN; ramusCz /= ramusN; }
+                var planes = new[]
+                {
+                    // Lingual cortex plate cut — horizontal, along the medial cortex of the ramus
+                    PlaneEq(lc[0], lc[1], lc[2]),
+                    // Buccal cortex plate cut — angled, along the lateral cortex of the ramus
+                    PlaneEq(bc[0], bc[1], bc[2]),
+                    // Sagittal marrow split — roughly vertical, separating ramus from body
+                    PlaneEq(sagTop[0], sagTop[1], sagBot[0]),
+                };
 
-            // Compute mandible body centroid (largest unvisited component)
-            double mandCx = 0, mandCy = 0, mandCz = 0;
-            foreach (int tri in components[largestIdx]) { mandCx += ctrs[tri][0]; mandCy += ctrs[tri][1]; mandCz += ctrs[tri][2]; }
-            mandCx /= components[largestIdx].Count; mandCy /= components[largestIdx].Count; mandCz /= components[largestIdx].Count;
+                // ── Step 3: True multi-plane triangle slicing ──────────────────────
+                //   MeshPlaneCut (geometry3Sharp) slices every straddling triangle
+                //   at its exact intersection edge and caps the resulting open boundary
+                //   loops with flat fills — creating proper closed meshes on both sides.
+                //   NOTE: These are infinite planes; the condyle-seed classification
+                //   in Step 4 correctly handles any spurious extra components produced
+                //   by the planes extending beyond the anatomical cut extent.
+                var components = OrthoPlanner.Core.Geometry.MeshOps.TrueSliceByMultiplePlanes(
+                    operated, planes, capEnds: true);
 
-            // Plane reference points (using condyle seed sign to determine correct sides)
-            var lingP0 = new double[]{_lc[0].X,_lc[0].Y,_lc[0].Z};
-            var lingP1 = new double[]{_lc[1].X,_lc[1].Y,_lc[1].Z};
-            var lingP2 = new double[]{_lc[2].X,_lc[2].Y,_lc[2].Z};
-            double lingualSeedSign = PlaneSide(ctrs[seed], lingP0, lingP1, lingP2);
+                // ── Step 4: Identify the condyle component ─────────────────────────
+                //   The ramus/condyle fragment has the highest mean (Y+Z) centroid:
+                //   Y is posterior (condyle is the most posterior point of the mandible)
+                //   Z is superior  (condyle is the highest point on the operated side)
+                int condyleIdx = -1; double bestScore = double.MinValue;
+                for (int ci = 0; ci < components.Count; ci++)
+                {
+                    var m = components[ci].Mesh;
+                    if (m.Count == 0) continue;
+                    double sum = 0;
+                    foreach (var v in m) sum += v[1] + v[2];   // Y + Z per vertex
+                    double avg = sum / m.Count;
+                    if (avg > bestScore) { bestScore = avg; condyleIdx = ci; }
+                }
 
-            var buccP0 = new double[]{_bc[0].X,_bc[0].Y,_bc[0].Z};
-            var buccP1 = new double[]{_bc[1].X,_bc[1].Y,_bc[1].Z};
-            var buccP2 = new double[]{_bc[2].X,_bc[2].Y,_bc[2].Z};
-            double buccalSeedSign = PlaneSide(ctrs[seed], buccP0, buccP1, buccP2);
+                // ── Step 5: Classify all components into Proximal / Distal ─────────
+                //   • Condyle component                           → Proximal (ramus)
+                //   • Components on same lingual+sagittal side    → Proximal
+                //     (isolated cortical fragments that stayed on the ramus side)
+                //   • All remaining components + contralateral    → Distal
+                bool[]? condAbove = condyleIdx >= 0
+                    ? components[condyleIdx].AbovePlanes
+                    : null;
 
-            var sagP0 = new double[]{_sagTop[0].X,_sagTop[0].Y,_sagTop[0].Z};
-            var sagP1 = new double[]{_sagTop[1].X,_sagTop[1].Y,_sagTop[1].Z};
-            var sagP2 = new double[]{_sagBot[0].X,_sagBot[0].Y,_sagBot[0].Z};
-            double sagittalSeedSign = PlaneSide(ctrs[seed], sagP0, sagP1, sagP2);
+                var prox = new List<float[]>();
+                var dist = new List<float[]>();
 
-            // Classify each orphan component:
-            // Primary: 3-plane anatomical test
-            // Fallback: nearest centroid (ramus vs mandible body)
-            for (int ci = 0; ci < components.Count; ci++)
-            {
-                if (ci == largestIdx) continue; // Main mandible body — leave as distal
-                var comp = components[ci];
+                for (int ci = 0; ci < components.Count; ci++)
+                {
+                    var comp = components[ci];
+                    bool toProximal = (ci == condyleIdx);
 
-                double cx = 0, cy = 0, cz = 0;
-                foreach (int tri in comp) { cx += ctrs[tri][0]; cy += ctrs[tri][1]; cz += ctrs[tri][2]; }
-                cx /= comp.Count; cy /= comp.Count; cz /= comp.Count;
-                var cc = new double[] { cx, cy, cz };
+                    if (!toProximal && condAbove != null)
+                    {
+                        // A component is still part of the ramus if it sits on the
+                        // same side of both the lingual and the sagittal planes.
+                        bool sameLingual  = comp.AbovePlanes[0] == condAbove[0];
+                        bool sameSagittal = comp.AbovePlanes[2] == condAbove[2];
+                        toProximal = sameLingual && sameSagittal;
+                    }
 
-                bool aboveLingual    = Math.Sign(PlaneSide(cc, lingP0, lingP1, lingP2)) == Math.Sign(lingualSeedSign);
-                bool behindBuccal    = Math.Sign(PlaneSide(cc, buccP0, buccP1, buccP2)) == Math.Sign(buccalSeedSign);
-                bool lateralSagittal = Math.Sign(PlaneSide(cc, sagP0, sagP1, sagP2)) == Math.Sign(sagittalSeedSign);
-                bool planesRamus     = (behindBuccal && lateralSagittal) || aboveLingual;
+                    (toProximal ? prox : dist).AddRange(comp.Mesh);
+                }
 
-                // Nearest-centroid fallback: closer to ramus than to mandible body?
-                double dxR = cx-ramusCx, dyR = cy-ramusCy, dzR = cz-ramusCz;
-                double dxM = cx-mandCx,  dyM = cy-mandCy,  dzM = cz-mandCz;
-                bool nearerRamus = (dxR*dxR+dyR*dyR+dzR*dzR) < (dxM*dxM+dyM*dyM+dzM*dzM);
+                dist.AddRange(other);   // contralateral half always Distal
+                return (prox, dist);
+            });
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Cut failed: {ex.Message}";
+            CutBtn.IsEnabled = true;
+            Cursor = Cursors.Arrow;
+            return;
+        }
 
-                if (planesRamus || nearerRamus)
-                    foreach (int tri in comp) visited[tri] = true; // → Ramus
-                // else stays distal
-            }
-
-
-            var proximal = new List<float[]>(); var distal = new List<float[]>();
-            for(int i = 0; i < nTri; i++) {
-                (visited[i] ? proximal : distal).Add(operated[i*3]);
-                (visited[i] ? proximal : distal).Add(operated[i*3+1]);
-                (visited[i] ? proximal : distal).Add(operated[i*3+2]);
-            }
-            distal.AddRange(other);
-            ProximalResult = proximal; DistalResult = distal;
-
-            MainGroup.Children.Remove(_boneMesh);
-            MainGroup.Children.Add(MkBone(ProximalResult, new HelixToolkit.Maths.Color4(120/255f,160/255f,240/255f,1f)));
-            MainGroup.Children.Add(MkBone(DistalResult,   new HelixToolkit.Maths.Color4(220/255f,140/255f,120/255f,1f)));
-            _lingualVis.Children.Clear(); _sagittalVis.Children.Clear(); _postArmVis.Children.Clear(); _buccalVis.Children.Clear();
-            AcceptBtn.Visibility=Visibility.Visible; CutBtn.Visibility=Visibility.Collapsed;
-            StatusText.Text="Done. Ramus=blue, Mandible=red.";
-        } finally { Cursor=Cursors.Arrow; }
+        ProximalResult = proximal;
+        DistalResult   = distal;
+        MainGroup.Children.Remove(_boneMesh);
+        MainGroup.Children.Add(MkBone(ProximalResult, new HelixToolkit.Maths.Color4(120/255f, 160/255f, 240/255f, 1f)));
+        MainGroup.Children.Add(MkBone(DistalResult,   new HelixToolkit.Maths.Color4(220/255f, 140/255f, 120/255f, 1f)));
+        _lingualVis.Children.Clear(); _sagittalVis.Children.Clear();
+        _postArmVis.Children.Clear(); _buccalVis.Children.Clear();
+        AcceptBtn.Visibility = Visibility.Visible;
+        CutBtn.Visibility    = Visibility.Collapsed;
+        StatusText.Text = $"Done — Ramus (blue): {proximal.Count/3} tris | Mandible (red): {distal.Count/3} tris";
+        Cursor = Cursors.Arrow;
     }
 
-
     private void Accept_Click(object s, RoutedEventArgs e) { Accepted=true; DialogResult=true; Close(); }
+
+
     private void Cancel_Click(object s, RoutedEventArgs e) { DialogResult=false; Close(); }
 
     // ── Utilities ────────────────────────────────────────────────────────────
