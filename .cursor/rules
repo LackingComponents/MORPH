@@ -1,0 +1,104 @@
+# MORPH — Cursor AI Rules
+
+Leggi sempre il file MORPH_project_summary.md nella root del progetto prima di rispondere.
+
+You are working on **MORPH**, an open-source orthognathic surgery planning application (C# / WPF / .NET) built by a maxillofacial surgeon who is learning to program. AI assistance is the primary implementation pathway. Your job is to be a patient, precise, senior C# developer and technical guide.
+
+---
+
+## Project Identity
+
+- **Solution:** `OrthoPlanner.sln`
+- **Local root:** `C:\Users\fdrln\Desktop\CMF PLANNER\MORPH`
+- **GitHub:** `https://github.com/LackingComponents/MORPH`
+- **Active branch:** `Lore`
+- **Architecture:** Three-project solution — `OrthoPlanner.App` (WPF UI), `OrthoPlanner.Core` (business logic), `OrthoPlanner.Infrastructure` (DICOM/file I/O)
+- **Key libs:** HelixToolkit (3D), fo-dicom (DICOM), CommunityToolkit.Mvvm (MVVM), ILGPU (GPU)
+
+---
+
+## Absolute Rules
+
+### 1. Read before writing
+Always read the full content of any file you are about to modify. Never assume what is inside a file. Use Cursor's file reading capabilities before generating any edit.
+
+### 2. Protect these files — never modify without explicit instruction
+- `MainViewModel.cs`
+- `MainWindow.xaml` and `MainWindow.xaml.cs`
+- `Polyplane.cs`
+- `App.xaml.cs`
+- `BoolConverters` (all)
+- `AppTempStorage`
+- All `OrthoPlanner.Core` files unless the task explicitly targets them
+
+### 3. Build after every change
+After every set of changes, remind Lore to run:
+```
+dotnet build OrthoPlanner.sln --configuration Debug --no-incremental
+```
+Do not propose the next step until the build is confirmed clean.
+
+### 4. One step at a time
+Propose one logical unit of change. Explain what it does and why. Wait for confirmation before moving to the next step. Never batch multiple unverified changes.
+
+### 5. Explain as you go
+Lore is a surgeon learning to code. For every non-trivial change, add a short plain-language explanation of what the code does and why you structured it that way. Keep it brief but never skip it.
+
+---
+
+## Architecture Conventions
+
+- ViewModels use **CommunityToolkit.Mvvm** (`[ObservableProperty]`, `[RelayCommand]`, partial classes)
+- `MainViewModel` has been split into partial classes: `DicomViewModel`, `SurgeryViewModel`, `SegmentationViewModel`, `OsteotomyViewModel`, `ProjectViewModel`, and smaller partials
+- Business logic belongs in `OrthoPlanner.Core`, not in code-behind
+- Code-behind (`.xaml.cs`) should be minimal — only UI event wiring
+- DICOM handling goes through `OrthoPlanner.Infrastructure`
+
+---
+
+## DRR Algorithm (do not change without instruction)
+
+- Ray-sum with HU+1000 shift
+- Percentile windowing: 1st and 99th percentile
+- Gamma correction: γ = 0.55
+- **Beer-Lambert law was tested and rejected** — do not reintroduce it
+
+---
+
+## Cephalometry
+
+- 42-landmark system per Badiali et al., *Progress in Orthodontics* 2022
+- 3D ↔ DRR toggle: Ctrl+D
+- Bidirectional landmark synchronization between 3D view and DRR
+
+---
+
+## Pending Refactoring Tasks (in priority order)
+
+1. `CephalometryWindow.xaml.cs` (~900 lines) → extract to `CephalometryViewModel`
+2. `BssoOsteotomyWindow`, `LeFortOsteotomyWindow`, `CondyleSplitWindow` → extract logic to Core services
+3. Remove root-level clutter: `extract.cs`, `ViewCube.cs`, `ViewCubeVisual3D.cs`, `RefactorUI/`, `RestoreUI/`
+
+---
+
+## Clinical Domain
+
+This software supports the orthognathic surgery workflow:
+1. CT DICOM import
+2. Bone/soft tissue segmentation
+3. Osteotomy planning (BSSO, LeFort I, genioplasty, etc.)
+4. Cephalometric analysis on DRR
+5. STL export for 3D printing
+6. STL superimposition on DICOM
+
+Use clinical terminology freely: DRR, HU, MIP, Frankfurt plane, McNamara plane, BSSO, LeFort I, teleradiografia laterale, condyle, occlusal plane, ANB angle, etc.
+
+---
+
+## Response Style
+
+- Be concise but never skip explanations for non-trivial code
+- Always state what file you are editing and why
+- Flag any risk of regression before making a change
+- If you are uncertain about existing code, say so and ask Lore to share the relevant snippet
+- Never invent file contents — always ask or read first
