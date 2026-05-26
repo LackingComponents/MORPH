@@ -218,7 +218,7 @@ public partial class LeFort1YCutWindow : Window
 
     private async void Cut_Click(object s, RoutedEventArgs e)
     {
-        StatusText.Text = "True-slicing Le Fort 1 3-piece… (may take a moment)";
+        StatusText.Text = "True-slicing Le Fort 1 3-piece... (may take a moment)";
         Cursor = Cursors.Wait;
         CutBtn.IsEnabled = false;
 
@@ -227,75 +227,54 @@ public partial class LeFort1YCutWindow : Window
         var rFT = _rFT; var rFB = _rFB;
         var lFT = _lFT; var lFB = _lFB;
         var jT  = _jT;  var jB  = _jB;
-        var sBT = _sBT; var sBB = _sBB;
+
+        // Build finite Polyplane for each arm from the exact quads drawn by Rebuild()
+        float[] F(Point3D p) => new float[]{ (float)p.X, (float)p.Y, (float)p.Z };
+        var ppRight = new Polyplane(0.0);
+        ppRight.SetMeshFromQuads(new List<(float[],float[],float[],float[])>{
+            (F(rFT), F(jT), F(jB), F(rFB))   // right arm: DrawQuad(_rFT,_jT,_jB,_rFB)
+        });
+        var ppLeft = new Polyplane(0.0);
+        ppLeft.SetMeshFromQuads(new List<(float[],float[],float[],float[])>{
+            (F(lFT), F(jT), F(jB), F(lFB))   // left arm:  DrawQuad(_lFT,_jT,_jB,_lFB)
+        });
 
         List<float[]> L, R, C;
         try
         {
-            // PlaneEq defined outside Task.Run so it can be used as a Func inside the lambda
-            Func<Point3D, Point3D, Point3D, (double nx, double ny, double nz, double d)> PlaneEq =
-                (p0, p1, p2) =>
-                {
-                    double ax = p1.X-p0.X, ay = p1.Y-p0.Y, az = p1.Z-p0.Z;
-                    double bx = p2.X-p0.X, by = p2.Y-p0.Y, bz = p2.Z-p0.Z;
-                    double nx_ = ay*bz - az*by, ny_ = az*bx - ax*bz, nz_ = ax*by - ay*bx;
-                    double len = Math.Sqrt(nx_*nx_ + ny_*ny_ + nz_*nz_);
-                    if (len < 1e-9) return (0, 1, 0, 0);
-                    nx_ /= len; ny_ /= len; nz_ /= len;
-                    return (nx_, ny_, nz_, -(nx_*p0.X + ny_*p0.Y + nz_*p0.Z));
-                };
-
             (L, R, C) = await System.Threading.Tasks.Task.Run(() =>
             {
-                var planeR = PlaneEq(rFT, jT, jB);  // Right arm plane
-                var planeL = PlaneEq(lFT, jT, jB);  // Left arm plane
+                // Reference: highest-Z vertex = cranial/central (above both arm planes)
+                double bestZ = double.MinValue;
+                double[] crRef = { 0, 0, 0 };
+                foreach (var v in maxillaVerts)
+                    if (v[2] > bestZ) { bestZ = v[2]; crRef = new double[]{ v[0], v[1], v[2] }; }
 
-                // Apply both planes sequentially via true triangle slicing
-                var components = OrthoPlanner.Core.Geometry.MeshOps.TrueSliceByMultiplePlanes(
-                    maxillaVerts,
-                    new[] { (planeR.nx, planeR.ny, planeR.nz, planeR.d),
-                            (planeL.nx, planeL.ny, planeL.nz, planeL.d) },
-                    capEnds: true);
+                // ── Step 1: cut along right arm ────────────────────────────────────
+                // "above" (same side as crRef) = the side that includes the central piece
+                // "below" = right lateral segment
+                var (central1, rightSeg) = MeshOps.TrueSliceByPolyplane(
+                    maxillaVerts, ppRight, crRef, capEnds: true);
 
-                // ── Classify components into Left / Right / Central ─────────────
-                // The junction centroid tells us which side each arm expects:
-                var juncMid = new Point3D((jT.X+jB.X)/2, (jT.Y+jB.Y)/2, (jT.Z+jB.Z)/2);
+                // ── Step 2: cut along left arm on the central+right remnant ─────────
+                // Reference stays the same (cranial direction)
+                double bestZ2 = double.MinValue;
+                double[] crRef2 = crRef;
+                foreach (var v in central1)
+                    if (v[2] > bestZ2) { bestZ2 = v[2]; crRef2 = new double[]{ v[0], v[1], v[2] }; }
 
-                var leftList    = new List<float[]>();
-                var rightList   = new List<float[]>();
-                var centralList = new List<float[]>();
+                var (centralSeg, leftSeg) = MeshOps.TrueSliceByPolyplane(
+                    central1, ppLeft, crRef2, capEnds: true);
 
-                foreach (var comp in components)
-                {
-                    if (comp.Mesh.Count == 0) continue;
+                // Verify handedness: rFT should be on the "right" side of ppRight
+                // If rightSeg is actually larger than leftSeg in X, swap left/right
+                double rSumX = rightSeg.Count > 0 ? rightSeg.Average(v => v[0]) : 0;
+                double lSumX = leftSeg.Count  > 0 ? leftSeg.Average(v  => v[0]) : 0;
+                // On a left-side maxilla the right segment has larger X; if reversed, swap
+                if (rFT.X < lFT.X && rSumX > lSumX)
+                    return (leftSeg, rightSeg, centralSeg);
 
-                    // Component centroid
-                    double sumX = 0, sumY = 0, sumZ = 0;
-                    foreach (var v in comp.Mesh) { sumX += v[0]; sumY += v[1]; sumZ += v[2]; }
-                    double inv = 1.0 / comp.Mesh.Count;
-                    var cPt = new Point3D(sumX * inv, sumY * inv, sumZ * inv);
-
-                    // Side flags relative to each plane
-                    bool aboveR = comp.AbovePlanes[0]; // true = same side as positive normal of right arm plane
-                    bool aboveL = comp.AbovePlanes[1]; // true = same side as positive normal of left arm plane
-
-                    // Determine which side of the right arm the rFT handle falls on
-                    // (to set the canonical "right" direction)
-                    double rFT_sideR = planeR.nx * rFT.X + planeR.ny * rFT.Y + planeR.nz * rFT.Z + planeR.d;
-                    double lFT_sideL = planeL.nx * lFT.X + planeL.ny * lFT.Y + planeL.nz * lFT.Z + planeL.d;
-
-                    bool isRightSide   = aboveR == (rFT_sideR >= 0);
-                    bool isLeftSide    = aboveL == (lFT_sideL >= 0);
-
-                    if (isRightSide && !isLeftSide)
-                        rightList.AddRange(comp.Mesh);
-                    else if (isLeftSide && !isRightSide)
-                        leftList.AddRange(comp.Mesh);
-                    else
-                        centralList.AddRange(comp.Mesh); // between the two planes = central piece
-                }
-
-                return (leftList, rightList, centralList);
+                return (leftSeg, rightSeg, centralSeg);
             });
         }
         catch (Exception ex)
@@ -316,10 +295,9 @@ public partial class LeFort1YCutWindow : Window
         MainGroup.Children.Add(MkMesh(C, Color.FromRgb(220, 180, 255), 1.0));
         AcceptBtn.Visibility = Visibility.Visible;
         CutBtn.IsEnabled = false;
-        StatusText.Text = $"Done — L:{L.Count/3} R:{R.Count/3} C:{C.Count/3}";
+        StatusText.Text = $"Done -- L:{L.Count/3} R:{R.Count/3} C:{C.Count/3}";
         Cursor = Cursors.Arrow;
     }
-
 
 
     private void Clear_Click(object s,RoutedEventArgs e)

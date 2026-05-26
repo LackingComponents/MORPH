@@ -242,16 +242,36 @@ public partial class LeFort1SagittalCutWindow : Window
         CutBtn.IsEnabled = false;
 
         var maxillaVerts = _maxillaVerts;
-        double xMid = _xMid;
+        double xMid = _xMid, yFront = _yFront, yBack = _yBack, zTop = _zTop, zBot = _zBot;
+
+        // Build a finite Polyplane from the exact visual plane bounds used by RebuildPlane().
+        // The plane is a rectangle at x=xMid spanning [yFront..yBack] × [zBot..zTop].
+        // Quad corners: FrontTop, BackTop, BackBot, FrontBot  (same winding as addSection())
+        float[] FT = { (float)xMid, (float)yFront, (float)zTop };
+        float[] BT = { (float)xMid, (float)yBack,  (float)zTop };
+        float[] BB = { (float)xMid, (float)yBack,  (float)zBot };
+        float[] FB = { (float)xMid, (float)yFront, (float)zBot };
+        var polyplane = new Polyplane(0.0);
+        polyplane.SetMeshFromQuads(new List<(float[], float[], float[], float[])>{
+            (FT, BT, BB, FB)
+        });
 
         List<float[]> L, R;
         try
         {
             (R, L) = await System.Threading.Tasks.Task.Run(() =>
             {
-                // Vertical sagittal plane: normal = (1,0,0), offset d = -xMid
-                // "above" (x >= xMid) => R, "below" (x < xMid) => L
-                return MeshOps.TrueSliceByPlane(maxillaVerts, 1.0, 0.0, 0.0, -xMid, capEnds: true);
+                // Reference: highest-Z vertex = superior = right of mid-sagittal (arbitrary;
+                // parity will correctly assign each side regardless of which we call "above")
+                double bestZ = double.MinValue;
+                double[] crRef = { 0, 0, 0 };
+                foreach (var v in maxillaVerts)
+                    if (v[2] > bestZ) { bestZ = v[2]; crRef = new double[]{ v[0], v[1], v[2] }; }
+
+                // TrueSliceByPolyplane: "above" = same parity as crRef = R, "below" = L
+                var (above, below) = MeshOps.TrueSliceByPolyplane(
+                    maxillaVerts, polyplane, crRef, capEnds: true);
+                return (above, below);
             });
         }
         catch (Exception ex)
@@ -272,6 +292,7 @@ public partial class LeFort1SagittalCutWindow : Window
         StatusText.Text = $"Done -- L: {L.Count/3} tris | R: {R.Count/3} tris";
         Cursor = Cursors.Arrow;
     }
+
 
     private void Clear_Click(object s, RoutedEventArgs e)
     {
