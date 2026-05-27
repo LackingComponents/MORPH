@@ -155,22 +155,40 @@ public partial class MainViewModel
         bool applyNoiseRemoval = true,
         bool enhanceThinBone = false,
         int morphologyIterations = 1,
-        bool cleanDental = false)
+        bool cleanDental = false,
+        bool confirmOverwrite = true)
     {
         if (Volume == null || IsLoading) return;
 
-        if (modelToOverwrite != null)
+        bool savedState = false;
+        void SaveStateOnce()
         {
-            var result = System.Windows.MessageBox.Show(
-                $"A {name} model already exists. Generating a new one will overwrite it. Continue?",
-                "Confirm Overwrite", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);
-
-            if (result != System.Windows.MessageBoxResult.Yes) return;
-
-            DeleteSegmentItem(modelToOverwrite);
+            if (savedState) return;
+            SaveStateForUndo();
+            savedState = true;
         }
 
-        SaveStateForUndo();
+        if (modelToOverwrite != null)
+        {
+            if (confirmOverwrite)
+            {
+                var result = System.Windows.MessageBox.Show(
+                    $"A {name} model already exists. Generating a new one will overwrite it. Continue?",
+                    "Confirm Overwrite", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);
+
+                if (result != System.Windows.MessageBoxResult.Yes) return;
+            }
+
+            SaveStateOnce();
+            Segments.Remove(modelToOverwrite);
+            if (_segVolume != null) _segVolume.ClearLabel(modelToOverwrite.Label);
+            if (HardTissueModel == modelToOverwrite) HardTissueModel = null;
+            if (SoftTissueModel == modelToOverwrite) SoftTissueModel = null;
+            if (DentalModel == modelToOverwrite) DentalModel = null;
+            RefreshCombinedModel();
+        }
+
+        SaveStateOnce();
 
         if (_segVolume == null)
             _segVolume = new SegmentationVolume(Volume);
