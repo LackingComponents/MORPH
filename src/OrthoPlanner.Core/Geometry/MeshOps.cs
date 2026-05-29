@@ -855,9 +855,9 @@ public static class MeshOps
             SplitStraddlingTriangle(v0, s0, v1, s1, v2, s2, p01, p12, p20, above, below, cutEdges);
         }
 
-        // ── 3. Cap the open cut boundary ──────────────────────────────────────────────
+        // ── 3. Cap: subdivide polyplane, PIP-test against open boundary loops ──
         if (capEnds && cutEdges.Count >= 2)
-            CapFromEdgeLoops(cutEdges, above, below);
+            CapFromPolyplaneSubdivided(cutEdges, polyplane, above, below);
 
         return (above, below);
     }
@@ -956,30 +956,31 @@ public static class MeshOps
         t.Add(v0); t.Add(v1); t.Add(v2);
     }
 
-    // ── Proper loop-based cap fill ─────────────────────────────────────────────
+    // ── Cap fill: subdivided polyplane PIP ───────────────────────────────────────────────
 
     /// <summary>
-    /// Caps the cut surface by chaining the directed cut edges into closed boundary
-    /// loops and fan-triangulating each loop around its own centroid.
+    /// Caps the open cut boundary by:
+    ///   1. Chaining the directed cut edges into closed 3-D boundary loops.
+    ///   2. Projecting those loops into the polyplane’s local 2-D frame.
+    ///   3. Recursively midpoint-subdividing every polyplane mesh triangle until
+    ///      its longest edge is &lt; <paramref name="targetEdge"/> mm.
+    ///   4. For each sub-triangle whose centroid falls inside the boundary loops
+    ///      (even-odd rule — handles holes), add it to the cap of both halves.
     ///
-    /// The cut edges already lie exactly on the polyplane surface, so the resulting
-    /// cap triangles also lie on the cut surface without requiring the polyplane mesh
-    /// geometry.  Per-loop centroids handle multiple disconnected boundary regions
-    /// (e.g. BSSO cortical islands) correctly.
-    ///
-    /// Winding convention:
-    ///   above: (cen, B, A)  — reversed boundary direction → normal faces toward below
-    ///   below: (cen, A, B)  — boundary direction → normal faces toward above
+    /// The cap therefore lies exactly on the polyplane surface and covers precisely
+    /// the area delimited by the open boundary of the cut mesh.
     /// </summary>
-
-    private static void CapFromEdgeLoops(
+    private static void CapFromPolyplaneSubdivided(
         List<(float[] A, float[] B)> cutEdges,
+        Polyplane polyplane,
         List<float[]> above,
-        List<float[]> below)
+        List<float[]> below,
+        float targetEdge = 3f)
     {
-        if (cutEdges.Count == 0) return;
+        var pverts = polyplane.MeshVertices;
+        if (cutEdges.Count == 0 || pverts.Count < 3) return;
 
-        // ── 1. Build start-vertex adjacency (key → edge indices) ─────────────────
+        // ── 1. Chain cut edges → 3-D loops ─────────────────────────────────────────
         static string VK(float[] p)
             => $"{Math.Round(p[0], 1)},{Math.Round(p[1], 1)},{Math.Round(p[2], 1)}";
 
@@ -990,67 +991,167 @@ public static class MeshOps
             if (!adj.TryGetValue(ka, out var q)) { q = new Queue<int>(); adj[ka] = q; }
             q.Enqueue(i);
         }
-
-        // ── 2. Walk edges into closed (or open) loops ───────────────────────────
-        var visited = new bool[cutEdges.Count];
-        var loops   = new List<List<float[]>>();   // each entry: polygon vertices in 3-D
-
+        var edgeVisited = new bool[cutEdges.Count];
+        var loops3D     = new List<List<float[]>>();
         for (int start = 0; start < cutEdges.Count; start++)
         {
-            if (visited[start]) continue;
-
+            if (edgeVisited[start]) continue;
             var loop = new List<float[]>();
-            int cur = start;
-
+            int cur  = start;
             for (int guard = 0; guard <= cutEdges.Count; guard++)
             {
-                if (visited[cur]) break;   // closed: walked back to start
-                visited[cur] = true;
+                if (edgeVisited[cur]) break;
+                edgeVisited[cur] = true;
                 loop.Add(cutEdges[cur].A);
-
                 string kb = VK(cutEdges[cur].B);
                 int next = -1;
                 if (adj.TryGetValue(kb, out var nexts))
-                    while (nexts.Count > 0)
-                    {
-                        int ni = nexts.Peek();
-                        if (!visited[ni]) { next = ni; break; }
-                        nexts.Dequeue();
-                    }
-
-                if (next == -1)
-                {
-                    // Open chain — include the terminal B and stop
-                    loop.Add(cutEdges[cur].B);
-                    break;
-                }
+                    while (nexts.Count > 0) { int ni = nexts.Peek(); if (!edgeVisited[ni]) { next = ni; break; } nexts.Dequeue(); }
+                if (next == -1) { loop.Add(cutEdges[cur].B); break; }
                 cur = next;
             }
+            if (loop.Count >= 3) loops3D.Add(loop);
+        }
+        if (loops3D.Count == 0) return;
 
-            if (loop.Count >= 3) loops.Add(loop);
+        // ── 2. Compute polyplane 2-D basis (N, U, V) ──────────────────────────────
+        double nx = 0, ny = 0, nz = 0;
+        for (int i = 0; i + 2 < pverts.Count; i += 3)
+        {
+            double ax=pverts[i+1][0]-pverts[i][0], ay=pverts[i+1][1]-pverts[i][1], az=pverts[i+1][2]-pverts[i][2];
+            double bx=pverts[i+2][0]-pverts[i][0], by=pverts[i+2][1]-pverts[i][1], bz=pverts[i+2][2]-pverts[i][2];
+            nx+=ay*bz-az*by; ny+=az*bx-ax*bz; nz+=ax*by-ay*bx;
+        }
+        double nlen = Math.Sqrt(nx*nx+ny*ny+nz*nz);
+        if (nlen < 1e-9) return;
+        nx /= nlen; ny /= nlen; nz /= nlen;
+
+        double ux = 1-nx*nx, uy = -nx*ny, uz = -nx*nz;
+        double ulen = Math.Sqrt(ux*ux+uy*uy+uz*uz);
+        if (ulen < 0.01) { ux=-nx*ny; uy=1-ny*ny; uz=-ny*nz; ulen=Math.Sqrt(ux*ux+uy*uy+uz*uz); }
+        ux/=ulen; uy/=ulen; uz/=ulen;
+        double vx=ny*uz-nz*uy, vy=nz*ux-nx*uz, vz=nx*uy-ny*ux;
+
+        // Origin = centroid of cut-edge endpoints
+        double ox=0, oy=0, oz=0; int nPts=0;
+        foreach (var (ea,eb) in cutEdges)
+        { ox+=ea[0]; oy+=ea[1]; oz+=ea[2]; ox+=eb[0]; oy+=eb[1]; oz+=eb[2]; nPts+=2; }
+        if (nPts>0) { ox/=nPts; oy/=nPts; oz/=nPts; }
+
+        (double u, double v) To2D(float[] p) => (
+            (p[0]-ox)*ux + (p[1]-oy)*uy + (p[2]-oz)*uz,
+            (p[0]-ox)*vx + (p[1]-oy)*vy + (p[2]-oz)*vz);
+
+        // ── 3. Project loops to 2-D ────────────────────────────────────────────────
+        var loops2D = loops3D
+            .Select(lp => lp.Select(p => To2D(p)).ToList())
+            .ToList();
+
+        // ── 4. Recursively midpoint-subdivide polyplane to targetEdge mm ───────────
+        static float EL(float[] a, float[] b)
+        { float dx=a[0]-b[0],dy=a[1]-b[1],dz=a[2]-b[2]; return MathF.Sqrt(dx*dx+dy*dy+dz*dz); }
+        static float[] Md(float[] a, float[] b)
+            => new[]{ (a[0]+b[0])*.5f,(a[1]+b[1])*.5f,(a[2]+b[2])*.5f };
+
+        var subTris = new List<float[]>(pverts);
+        for (int level = 0; level < 9; level++)
+        {
+            bool any = false;
+            var next = new List<float[]>(subTris.Count * 4);
+            for (int i = 0; i + 2 < subTris.Count; i += 3)
+            {
+                var a=subTris[i]; var b=subTris[i+1]; var c=subTris[i+2];
+                float me=Math.Max(EL(a,b),Math.Max(EL(b,c),EL(c,a)));
+                if (me > targetEdge)
+                {
+                    any=true;
+                    var mab=Md(a,b); var mbc=Md(b,c); var mca=Md(c,a);
+                    next.AddRange(new[]{ a,mab,mca }); next.AddRange(new[]{ mab,b,mbc });
+                    next.AddRange(new[]{ mca,mbc,c }); next.AddRange(new[]{ mab,mbc,mca });
+                }
+                else { next.Add(a); next.Add(b); next.Add(c); }
+            }
+            subTris = next;
+            if (!any) break;
         }
 
-        // ── 3. Fan-triangulate each loop around its own centroid ─────────────────
-        foreach (var loop in loops)
+        // ── 5. PIP even-odd test and add cap triangles ─────────────────────────────
+        static bool Pip(double pu, double pv, List<(double u, double v)> loop)
         {
-            double cx = 0, cy = 0, cz = 0;
-            foreach (var p in loop) { cx += p[0]; cy += p[1]; cz += p[2]; }
-            cx /= loop.Count; cy /= loop.Count; cz /= loop.Count;
-            var cen = new float[] { (float)cx, (float)cy, (float)cz };
-
-            int n = loop.Count;
-            for (int i = 0; i < n; i++)
+            int x=0, n=loop.Count;
+            for (int i=0;i<n;i++)
             {
-                var a = loop[i];
-                var b = loop[(i + 1) % n];
-                // above cap: boundary edge A→B → reversed winding (cen, B, A)
-                above.Add(cen); above.Add(b); above.Add(a);
-                // below cap: opposing winding (cen, A, B)
-                below.Add(cen); below.Add(a); below.Add(b);
+                var (au,av)=loop[i]; var (bu,bv)=loop[(i+1)%n];
+                if ((av<=pv&&bv>pv)||(bv<=pv&&av>pv))
+                    if (au+(pv-av)/(bv-av)*(bu-au)>pu) x++;
             }
+            return (x&1)==1;
+        }
+
+        for (int i = 0; i + 2 < subTris.Count; i += 3)
+        {
+            var pa=subTris[i]; var pb=subTris[i+1]; var pc=subTris[i+2];
+            float[] cen={ (pa[0]+pb[0]+pc[0])/3f, (pa[1]+pb[1]+pc[1])/3f, (pa[2]+pb[2]+pc[2])/3f };
+            var (cu,cv) = To2D(cen);
+            int hits = loops2D.Count(l => Pip(cu,cv,l));
+            if ((hits&1)==0) continue;
+            // above cap: reversed winding → normal faces toward below (distal)
+            above.Add(pa); above.Add(pc); above.Add(pb);
+            // below cap: normal winding → normal faces toward above (proximal)
+            below.Add(pa); below.Add(pb); below.Add(pc);
         }
     }
 
+    // ── BFS-vertex-map-guided true slice ─────────────────────────────────────────
+
+    /// <summary>
+    /// Performs a true mesh split guided by a pre-computed per-vertex side map
+    /// (typically derived from BFS triangle classification, e.g. BSSO ramus/body).
+    /// Unlike plain triangle sorting, straddling triangles are split exactly at the
+    /// polyplane intersection via <see cref="EdgeCross"/>, producing clean kerf edges.
+    /// The open cut boundary is then capped with <see cref="CapFromPolyplaneSubdivided"/>.
+    /// </summary>
+    /// <param name="soup">Input mesh as flat triangle soup.</param>
+    /// <param name="vertexSideMap">
+    ///   Map from quantised vertex key ("{x},{y},{z}" at 1 dp) to side:
+    ///   <c>true</c> = proximal/above, <c>false</c> = distal/below.
+    /// </param>
+    /// <param name="polyplane">Composite kerf polyplane for intersection + cap.</param>
+    /// <param name="capEnds">When true, caps the open cut boundaries.</param>
+    public static (List<float[]> Prox, List<float[]> Dist) SliceByVertexMap(
+        List<float[]> soup,
+        Dictionary<string, bool> vertexSideMap,
+        Polyplane polyplane,
+        bool capEnds = true)
+    {
+        var prox     = new List<float[]>();
+        var dist     = new List<float[]>();
+        var cutEdges = new List<(float[] A, float[] B)>();
+
+        static string VK2(float[] p)
+            => $"{Math.Round(p[0],1)},{Math.Round(p[1],1)},{Math.Round(p[2],1)}";
+        bool VertAbove(float[] v)
+            => vertexSideMap.TryGetValue(VK2(v), out bool s) ? s : false;
+
+        int nTri = soup.Count / 3;
+        for (int i = 0; i < nTri; i++)
+        {
+            var v0=soup[i*3]; var v1=soup[i*3+1]; var v2=soup[i*3+2];
+            bool s0=VertAbove(v0), s1=VertAbove(v1), s2=VertAbove(v2);
+            int ac=(s0?1:0)+(s1?1:0)+(s2?1:0);
+            if (ac==3) { prox.Add(v0); prox.Add(v1); prox.Add(v2); continue; }
+            if (ac==0) { dist.Add(v0); dist.Add(v1); dist.Add(v2); continue; }
+            float[]? p01=EdgeCross(polyplane,v0,v1,s0!=s1);
+            float[]? p12=EdgeCross(polyplane,v1,v2,s1!=s2);
+            float[]? p20=EdgeCross(polyplane,v2,v0,s2!=s0);
+            SplitStraddlingTriangle(v0,s0,v1,s1,v2,s2,p01,p12,p20,prox,dist,cutEdges);
+        }
+
+        if (capEnds && cutEdges.Count >= 2)
+            CapFromPolyplaneSubdivided(cutEdges, polyplane, prox, dist);
+
+        return (prox, dist);
+    }
 
     // ── Public slicing API ────────────────────────────────────────────────────
 

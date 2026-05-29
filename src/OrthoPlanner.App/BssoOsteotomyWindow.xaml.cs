@@ -554,16 +554,27 @@ public partial class BssoOsteotomyWindow : Window
                         foreach (int tri in comp) visited[tri] = true;
                 }
 
-                // ── Step 6: Assemble output lists ─────────────────────────────────
-                var prox = new List<float[]>(); var dist = new List<float[]>();
+                // ── Step 6: Build vertex→side map from BFS (majority vote) ───────────
+                // Each vertex is proximal if the majority of its adjacent triangles
+                // are BFS-proximal (visited[]).  This turns the triangle-level BFS
+                // classification into the vertex-level map needed for true splitting.
+                var vertAdj = new Dictionary<string, (int prox, int dist)>();
                 for (int i = 0; i < nTri; i++)
-                {
-                    (visited[i] ? prox : dist).Add(operated[i*3]);
-                    (visited[i] ? prox : dist).Add(operated[i*3+1]);
-                    (visited[i] ? prox : dist).Add(operated[i*3+2]);
-                }
+                    for (int j = 0; j < 3; j++)
+                    {
+                        var key = VK(operated[i*3+j]);
+                        if (!vertAdj.TryGetValue(key, out var c)) c = (0, 0);
+                        vertAdj[key] = visited[i] ? (c.prox+1, c.dist) : (c.prox, c.dist+1);
+                    }
+                var vertMap = vertAdj.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => kvp.Value.prox >= kvp.Value.dist);  // true = proximal
+
+                // ── Step 7: True mesh split with clean kerf edges + capping ──────────
+                var (prox, dist) = MeshOps.SliceByVertexMap(operated, vertMap, poly, capEnds: true);
                 dist.AddRange(other);
                 return (prox, dist);
+
 
             });
         }
