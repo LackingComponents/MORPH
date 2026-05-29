@@ -1121,6 +1121,11 @@ public static class MeshOps
             .Select(lp => lp.Select(p => To2D(p)).ToList())
             .ToList();
 
+        // Orientation check: the centroid of cut-edge endpoints is a known interior point.
+        // If PIP says it is outside, the projected boundary loop is inverted -- flip all tests.
+        var (refU,refV) = To2D(new float[]{ (float)ox,(float)oy,(float)oz });
+        bool pipInverted = (loops2D.Count(l=>Pip(refU,refV,l))&1)==0;
+
         // ── 4. Recursively midpoint-subdivide polyplane to targetEdge mm ───────────
         static float EL(float[] a, float[] b)
         { float dx=a[0]-b[0],dy=a[1]-b[1],dz=a[2]-b[2]; return MathF.Sqrt(dx*dx+dy*dy+dz*dz); }
@@ -1173,18 +1178,21 @@ public static class MeshOps
             float[] cen={ (pa[0]+pb[0]+pc[0])/3f,(pa[1]+pb[1]+pc[1])/3f,(pa[2]+pb[2]+pc[2])/3f };
             var (cnu,cnv)=To2D(cen);
             // Skip: centroid outside boundary net
-            if ((loops2D.Count(l=>Pip(cnu,cnv,l))&1)==0) return;
+            bool cenIn=(loops2D.Count(l=>Pip(cnu,cnv,l))&1)==1;
+            if (pipInverted) cenIn=!cenIn;
+            if (!cenIn) return;
             // Accept: all vertices inside, or max depth reached
-            bool allIn=(loops2D.Count(l=>Pip(au,av,l))&1)==1
-                    && (loops2D.Count(l=>Pip(bu,bv,l))&1)==1
-                    && (loops2D.Count(l=>Pip(cw,cv2,l))&1)==1;
+            bool va_in=(loops2D.Count(l=>Pip(au,av,l))&1)==1;
+            bool vb_in=(loops2D.Count(l=>Pip(bu,bv,l))&1)==1;
+            bool vc_in=(loops2D.Count(l=>Pip(cw,cv2,l))&1)==1;
+            if (pipInverted) { va_in=!va_in; vb_in=!vb_in; vc_in=!vc_in; }
+            bool allIn=va_in && vb_in && vc_in;
             if (allIn || depth>=5)
             {
                 above.Add(pa); above.Add(pc); above.Add(pb);
                 below.Add(pa); below.Add(pb); below.Add(pc);
                 return;
             }
-            // Subdivide into 4 sub-tiles and recurse
             var mab=Md2(pa,pb); var mbc=Md2(pb,pc); var mca=Md2(pc,pa);
             TryAddTile(pa,mab,mca,depth+1);
             TryAddTile(mab,pb,mbc,depth+1);
