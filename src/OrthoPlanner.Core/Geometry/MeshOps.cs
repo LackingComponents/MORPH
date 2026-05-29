@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using g3;
@@ -855,9 +855,9 @@ public static class MeshOps
             SplitStraddlingTriangle(v0, s0, v1, s1, v2, s2, p01, p12, p20, above, below, cutEdges);
         }
 
-        // ── 3. Cap: subdivide polyplane, PIP-test against open boundary loops ──
-        if (capEnds && cutEdges.Count >= 2)
-            CapFromPolyplaneSubdivided(cutEdges, polyplane, above, below);
+        // -- 3. Cap: PlanarHoleFiller on the sliced above mesh --
+        if (capEnds)
+            CapWithPlanarHoleFiller(polyplane, above, below);
 
         return (above, below);
     }
@@ -954,6 +954,80 @@ public static class MeshOps
         int n = (s0?1:0)+(s1?1:0)+(s2?1:0);
         var t = n >= 2 ? above : below;
         t.Add(v0); t.Add(v1); t.Add(v2);
+    }
+
+    // -- Cap fill: geometry3Sharp PlanarHoleFiller ----------------------------------------
+
+    private static void CapWithPlanarHoleFiller(
+        Polyplane polyplane,
+        List<float[]> above,
+        List<float[]> below)
+    {
+        if (above.Count < 9) return;
+
+        // 1. Compute polyplane average normal
+        var pverts = polyplane.MeshVertices;
+        double nx = 0, ny = 0, nz = 0;
+        for (int i = 0; i + 2 < pverts.Count; i += 3)
+        {
+            double ax = pverts[i+1][0]-pverts[i][0], ay = pverts[i+1][1]-pverts[i][1], az = pverts[i+1][2]-pverts[i][2];
+            double bx = pverts[i+2][0]-pverts[i][0], by = pverts[i+2][1]-pverts[i][1], bz = pverts[i+2][2]-pverts[i][2];
+            nx += ay*bz-az*by; ny += az*bx-ax*bz; nz += ax*by-ay*bx;
+        }
+        double nlen = Math.Sqrt(nx*nx+ny*ny+nz*nz);
+        if (nlen < 1e-9) return;
+        var planeNormal = new Vector3d(nx/nlen, ny/nlen, nz/nlen);
+
+        // 2. Build indexed mesh from above soup
+        DMesh3 dm = ToIndexedMesh(above);
+        if (dm.VertexCount < 3 || dm.TriangleCount < 1) return;
+
+        // 3. Find open boundary loops
+        MeshBoundaryLoops loops;
+        try { loops = new MeshBoundaryLoops(dm, true); }
+        catch { return; }
+        if (loops.Count == 0) return;
+
+        // Plane origin = average of boundary vertices
+        double ox = 0, oy = 0, oz = 0; int bvCount = 0;
+        foreach (var loop in loops.Loops)
+            foreach (int vi in loop.Vertices)
+            { var p = dm.GetVertex(vi); ox += p.x; oy += p.y; oz += p.z; bvCount++; }
+        if (bvCount == 0) return;
+        var origin = new Vector3d(ox/bvCount, oy/bvCount, oz/bvCount);
+
+        // 4. Fill each boundary loop with PlanarHoleFiller
+        var capTris = new List<float[]>();
+        foreach (var loop in loops.Loops)
+        {
+            int trisBefore = dm.TriangleCount;
+            try
+            {
+                var filler = new PlanarHoleFiller(dm);
+                filler.SetPlane(origin, planeNormal);
+                filler.AddFillLoop(loop);
+                if (!filler.Fill()) continue;
+            }
+            catch { continue; }
+
+            foreach (int tid in dm.TriangleIndices())
+            {
+                if (tid < trisBefore) continue;
+                var t = dm.GetTriangle(tid);
+                var va = dm.GetVertex(t.a); var vb = dm.GetVertex(t.b); var vc = dm.GetVertex(t.c);
+                capTris.Add(new float[]{ (float)va.x,(float)va.y,(float)va.z });
+                capTris.Add(new float[]{ (float)vb.x,(float)vb.y,(float)vb.z });
+                capTris.Add(new float[]{ (float)vc.x,(float)vc.y,(float)vc.z });
+            }
+        }
+
+        // 5. Append cap to both halves (reversed winding for below)
+        for (int i = 0; i + 2 < capTris.Count; i += 3)
+        {
+            var pa=capTris[i]; var pb=capTris[i+1]; var pc=capTris[i+2];
+            above.Add(pa); above.Add(pb); above.Add(pc);
+            below.Add(pa); below.Add(pc); below.Add(pb);
+        }
     }
 
     // ── Cap fill: subdivided polyplane PIP ───────────────────────────────────────────────
@@ -1147,8 +1221,8 @@ public static class MeshOps
             SplitStraddlingTriangle(v0,s0,v1,s1,v2,s2,p01,p12,p20,prox,dist,cutEdges);
         }
 
-        if (capEnds && cutEdges.Count >= 2)
-            CapFromPolyplaneSubdivided(cutEdges, polyplane, prox, dist);
+        if (capEnds)
+            CapWithPlanarHoleFiller(polyplane, prox, dist);
 
         return (prox, dist);
     }
