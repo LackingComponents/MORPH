@@ -375,7 +375,7 @@ public partial class BssoOsteotomyWindow : Window
 
     private async void Cut_Click(object s, RoutedEventArgs e)
     {
-        StatusText.Text = "True-slicing BSSO osteotomy… (may take a moment)";
+        StatusText.Text = "Cutting BSSO osteotomy…";
         Cursor = Cursors.Wait;
         CutBtn.IsEnabled = false;
 
@@ -393,17 +393,7 @@ public partial class BssoOsteotomyWindow : Window
         {
             (proximal, distal) = await System.Threading.Tasks.Task.Run(() =>
             {
-                // ── Helpers ─────────────────────────────────────────────────────
                 float[] Fv3(Point3D p) => new float[] { (float)p.X, (float)p.Y, (float)p.Z };
-
-                // Build a Polyplane from a list of quads (each quad = 4 corners, CCW).
-                // Each quad is split into 2 triangles and stored in the Polyplane mesh.
-                Polyplane MakePP(List<(float[], float[], float[], float[])> quads)
-                {
-                    var pp = new Polyplane(0.0);
-                    pp.SetMeshFromQuads(quads);
-                    return pp;
-                }
 
                 // ── Step 1: Pre-filter operated vs. contralateral side ───────────
                 float midX   = mandibleVerts.Count > 0 ? mandibleVerts.Average(v => v[0]) : 0f;
@@ -419,77 +409,162 @@ public partial class BssoOsteotomyWindow : Window
                     (isOp ? operated : other).AddRange(new[]{ mandibleVerts[i], mandibleVerts[i+1], mandibleVerts[i+2] });
                 }
 
-                // ── Step 2: Build the three finite polyplanes ────────────────────
-                //  2a. Lingual cortex — quad: lc[0] lc[1] lc[2] lc[3]
-                var ppLingual = MakePP(new List<(float[],float[],float[],float[])>{
-                    (Fv3(lc[0]), Fv3(lc[1]), Fv3(lc[2]), Fv3(lc[3]))
-                });
+                // ── Step 2: Build the composite kerf polyplane ────────────────────
+                // All quads matching RebuildPlanes() — used as a BFS edge barrier.
+                var quads = new List<(float[], float[], float[], float[])>();
+                quads.Add((Fv3(lc[0]),     Fv3(lc[1]),     Fv3(lc[2]),     Fv3(lc[3])));
+                quads.Add((Fv3(bc[0]),     Fv3(bc[1]),     Fv3(bc[2]),     Fv3(bc[3])));
+                quads.Add((Fv3(sagTop[0]), Fv3(sagTop[1]), Fv3(sagBot[1]), Fv3(sagBot[0])));
+                quads.Add((Fv3(sagTop[1]), Fv3(sagTop[2]), Fv3(bc[1]),     Fv3(sagBot[1])));
+                quads.Add((Fv3(sagTop[2]), Fv3(bc[0]),     Fv3(bc[1]),     Fv3(bc[1])));
+                quads.Add((Fv3(sagTop[0]), Fv3(postTip),   Fv3(armBot),    Fv3(sagBot[0])));
+                var poly = new Polyplane(0.0);
+                poly.SetMeshFromQuads(quads);
 
-                //  2b. Buccal cortex — quad: bc[0] bc[1] bc[2] bc[3]
-                var ppBuccal = MakePP(new List<(float[],float[],float[],float[])>{
-                    (Fv3(bc[0]), Fv3(bc[1]), Fv3(bc[2]), Fv3(bc[3]))
-                });
+                // ── Step 3: Triangle centroids + edge adjacency map ───────────────
+                int nTri = operated.Count / 3;
+                var ctrs = new double[nTri][];
+                for (int i = 0; i < nTri; i++)
+                    ctrs[i] = new double[] {
+                        (operated[i*3][0]+operated[i*3+1][0]+operated[i*3+2][0])/3.0,
+                        (operated[i*3][1]+operated[i*3+1][1]+operated[i*3+2][1])/3.0,
+                        (operated[i*3][2]+operated[i*3+1][2]+operated[i*3+2][2])/3.0 };
 
-                //  2c. Sagittal marrow split — compound patch exactly matching RebuildPlanes():
-                //      Quad S1: sagTop[0] sagTop[1] sagBot[1] sagBot[0]
-                //      Quad Bridge: sagTop[1] sagTop[2] bc[1] sagBot[1]
-                //      Triangle: sagTop[2] bc[0] bc[1]
-                var ppSagittal = MakePP(new List<(float[],float[],float[],float[])>{
-                    (Fv3(sagTop[0]), Fv3(sagTop[1]), Fv3(sagBot[1]), Fv3(sagBot[0])),
-                    (Fv3(sagTop[1]), Fv3(sagTop[2]), Fv3(bc[1]),     Fv3(sagBot[1]))
-                });
-                // Add the closing triangle as a degenerate quad (d == c)
-                ppSagittal.MeshVertices.Add(Fv3(sagTop[2]));
-                ppSagittal.MeshVertices.Add(Fv3(bc[0]));
-                ppSagittal.MeshVertices.Add(Fv3(bc[1]));
+                var edgeMap = new Dictionary<string, List<int>>(nTri * 2);
+                static string VK(float[] v) => $"{Math.Round(v[0],1)},{Math.Round(v[1],1)},{Math.Round(v[2],1)}";
+                for (int i = 0; i < nTri; i++)
+                    for (int edge = 0; edge < 3; edge++)
+                    {
+                        var kA = VK(operated[i*3+edge]);
+                        var kB = VK(operated[i*3+(edge+1)%3]);
+                        var ek = string.Compare(kA,kB)<0 ? kA+"|"+kB : kB+"|"+kA;
+                        if (!edgeMap.TryGetValue(ek, out var lst)) { lst = new List<int>(2); edgeMap[ek]=lst; }
+                        lst.Add(i);
+                    }
 
-                // ── Step 3: Determine "above" reference for each polyplane ───────
-                // For parity classification we need a point firmly on the "proximal" side.
-                // The condyle tip (highest Z on the operated side) works well.
-                double bestZ = double.MinValue;
-                double[] condRef = { 0, 0, 0 };
-                foreach (var v in operated)
-                    if (v[2] > bestZ) { bestZ = v[2]; condRef = new double[]{ v[0], v[1], v[2] }; }
+                // ── Step 4: BFS from condyle seed — stop at kerf barrier ──────────
+                int seed = -1; float bestScore = float.MinValue;
+                for (int i = 0; i < nTri; i++)
+                {
+                    float score = (float)(ctrs[i][1] + ctrs[i][2]); // Y+ posterior, Z+ superior
+                    if (score > bestScore) { bestScore = score; seed = i; }
+                }
 
-                // ── Step 4: Apply lingual cut — separates ramus from body ────────
-                // "above" = proximal (condyle side), "below" = distal (body)
-                var (lingualProx, lingualDist) = MeshOps.TrueSliceByPolyplane(
-                    operated, ppLingual, condRef, capEnds: true);
+                var visited = new bool[nTri];
+                if (seed >= 0)
+                {
+                    var q = new Queue<int>(); q.Enqueue(seed); visited[seed] = true;
+                    while (q.Count > 0)
+                    {
+                        int ti = q.Dequeue();
+                        for (int edge = 0; edge < 3; edge++)
+                        {
+                            var kA = VK(operated[ti*3+edge]);
+                            var kB = VK(operated[ti*3+(edge+1)%3]);
+                            var ek = string.Compare(kA,kB)<0 ? kA+"|"+kB : kB+"|"+kA;
+                            if (edgeMap.TryGetValue(ek, out var nbrs))
+                                foreach (int ni in nbrs) if (!visited[ni])
+                                {
+                                    if (poly.SegmentIntersects(ctrs[ti], ctrs[ni])) continue;
+                                    visited[ni] = true; q.Enqueue(ni);
+                                }
+                        }
+                    }
+                }
 
-                // ── Step 5: Apply buccal cut on the proximal fragment ────────────
-                // Reclassify condRef against the now-cut mesh
-                double bestZ2 = double.MinValue;
-                double[] condRef2 = condRef;
-                foreach (var v in lingualProx)
-                    if (v[2] > bestZ2) { bestZ2 = v[2]; condRef2 = new double[]{ v[0], v[1], v[2] }; }
+                // ── Step 5: Floater reclassification (orphan components) ──────────
+                static double PlaneSide(double[] pt, double[] p0, double[] p1, double[] p2)
+                {
+                    double ax=p1[0]-p0[0],ay=p1[1]-p0[1],az=p1[2]-p0[2];
+                    double bx=p2[0]-p0[0],by=p2[1]-p0[1],bz=p2[2]-p0[2];
+                    double nx=ay*bz-az*by,ny=az*bx-ax*bz,nz=ax*by-ay*bx;
+                    return nx*(pt[0]-p0[0])+ny*(pt[1]-p0[1])+nz*(pt[2]-p0[2]);
+                }
 
-                var (buccalProxA, buccalSplit) = MeshOps.TrueSliceByPolyplane(
-                    lingualProx, ppBuccal, condRef2, capEnds: true);
+                var compMark = new int[nTri];
+                var components = new List<List<int>>();
+                for (int i = 0; i < nTri; i++)
+                {
+                    if (visited[i] || compMark[i] != 0) continue;
+                    var comp = new List<int>(); var compQ = new Queue<int>();
+                    compQ.Enqueue(i); compMark[i] = components.Count + 1;
+                    while (compQ.Count > 0)
+                    {
+                        int ti = compQ.Dequeue(); comp.Add(ti);
+                        for (int edge = 0; edge < 3; edge++)
+                        {
+                            var kA = VK(operated[ti*3+edge]);
+                            var kB = VK(operated[ti*3+(edge+1)%3]);
+                            var ek = string.Compare(kA,kB)<0 ? kA+"|"+kB : kB+"|"+kA;
+                            if (edgeMap.TryGetValue(ek, out var nbrs))
+                                foreach (int ni in nbrs)
+                                    if (!visited[ni] && compMark[ni]==0)
+                                    { compMark[ni]=components.Count+1; compQ.Enqueue(ni); }
+                        }
+                    }
+                    components.Add(comp);
+                }
 
-                // ── Step 6: Apply sagittal cut on the buccal fragment ────────────
-                // The sagittal cut separates the ramus anterior cortex from the
-                // posterior condyle neck.
-                double bestZ3 = double.MinValue;
-                double[] condRef3 = condRef;
-                foreach (var v in buccalSplit)
-                    if (v[2] > bestZ3) { bestZ3 = v[2]; condRef3 = new double[]{ v[0], v[1], v[2] }; }
+                int largestIdx = 0;
+                for (int ci = 1; ci < components.Count; ci++)
+                    if (components[ci].Count > components[largestIdx].Count) largestIdx = ci;
 
-                var (sagProx, sagDist) = MeshOps.TrueSliceByPolyplane(
-                    buccalSplit, ppSagittal, condRef3, capEnds: true);
+                double ramusCx=0,ramusCy=0,ramusCz=0; int ramusN=0;
+                for (int i=0;i<nTri;i++) { if(!visited[i])continue; ramusCx+=ctrs[i][0]; ramusCy+=ctrs[i][1]; ramusCz+=ctrs[i][2]; ramusN++; }
+                if (ramusN>0) { ramusCx/=ramusN; ramusCy/=ramusN; ramusCz/=ramusN; }
 
-                // ── Step 7: Assemble proximal and distal ─────────────────────────
-                // Proximal = condyle neck (buccalProxA) + sagittal proximal fragment (sagProx)
-                // Distal   = lingual body (lingualDist) + sagittal distal (sagDist)
-                var prox = new List<float[]>(buccalProxA.Count + sagProx.Count);
-                prox.AddRange(buccalProxA);
-                prox.AddRange(sagProx);
+                double mandCx=0,mandCy=0,mandCz=0;
+                foreach (int tri in components[largestIdx]) { mandCx+=ctrs[tri][0]; mandCy+=ctrs[tri][1]; mandCz+=ctrs[tri][2]; }
+                mandCx/=components[largestIdx].Count; mandCy/=components[largestIdx].Count; mandCz/=components[largestIdx].Count;
 
-                var dist = new List<float[]>(lingualDist.Count + sagDist.Count + other.Count);
-                dist.AddRange(lingualDist);
-                dist.AddRange(sagDist);
-                dist.AddRange(other);   // contralateral half always Distal
+                var lingP0=new double[]{lc[0].X,lc[0].Y,lc[0].Z};
+                var lingP1=new double[]{lc[1].X,lc[1].Y,lc[1].Z};
+                var lingP2=new double[]{lc[2].X,lc[2].Y,lc[2].Z};
+                double lingualSeedSign = PlaneSide(ctrs[seed], lingP0, lingP1, lingP2);
 
+                var buccP0=new double[]{bc[0].X,bc[0].Y,bc[0].Z};
+                var buccP1=new double[]{bc[1].X,bc[1].Y,bc[1].Z};
+                var buccP2=new double[]{bc[2].X,bc[2].Y,bc[2].Z};
+                double buccalSeedSign = PlaneSide(ctrs[seed], buccP0, buccP1, buccP2);
+
+                var sagP0=new double[]{sagTop[0].X,sagTop[0].Y,sagTop[0].Z};
+                var sagP1=new double[]{sagTop[1].X,sagTop[1].Y,sagTop[1].Z};
+                var sagP2=new double[]{sagBot[0].X,sagBot[0].Y,sagBot[0].Z};
+                double sagittalSeedSign = PlaneSide(ctrs[seed], sagP0, sagP1, sagP2);
+
+                for (int ci = 0; ci < components.Count; ci++)
+                {
+                    if (ci == largestIdx) continue;
+                    var comp = components[ci];
+                    double cx=0,cy=0,cz=0;
+                    foreach (int tri in comp) { cx+=ctrs[tri][0]; cy+=ctrs[tri][1]; cz+=ctrs[tri][2]; }
+                    cx/=comp.Count; cy/=comp.Count; cz/=comp.Count;
+                    var cc = new double[]{cx,cy,cz};
+
+                    bool aboveLingual    = Math.Sign(PlaneSide(cc,lingP0,lingP1,lingP2)) == Math.Sign(lingualSeedSign);
+                    bool behindBuccal    = Math.Sign(PlaneSide(cc,buccP0,buccP1,buccP2)) == Math.Sign(buccalSeedSign);
+                    bool lateralSagittal = Math.Sign(PlaneSide(cc,sagP0, sagP1, sagP2))  == Math.Sign(sagittalSeedSign);
+                    bool planesRamus     = (behindBuccal && lateralSagittal) || aboveLingual;
+
+                    double dxR=cx-ramusCx,dyR=cy-ramusCy,dzR=cz-ramusCz;
+                    double dxM=cx-mandCx, dyM=cy-mandCy, dzM=cz-mandCz;
+                    bool nearerRamus = (dxR*dxR+dyR*dyR+dzR*dzR) < (dxM*dxM+dyM*dyM+dzM*dzM);
+
+                    if (planesRamus || nearerRamus)
+                        foreach (int tri in comp) visited[tri] = true;
+                }
+
+                // ── Step 6: Assemble output lists ─────────────────────────────────
+                var prox = new List<float[]>(); var dist = new List<float[]>();
+                for (int i = 0; i < nTri; i++)
+                {
+                    (visited[i] ? prox : dist).Add(operated[i*3]);
+                    (visited[i] ? prox : dist).Add(operated[i*3+1]);
+                    (visited[i] ? prox : dist).Add(operated[i*3+2]);
+                }
+                dist.AddRange(other);
                 return (prox, dist);
+
             });
         }
         catch (Exception ex)
