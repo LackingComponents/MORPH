@@ -855,9 +855,9 @@ public static class MeshOps
             SplitStraddlingTriangle(v0, s0, v1, s1, v2, s2, p01, p12, p20, above, below, cutEdges);
         }
 
-        // ── 3. Cap: use polyplane mesh triangles that lie inside the cut region ──
+        // ── 3. Cap the open cut boundary ──────────────────────────────────────────────
         if (capEnds && cutEdges.Count >= 2)
-            CapFromPolyplaneIntersection(cutEdges, polyplane, above, below);
+            CapFromEdgeLoops(cutEdges, above, below);
 
         return (above, below);
     }
@@ -959,70 +959,29 @@ public static class MeshOps
     // ── Proper loop-based cap fill ─────────────────────────────────────────────
 
     /// <summary>
-    /// Builds cap triangles from directed cut edges by:
-    ///   1. Chaining edges into closed boundary loops (one per disconnected region).
-    ///   2. Fan-triangulating each loop around its centroid.
-    ///   3. Adding the cap to both halves with opposing windings.
+    /// Caps the cut surface by chaining the directed cut edges into closed boundary
+    /// loops and fan-triangulating each loop around its own centroid.
     ///
-    /// Convention: each (A, B) in cutEdges is oriented as the boundary of "above",
-    /// so the cap for "above" uses the reversed sequence: (centroid, B, A) per edge.
-    /// The cap for "below" uses (centroid, A, B).
+    /// The cut edges already lie exactly on the polyplane surface, so the resulting
+    /// cap triangles also lie on the cut surface without requiring the polyplane mesh
+    /// geometry.  Per-loop centroids handle multiple disconnected boundary regions
+    /// (e.g. BSSO cortical islands) correctly.
+    ///
+    /// Winding convention:
+    ///   above: (cen, B, A)  — reversed boundary direction → normal faces toward below
+    ///   below: (cen, A, B)  — boundary direction → normal faces toward above
     /// </summary>
-    /// <summary>
-    /// Caps the cut surface by treating the <paramref name="polyplane"/> mesh as the cap.
-    /// Algorithm:
-    ///   1. Project the directed cut edges onto the polyplane's 2-D local coordinate system
-    ///      and chain them into closed boundary loops.
-    ///   2. For each triangle in the polyplane mesh, test whether its centroid is inside
-    ///      the cut region using 2-D ray-casting (point-in-polygon against the boundary loops).
-    ///   3. Inside triangles are added verbatim to both halves with opposing windings,
-    ///      so the cap lies exactly on the polyplane surface.
-    /// </summary>
-    private static void CapFromPolyplaneIntersection(
+
+    private static void CapFromEdgeLoops(
         List<(float[] A, float[] B)> cutEdges,
-        Polyplane polyplane,
         List<float[]> above,
         List<float[]> below)
     {
-        var pverts = polyplane.MeshVertices;
-        if (cutEdges.Count == 0 || pverts.Count < 3) return;
+        if (cutEdges.Count == 0) return;
 
-        // ── 1. Compute polyplane local 2-D basis (average normal + Graham-Schmidt) ──
-        double nx = 0, ny = 0, nz = 0;
-        for (int i = 0; i + 2 < pverts.Count; i += 3)
-        {
-            double ax = pverts[i+1][0]-pverts[i][0], ay = pverts[i+1][1]-pverts[i][1], az = pverts[i+1][2]-pverts[i][2];
-            double bx = pverts[i+2][0]-pverts[i][0], by = pverts[i+2][1]-pverts[i][1], bz = pverts[i+2][2]-pverts[i][2];
-            nx += ay*bz - az*by; ny += az*bx - ax*bz; nz += ax*by - ay*bx;
-        }
-        double nlen = Math.Sqrt(nx*nx + ny*ny + nz*nz);
-        if (nlen < 1e-9) return;          // degenerate polyplane
-        nx /= nlen; ny /= nlen; nz /= nlen;
-
-        // U: project world-X onto the plane; fall back to world-Y if near-parallel
-        double ux = 1 - nx*nx, uy = -nx*ny, uz = -nx*nz;
-        double ulen = Math.Sqrt(ux*ux + uy*uy + uz*uz);
-        if (ulen < 0.01) { ux = -nx*ny; uy = 1-ny*ny; uz = -ny*nz; ulen = Math.Sqrt(ux*ux+uy*uy+uz*uz); }
-        ux /= ulen; uy /= ulen; uz /= ulen;
-
-        // V = N × U  (right-handed, in-plane perpendicular to U)
-        double vx = ny*uz - nz*uy, vy = nz*ux - nx*uz, vz = nx*uy - ny*ux;
-
-        // Origin: centroid of all cut-edge endpoints
-        double ox = 0, oy = 0, oz = 0;
-        foreach (var (a, b) in cutEdges)
-        { ox += a[0]+b[0]; oy += a[1]+b[1]; oz += a[2]+b[2]; }
-        int np = cutEdges.Count * 2;
-        ox /= np; oy /= np; oz /= np;
-
-        (double u, double v) To2D(float[] p) => (
-            (p[0]-ox)*ux + (p[1]-oy)*uy + (p[2]-oz)*uz,
-            (p[0]-ox)*vx + (p[1]-oy)*vy + (p[2]-oz)*vz
-        );
-
-        // ── 2. Chain cut edges into 2-D boundary loops ────────────────────────
+        // ── 1. Build start-vertex adjacency (key → edge indices) ─────────────────
         static string VK(float[] p)
-            => $"{Math.Round(p[0],1)},{Math.Round(p[1],1)},{Math.Round(p[2],1)}";
+            => $"{Math.Round(p[0], 1)},{Math.Round(p[1], 1)},{Math.Round(p[2], 1)}";
 
         var adj = new Dictionary<string, Queue<int>>();
         for (int i = 0; i < cutEdges.Count; i++)
@@ -1032,21 +991,22 @@ public static class MeshOps
             q.Enqueue(i);
         }
 
+        // ── 2. Walk edges into closed (or open) loops ───────────────────────────
         var visited = new bool[cutEdges.Count];
-        // Each loop: list of 2-D points (u,v)
-        var loops2D = new List<List<(double u, double v)>>();
+        var loops   = new List<List<float[]>>();   // each entry: polygon vertices in 3-D
 
         for (int start = 0; start < cutEdges.Count; start++)
         {
             if (visited[start]) continue;
-            var loop = new List<(double, double)>();
+
+            var loop = new List<float[]>();
             int cur = start;
 
             for (int guard = 0; guard <= cutEdges.Count; guard++)
             {
-                if (visited[cur]) break;
+                if (visited[cur]) break;   // closed: walked back to start
                 visited[cur] = true;
-                loop.Add(To2D(cutEdges[cur].A));
+                loop.Add(cutEdges[cur].A);
 
                 string kb = VK(cutEdges[cur].B);
                 int next = -1;
@@ -1058,65 +1018,39 @@ public static class MeshOps
                         nexts.Dequeue();
                     }
 
-                if (next == -1) { loop.Add(To2D(cutEdges[cur].B)); break; }
+                if (next == -1)
+                {
+                    // Open chain — include the terminal B and stop
+                    loop.Add(cutEdges[cur].B);
+                    break;
+                }
                 cur = next;
             }
-            if (loop.Count >= 3) loops2D.Add(loop);
+
+            if (loop.Count >= 3) loops.Add(loop);
         }
 
-        if (loops2D.Count == 0) return;
-
-        // ── 3. 2-D point-in-polygon (ray casting) ────────────────────────────
-        static bool Pip(double pu, double pv, List<(double u, double v)> poly)
+        // ── 3. Fan-triangulate each loop around its own centroid ─────────────────
+        foreach (var loop in loops)
         {
-            int crossings = 0;
-            int n = poly.Count;
+            double cx = 0, cy = 0, cz = 0;
+            foreach (var p in loop) { cx += p[0]; cy += p[1]; cz += p[2]; }
+            cx /= loop.Count; cy /= loop.Count; cz /= loop.Count;
+            var cen = new float[] { (float)cx, (float)cy, (float)cz };
+
+            int n = loop.Count;
             for (int i = 0; i < n; i++)
             {
-                var (au, av) = poly[i];
-                var (bu, bv) = poly[(i + 1) % n];
-                if ((av <= pv && bv > pv) || (bv <= pv && av > pv))
-                {
-                    double t = (pv - av) / (bv - av);
-                    if (au + t * (bu - au) > pu) crossings++;
-                }
+                var a = loop[i];
+                var b = loop[(i + 1) % n];
+                // above cap: boundary edge A→B → reversed winding (cen, B, A)
+                above.Add(cen); above.Add(b); above.Add(a);
+                // below cap: opposing winding (cen, A, B)
+                below.Add(cen); below.Add(a); below.Add(b);
             }
-            return (crossings & 1) == 1;
-        }
-
-        bool InsideCut(double pu, double pv)
-        {
-            // A point is inside the cut if it's inside an odd number of loops.
-            // For simple cases there's one loop; for complex cases (cortical islands)
-            // there may be several — we use the winding rule implicitly via XOR.
-            int inside = 0;
-            foreach (var loop in loops2D)
-                if (Pip(pu, pv, loop)) inside++;
-            return (inside & 1) == 1;
-        }
-
-        // ── 4. Select polyplane triangles whose centroids are inside the cut ──
-        for (int i = 0; i + 2 < pverts.Count; i += 3)
-        {
-            var pa = pverts[i]; var pb = pverts[i+1]; var pc = pverts[i+2];
-
-            // Centroid of this polyplane triangle
-            float[] cen = {
-                (pa[0]+pb[0]+pc[0]) / 3f,
-                (pa[1]+pb[1]+pc[1]) / 3f,
-                (pa[2]+pb[2]+pc[2]) / 3f
-            };
-            var (cu, cv) = To2D(cen);
-
-            if (!InsideCut(cu, cv)) continue;
-
-            // The polyplane triangle lies on the cut surface.
-            // above cap: outward normal faces downward (toward below) → reversed winding
-            above.Add(pa); above.Add(pc); above.Add(pb);
-            // below cap: normal faces upward (toward above)
-            below.Add(pa); below.Add(pb); below.Add(pc);
         }
     }
+
 
     // ── Public slicing API ────────────────────────────────────────────────────
 
