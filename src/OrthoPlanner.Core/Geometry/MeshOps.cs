@@ -1162,26 +1162,38 @@ public static class MeshOps
             return (x&1)==1;
         }
 
-        for (int i = 0; i + 2 < subTris.Count; i += 3)
+        // -- 5. Adaptive PIP: tiles fully inside accept; boundary tiles subdivide --
+        // At depth 5, sub-tile edge is ~targetEdge/32 < 0.1 mm -- sub-clinical.
+        static float[] Md2(float[] a, float[] b)
+            => new[]{ (a[0]+b[0])*.5f,(a[1]+b[1])*.5f,(a[2]+b[2])*.5f };
+
+        void TryAddTile(float[] pa, float[] pb, float[] pc, int depth)
         {
-            var pa=subTris[i]; var pb=subTris[i+1]; var pc=subTris[i+2];
-            // All 3 vertices AND centroid must be inside every boundary loop check.
-            // This strict test eliminates tile overhang at the cut boundary edge.
-            var (au,av)=To2D(pa); var (bu,bv)=To2D(pb); var (cu2,cv2)=To2D(pc);
+            var (au,av)=To2D(pa); var (bu,bv)=To2D(pb); var (cw,cv2)=To2D(pc);
             float[] cen={ (pa[0]+pb[0]+pc[0])/3f,(pa[1]+pb[1]+pc[1])/3f,(pa[2]+pb[2]+pc[2])/3f };
             var (cnu,cnv)=To2D(cen);
-            // Count boundary loops enclosing centroid (odd = inside net)
-            int hits = loops2D.Count(l => Pip(cnu,cnv,l));
-            if ((hits&1)==0) continue;  // centroid not inside
-            // Reject tile if any vertex is outside (would overflow boundary)
-            if (loops2D.Count(l => Pip(au,av,l))%2==0) continue;
-            if (loops2D.Count(l => Pip(bu,bv,l))%2==0) continue;
-            if (loops2D.Count(l => Pip(cu2,cv2,l))%2==0) continue;
-            // above cap: reversed winding
-            above.Add(pa); above.Add(pc); above.Add(pb);
-            // below cap: normal winding
-            below.Add(pa); below.Add(pb); below.Add(pc);
+            // Skip: centroid outside boundary net
+            if ((loops2D.Count(l=>Pip(cnu,cnv,l))&1)==0) return;
+            // Accept: all vertices inside, or max depth reached
+            bool allIn=(loops2D.Count(l=>Pip(au,av,l))&1)==1
+                    && (loops2D.Count(l=>Pip(bu,bv,l))&1)==1
+                    && (loops2D.Count(l=>Pip(cw,cv2,l))&1)==1;
+            if (allIn || depth>=5)
+            {
+                above.Add(pa); above.Add(pc); above.Add(pb);
+                below.Add(pa); below.Add(pb); below.Add(pc);
+                return;
+            }
+            // Subdivide into 4 sub-tiles and recurse
+            var mab=Md2(pa,pb); var mbc=Md2(pb,pc); var mca=Md2(pc,pa);
+            TryAddTile(pa,mab,mca,depth+1);
+            TryAddTile(mab,pb,mbc,depth+1);
+            TryAddTile(mca,mbc,pc,depth+1);
+            TryAddTile(mab,mbc,mca,depth+1);
         }
+
+        for (int i=0; i+2<subTris.Count; i+=3)
+            TryAddTile(subTris[i],subTris[i+1],subTris[i+2],0);
     }
 
 
