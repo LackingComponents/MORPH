@@ -855,9 +855,9 @@ public static class MeshOps
             SplitStraddlingTriangle(v0, s0, v1, s1, v2, s2, p01, p12, p20, above, below, cutEdges);
         }
 
-        // -- 3. Cap: PlanarHoleFiller on the sliced above mesh --
-        if (capEnds)
-            CapWithPlanarHoleFiller(polyplane, above, below);
+        // -- 3. Cap: subdivide polyplane, PIP-test against open boundary loops --
+        if (capEnds && cutEdges.Count >= 2)
+            CapFromPolyplaneSubdivided(cutEdges, polyplane, above, below);
 
         return (above, below);
     }
@@ -1165,16 +1165,25 @@ public static class MeshOps
         for (int i = 0; i + 2 < subTris.Count; i += 3)
         {
             var pa=subTris[i]; var pb=subTris[i+1]; var pc=subTris[i+2];
-            float[] cen={ (pa[0]+pb[0]+pc[0])/3f, (pa[1]+pb[1]+pc[1])/3f, (pa[2]+pb[2]+pc[2])/3f };
-            var (cu,cv) = To2D(cen);
-            int hits = loops2D.Count(l => Pip(cu,cv,l));
-            if ((hits&1)==0) continue;
-            // above cap: reversed winding → normal faces toward below (distal)
+            // All 3 vertices AND centroid must be inside every boundary loop check.
+            // This strict test eliminates tile overhang at the cut boundary edge.
+            var (au,av)=To2D(pa); var (bu,bv)=To2D(pb); var (cu2,cv2)=To2D(pc);
+            float[] cen={ (pa[0]+pb[0]+pc[0])/3f,(pa[1]+pb[1]+pc[1])/3f,(pa[2]+pb[2]+pc[2])/3f };
+            var (cnu,cnv)=To2D(cen);
+            // Count boundary loops enclosing centroid (odd = inside net)
+            int hits = loops2D.Count(l => Pip(cnu,cnv,l));
+            if ((hits&1)==0) continue;  // centroid not inside
+            // Reject tile if any vertex is outside (would overflow boundary)
+            if (loops2D.Count(l => Pip(au,av,l))%2==0) continue;
+            if (loops2D.Count(l => Pip(bu,bv,l))%2==0) continue;
+            if (loops2D.Count(l => Pip(cu2,cv2,l))%2==0) continue;
+            // above cap: reversed winding
             above.Add(pa); above.Add(pc); above.Add(pb);
-            // below cap: normal winding → normal faces toward above (proximal)
+            // below cap: normal winding
             below.Add(pa); below.Add(pb); below.Add(pc);
         }
     }
+
 
     // ── BFS-vertex-map-guided true slice ─────────────────────────────────────────
 
@@ -1221,8 +1230,8 @@ public static class MeshOps
             SplitStraddlingTriangle(v0,s0,v1,s1,v2,s2,p01,p12,p20,prox,dist,cutEdges);
         }
 
-        if (capEnds)
-            CapWithPlanarHoleFiller(polyplane, prox, dist);
+        if (capEnds && cutEdges.Count >= 2)
+            CapFromPolyplaneSubdivided(cutEdges, polyplane, prox, dist);
 
         return (prox, dist);
     }
