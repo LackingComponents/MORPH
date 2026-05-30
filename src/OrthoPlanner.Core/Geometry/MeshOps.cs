@@ -998,7 +998,7 @@ public static class MeshOps
             {
                 var a=subTris[i]; var b=subTris[i+1]; var c=subTris[i+2];
                 float me=Math.Max(EdgeLen(a,b),Math.Max(EdgeLen(b,c),EdgeLen(c,a)));
-                if (me > 1f)
+                if (me > 0.5f)
                 {
                     any=true;
                     var mab=Mid(a,b); var mbc=Mid(b,c); var mca=Mid(c,a);
@@ -1011,15 +1011,8 @@ public static class MeshOps
             if (!any) break;
         }
 
-        // -- 2. Collect accepted tiles and identify boundary cap vertices ------
-        // First pass: collect all accepted tile indices.
-        // Build edge adjacency to find boundary edges (appear once, not shared).
-        // Boundary vertices are those on any boundary edge.
-        static string EK(float[] p) => $"{p[0]:F4},{p[1]:F4},{p[2]:F4}";
-        static string EdgeKey(float[] a, float[] b)
-        { string ka=EK(a), kb=EK(b); return string.CompareOrdinal(ka,kb)<0 ? ka+"|"+kb : kb+"|"+ka; }
-
-        // Collect accepted tiles as (a,b,c) triples
+        // -- 2. Collect accepted tiles, identify boundary, weld to bone edge --
+        // Collect accepted tiles
         var accepted = new List<(float[] a, float[] b, float[] c)>();
         for (int i = 0; i + 2 < subTris.Count; i += 3)
         {
@@ -1032,75 +1025,77 @@ public static class MeshOps
         }
         if (accepted.Count == 0) return;
 
-        // Count edge occurrences: boundary edges appear once, interior edges twice
-        var edgeCount = new Dictionary<string, int>();
+        // Identify boundary vertices via edge adjacency
+        static string VK(float[] p) => $"{p[0]:F4},{p[1]:F4},{p[2]:F4}";
+        static string EKE(float[] a, float[] b)
+        { string ka=VK(a),kb=VK(b); return string.CompareOrdinal(ka,kb)<0 ? ka+"|"+kb : kb+"|"+ka; }
+
+        var edgeCnt = new Dictionary<string, int>();
         foreach (var (a, b, c) in accepted)
         {
             void Inc(float[] x, float[] y) {
-                string k = EdgeKey(x, y);
-                edgeCount[k] = edgeCount.GetValueOrDefault(k) + 1;
-            }
+                string k=EKE(x,y); edgeCnt[k]=edgeCnt.GetValueOrDefault(k)+1; }
             Inc(a,b); Inc(b,c); Inc(c,a);
         }
-
-        // Mark boundary vertex keys (on any edge with count == 1)
-        var boundaryVerts = new HashSet<string>();
+        var bndVerts = new HashSet<string>();
         foreach (var (a, b, c) in accepted)
         {
-            void Check(float[] x, float[] y) {
-                if (edgeCount.GetValueOrDefault(EdgeKey(x,y)) == 1)
-                { boundaryVerts.Add(EK(x)); boundaryVerts.Add(EK(y)); }
-            }
-            Check(a,b); Check(b,c); Check(c,a);
+            void Chk(float[] x, float[] y) {
+                if (edgeCnt.GetValueOrDefault(EKE(x,y))==1)
+                { bndVerts.Add(VK(x)); bndVerts.Add(VK(y)); } }
+            Chk(a,b); Chk(b,c); Chk(c,a);
         }
 
-        // -- 3. Build snap map: boundary vertex → nearest cut-edge point ------
-        // Only boundary cap vertices are snapped. Interior vertices are untouched.
-        // All tiles sharing a boundary vertex get the same snapped position.
-        var snapMap = new Dictionary<string, float[]>();
-        if (cutEdges.Count >= 2)
-        {
-            foreach (var vk in boundaryVerts)
+        // Weld: snap boundary cap vertices to nearest cut-edge ENDPOINT.
+        // Only endpoints — not arbitrary positions along segments — so the cap
+        // vertex coincides with an actual bone mesh vertex for a watertight join.
+        // Max weld distance = 0.6mm (slightly larger than half-tile edge 0.25mm).
+        var weldMap = new Dictionary<string, float[]>();
+        float weldR2 = 0.6f * 0.6f;
+
+        // Collect unique cut-edge endpoint positions
+        var ceVerts = new List<float[]>();
+        var ceSet   = new HashSet<string>();
+        if (cutEdges != null)
+            foreach (var (ea, eb) in cutEdges)
             {
-                if (snapMap.ContainsKey(vk)) continue;
-                // Parse vertex key back to coordinates
-                var parts = vk.Split(',');
-                float vx = float.Parse(parts[0]), vy = float.Parse(parts[1]), vz = float.Parse(parts[2]);
-
-                // Find nearest point on any cut-edge segment
-                float bestD2 = float.MaxValue;
-                float bx = vx, by = vy, bz = vz;
-                foreach (var (ea, eb) in cutEdges)
-                {
-                    float ex=eb[0]-ea[0], ey=eb[1]-ea[1], ez=eb[2]-ea[2];
-                    float len2 = ex*ex+ey*ey+ez*ez;
-                    if (len2 < 1e-12f) continue;
-                    float t = ((vx-ea[0])*ex+(vy-ea[1])*ey+(vz-ea[2])*ez) / len2;
-                    t = Math.Clamp(t, 0f, 1f);
-                    float qx=ea[0]+t*ex, qy=ea[1]+t*ey, qz=ea[2]+t*ez;
-                    float dd=(vx-qx)*(vx-qx)+(vy-qy)*(vy-qy)+(vz-qz)*(vz-qz);
-                    if (dd < bestD2) { bestD2=dd; bx=qx; by=qy; bz=qz; }
-                }
-                snapMap[vk] = new float[]{ bx, by, bz };
+                string ka=VK(ea), kb=VK(eb);
+                if (ceSet.Add(ka)) ceVerts.Add(ea);
+                if (ceSet.Add(kb)) ceVerts.Add(eb);
             }
+
+        foreach (var bk in bndVerts)
+        {
+            var parts = bk.Split(',');
+            float vx=float.Parse(parts[0]), vy=float.Parse(parts[1]), vz=float.Parse(parts[2]);
+            float bestD2 = weldR2;
+            float[]? bestP = null;
+            foreach (var ep in ceVerts)
+            {
+                float dx=vx-ep[0], dy=vy-ep[1], dz=vz-ep[2];
+                float d2=dx*dx+dy*dy+dz*dz;
+                if (d2 < bestD2) { bestD2=d2; bestP=ep; }
+            }
+            if (bestP != null)
+                weldMap[bk] = bestP;
         }
 
-        // -- 4. Emit cap tiles with snapped boundary vertices -----------------
-        float[] Snap(float[] v)
+        // Emit cap tiles with welded boundary vertices
+        float[] Weld(float[] v)
         {
-            string k = EK(v);
-            if (snapMap.TryGetValue(k, out var s))
-                return new float[]{ s[0], s[1], s[2] };
-            return new float[]{ v[0], v[1], v[2] };
+            string k = VK(v);
+            if (weldMap.TryGetValue(k, out var w))
+                return new float[]{ w[0], w[1], w[2] };
+            return v;
         }
 
         foreach (var (a, b, c) in accepted)
         {
-            var sa = Snap(a); var sb = Snap(b); var sc = Snap(c);
+            var wa = Weld(a); var wb = Weld(b); var wc = Weld(c);
             // above cap: reversed winding
-            above.Add(sa); above.Add(sc); above.Add(sb);
-            // below cap: normal winding (fresh clones)
-            below.Add((float[])sa.Clone()); below.Add((float[])sb.Clone()); below.Add((float[])sc.Clone());
+            above.Add(wa); above.Add(wc); above.Add(wb);
+            // below cap: normal winding
+            below.Add(wa); below.Add(wb); below.Add(wc);
         }
     }
 
