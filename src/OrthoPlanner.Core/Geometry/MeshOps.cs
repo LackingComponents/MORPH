@@ -857,7 +857,7 @@ public static class MeshOps
 
         // -- 3. Cap: subdivide polyplane, PIP-test against open boundary loops --
         if (capEnds && cutEdges.Count >= 2)
-            CapFromCutSurface(soup, cutEdges, polyplane, above, below);
+            CapFromCutSurface(soup, polyplane, above, below);
 
         return (above, below);
     }
@@ -970,7 +970,6 @@ public static class MeshOps
     /// </summary>
     private static void CapFromCutSurface(
         List<float[]> originalSoup,
-        List<(float[] A, float[] B)> cutEdges,
         Polyplane polyplane,
         List<float[]> above,
         List<float[]> below)
@@ -1011,91 +1010,21 @@ public static class MeshOps
             if (!any) break;
         }
 
-        // -- 2. Collect accepted tiles, identify boundary, weld to bone edge --
-        // Collect accepted tiles
-        var accepted = new List<(float[] a, float[] b, float[] c)>();
+        // -- 2. Accept tiles whose centroid is inside the bone volume ----------
         for (int i = 0; i + 2 < subTris.Count; i += 3)
         {
             var pa = subTris[i]; var pb = subTris[i+1]; var pc = subTris[i+2];
             float cx = (pa[0]+pb[0]+pc[0]) / 3f;
             float cy = (pa[1]+pb[1]+pc[1]) / 3f;
             float cz = (pa[2]+pb[2]+pc[2]) / 3f;
-            if (tree.IsInside(new Vector3d(cx, cy, cz)))
-                accepted.Add((pa, pb, pc));
-        }
-        if (accepted.Count == 0) return;
 
-        // Identify boundary vertices via edge adjacency
-        static string VK(float[] p) => $"{p[0]:F4},{p[1]:F4},{p[2]:F4}";
-        static string EKE(float[] a, float[] b)
-        { string ka=VK(a),kb=VK(b); return string.CompareOrdinal(ka,kb)<0 ? ka+"|"+kb : kb+"|"+ka; }
+            if (!tree.IsInside(new Vector3d(cx, cy, cz)))
+                continue;
 
-        var edgeCnt = new Dictionary<string, int>();
-        foreach (var (a, b, c) in accepted)
-        {
-            void Inc(float[] x, float[] y) {
-                string k=EKE(x,y); edgeCnt[k]=edgeCnt.GetValueOrDefault(k)+1; }
-            Inc(a,b); Inc(b,c); Inc(c,a);
-        }
-        var bndVerts = new HashSet<string>();
-        foreach (var (a, b, c) in accepted)
-        {
-            void Chk(float[] x, float[] y) {
-                if (edgeCnt.GetValueOrDefault(EKE(x,y))==1)
-                { bndVerts.Add(VK(x)); bndVerts.Add(VK(y)); } }
-            Chk(a,b); Chk(b,c); Chk(c,a);
-        }
-
-        // Weld: snap boundary cap vertices to nearest cut-edge ENDPOINT.
-        // Only endpoints — not arbitrary positions along segments — so the cap
-        // vertex coincides with an actual bone mesh vertex for a watertight join.
-        // Max weld distance = 0.6mm (slightly larger than half-tile edge 0.25mm).
-        var weldMap = new Dictionary<string, float[]>();
-        float weldR2 = 0.6f * 0.6f;
-
-        // Collect unique cut-edge endpoint positions
-        var ceVerts = new List<float[]>();
-        var ceSet   = new HashSet<string>();
-        if (cutEdges != null)
-            foreach (var (ea, eb) in cutEdges)
-            {
-                string ka=VK(ea), kb=VK(eb);
-                if (ceSet.Add(ka)) ceVerts.Add(ea);
-                if (ceSet.Add(kb)) ceVerts.Add(eb);
-            }
-
-        foreach (var bk in bndVerts)
-        {
-            var parts = bk.Split(',');
-            float vx=float.Parse(parts[0]), vy=float.Parse(parts[1]), vz=float.Parse(parts[2]);
-            float bestD2 = weldR2;
-            float[]? bestP = null;
-            foreach (var ep in ceVerts)
-            {
-                float dx=vx-ep[0], dy=vy-ep[1], dz=vz-ep[2];
-                float d2=dx*dx+dy*dy+dz*dz;
-                if (d2 < bestD2) { bestD2=d2; bestP=ep; }
-            }
-            if (bestP != null)
-                weldMap[bk] = bestP;
-        }
-
-        // Emit cap tiles with welded boundary vertices
-        float[] Weld(float[] v)
-        {
-            string k = VK(v);
-            if (weldMap.TryGetValue(k, out var w))
-                return new float[]{ w[0], w[1], w[2] };
-            return v;
-        }
-
-        foreach (var (a, b, c) in accepted)
-        {
-            var wa = Weld(a); var wb = Weld(b); var wc = Weld(c);
             // above cap: reversed winding
-            above.Add(wa); above.Add(wc); above.Add(wb);
+            above.Add(pa); above.Add(pc); above.Add(pb);
             // below cap: normal winding
-            below.Add(wa); below.Add(wb); below.Add(wc);
+            below.Add(pa); below.Add(pb); below.Add(pc);
         }
     }
 
@@ -1146,7 +1075,7 @@ public static class MeshOps
         }
 
         if (capEnds && cutEdges.Count >= 2)
-            CapFromCutSurface(soup, cutEdges, polyplane, prox, dist);
+            CapFromCutSurface(soup, polyplane, prox, dist);
 
         return (prox, dist);
     }
