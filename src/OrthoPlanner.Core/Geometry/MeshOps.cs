@@ -857,7 +857,7 @@ public static class MeshOps
 
         // -- 3. Cap: subdivide polyplane, PIP-test against open boundary loops --
         if (capEnds && cutEdges.Count >= 2)
-            CapFromPolyplaneSubdivided(cutEdges, polyplane, above, below);
+            CapFromCutEdges(cutEdges, polyplane, above, below);
 
         return (above, below);
     }
@@ -956,107 +956,30 @@ public static class MeshOps
         t.Add(v0); t.Add(v1); t.Add(v2);
     }
 
-    // -- Cap fill: geometry3Sharp PlanarHoleFiller ----------------------------------------
-
-    private static void CapWithPlanarHoleFiller(
-        Polyplane polyplane,
-        List<float[]> above,
-        List<float[]> below)
-    {
-        if (above.Count < 9) return;
-
-        // 1. Compute polyplane average normal
-        var pverts = polyplane.MeshVertices;
-        double nx = 0, ny = 0, nz = 0;
-        for (int i = 0; i + 2 < pverts.Count; i += 3)
-        {
-            double ax = pverts[i+1][0]-pverts[i][0], ay = pverts[i+1][1]-pverts[i][1], az = pverts[i+1][2]-pverts[i][2];
-            double bx = pverts[i+2][0]-pverts[i][0], by = pverts[i+2][1]-pverts[i][1], bz = pverts[i+2][2]-pverts[i][2];
-            nx += ay*bz-az*by; ny += az*bx-ax*bz; nz += ax*by-ay*bx;
-        }
-        double nlen = Math.Sqrt(nx*nx+ny*ny+nz*nz);
-        if (nlen < 1e-9) return;
-        var planeNormal = new Vector3d(nx/nlen, ny/nlen, nz/nlen);
-
-        // 2. Build indexed mesh from above soup
-        DMesh3 dm = ToIndexedMesh(above);
-        if (dm.VertexCount < 3 || dm.TriangleCount < 1) return;
-
-        // 3. Find open boundary loops
-        MeshBoundaryLoops loops;
-        try { loops = new MeshBoundaryLoops(dm, true); }
-        catch { return; }
-        if (loops.Count == 0) return;
-
-        // Plane origin = average of boundary vertices
-        double ox = 0, oy = 0, oz = 0; int bvCount = 0;
-        foreach (var loop in loops.Loops)
-            foreach (int vi in loop.Vertices)
-            { var p = dm.GetVertex(vi); ox += p.x; oy += p.y; oz += p.z; bvCount++; }
-        if (bvCount == 0) return;
-        var origin = new Vector3d(ox/bvCount, oy/bvCount, oz/bvCount);
-
-        // 4. Fill each boundary loop with PlanarHoleFiller
-        var capTris = new List<float[]>();
-        foreach (var loop in loops.Loops)
-        {
-            int trisBefore = dm.TriangleCount;
-            try
-            {
-                var filler = new PlanarHoleFiller(dm);
-                filler.SetPlane(origin, planeNormal);
-                filler.AddFillLoop(loop);
-                if (!filler.Fill()) continue;
-            }
-            catch { continue; }
-
-            foreach (int tid in dm.TriangleIndices())
-            {
-                if (tid < trisBefore) continue;
-                var t = dm.GetTriangle(tid);
-                var va = dm.GetVertex(t.a); var vb = dm.GetVertex(t.b); var vc = dm.GetVertex(t.c);
-                capTris.Add(new float[]{ (float)va.x,(float)va.y,(float)va.z });
-                capTris.Add(new float[]{ (float)vb.x,(float)vb.y,(float)vb.z });
-                capTris.Add(new float[]{ (float)vc.x,(float)vc.y,(float)vc.z });
-            }
-        }
-
-        // 5. Append cap to both halves (reversed winding for below)
-        for (int i = 0; i + 2 < capTris.Count; i += 3)
-        {
-            var pa=capTris[i]; var pb=capTris[i+1]; var pc=capTris[i+2];
-            above.Add(pa); above.Add(pb); above.Add(pc);
-            below.Add(pa); below.Add(pc); below.Add(pb);
-        }
-    }
-
-    // ── Cap fill: subdivided polyplane PIP ───────────────────────────────────────────────
+    // -- Cap fill: ear-clip triangulation of cut-edge boundary loops ----------
 
     /// <summary>
     /// Caps the open cut boundary by:
     ///   1. Chaining the directed cut edges into closed 3-D boundary loops.
-    ///   2. Projecting those loops into the polyplane’s local 2-D frame.
-    ///   3. Recursively midpoint-subdividing every polyplane mesh triangle until
-    ///      its longest edge is &lt; <paramref name="targetEdge"/> mm.
-    ///   4. For each sub-triangle whose centroid falls inside the boundary loops
-    ///      (even-odd rule — handles holes), add it to the cap of both halves.
+    ///   2. Computing the polyplane average normal for 2-D projection.
+    ///   3. Ear-clip triangulating each loop (works for any simple polygon,
+    ///      including non-convex cross-sections).
+    ///   4. Adding the resulting triangles to both halves with opposing windings.
     ///
-    /// The cap therefore lies exactly on the polyplane surface and covers precisely
-    /// the area delimited by the open boundary of the cut mesh.
+    /// Because the cap triangles share the exact boundary vertices of the cut,
+    /// there is zero overhang and zero gap.  No polyplane tiles, no PIP tests.
     /// </summary>
-    private static void CapFromPolyplaneSubdivided(
+    private static void CapFromCutEdges(
         List<(float[] A, float[] B)> cutEdges,
         Polyplane polyplane,
         List<float[]> above,
-        List<float[]> below,
-        float targetEdge = 3f)
+        List<float[]> below)
     {
-        var pverts = polyplane.MeshVertices;
-        if (cutEdges.Count == 0 || pverts.Count < 3) return;
+        if (cutEdges.Count < 2) return;
 
-        // ── 1. Chain cut edges → 3-D loops ─────────────────────────────────────────
+        // -- 1. Chain cut edges into 3-D loops --------------------------------
         static string VK(float[] p)
-            => $"{Math.Round(p[0], 1)},{Math.Round(p[1], 1)},{Math.Round(p[2], 1)}";
+            => $"{Math.Round(p[0], 4)},{Math.Round(p[1], 4)},{Math.Round(p[2], 4)}";
 
         var adj = new Dictionary<string, Queue<int>>();
         for (int i = 0; i < cutEdges.Count; i++)
@@ -1065,22 +988,27 @@ public static class MeshOps
             if (!adj.TryGetValue(ka, out var q)) { q = new Queue<int>(); adj[ka] = q; }
             q.Enqueue(i);
         }
-        var edgeVisited = new bool[cutEdges.Count];
-        var loops3D     = new List<List<float[]>>();
+        var edgeUsed = new bool[cutEdges.Count];
+        var loops3D  = new List<List<float[]>>();
         for (int start = 0; start < cutEdges.Count; start++)
         {
-            if (edgeVisited[start]) continue;
+            if (edgeUsed[start]) continue;
             var loop = new List<float[]>();
             int cur  = start;
             for (int guard = 0; guard <= cutEdges.Count; guard++)
             {
-                if (edgeVisited[cur]) break;
-                edgeVisited[cur] = true;
+                if (edgeUsed[cur]) break;
+                edgeUsed[cur] = true;
                 loop.Add(cutEdges[cur].A);
                 string kb = VK(cutEdges[cur].B);
                 int next = -1;
                 if (adj.TryGetValue(kb, out var nexts))
-                    while (nexts.Count > 0) { int ni = nexts.Peek(); if (!edgeVisited[ni]) { next = ni; break; } nexts.Dequeue(); }
+                    while (nexts.Count > 0)
+                    {
+                        int ni = nexts.Peek();
+                        if (!edgeUsed[ni]) { next = ni; break; }
+                        nexts.Dequeue();
+                    }
                 if (next == -1) { loop.Add(cutEdges[cur].B); break; }
                 cur = next;
             }
@@ -1088,120 +1016,107 @@ public static class MeshOps
         }
         if (loops3D.Count == 0) return;
 
-        // ── 2. Compute polyplane 2-D basis (N, U, V) ──────────────────────────────
+        // -- 2. Compute polyplane average normal and 2-D basis ----------------
+        var pverts = polyplane.MeshVertices;
         double nx = 0, ny = 0, nz = 0;
         for (int i = 0; i + 2 < pverts.Count; i += 3)
         {
-            double ax=pverts[i+1][0]-pverts[i][0], ay=pverts[i+1][1]-pverts[i][1], az=pverts[i+1][2]-pverts[i][2];
-            double bx=pverts[i+2][0]-pverts[i][0], by=pverts[i+2][1]-pverts[i][1], bz=pverts[i+2][2]-pverts[i][2];
-            nx+=ay*bz-az*by; ny+=az*bx-ax*bz; nz+=ax*by-ay*bx;
+            double ax = pverts[i+1][0]-pverts[i][0], ay = pverts[i+1][1]-pverts[i][1], az = pverts[i+1][2]-pverts[i][2];
+            double bx = pverts[i+2][0]-pverts[i][0], by = pverts[i+2][1]-pverts[i][1], bz = pverts[i+2][2]-pverts[i][2];
+            nx += ay*bz-az*by; ny += az*bx-ax*bz; nz += ax*by-ay*bx;
         }
-        double nlen = Math.Sqrt(nx*nx+ny*ny+nz*nz);
+        double nlen = Math.Sqrt(nx*nx + ny*ny + nz*nz);
         if (nlen < 1e-9) return;
         nx /= nlen; ny /= nlen; nz /= nlen;
 
+        // Orthonormal basis: U = gram-schmidt from (1,0,0) or (0,1,0)
         double ux = 1-nx*nx, uy = -nx*ny, uz = -nx*nz;
-        double ulen = Math.Sqrt(ux*ux+uy*uy+uz*uz);
-        if (ulen < 0.01) { ux=-nx*ny; uy=1-ny*ny; uz=-ny*nz; ulen=Math.Sqrt(ux*ux+uy*uy+uz*uz); }
-        ux/=ulen; uy/=ulen; uz/=ulen;
-        double vx=ny*uz-nz*uy, vy=nz*ux-nx*uz, vz=nx*uy-ny*ux;
+        double ulen = Math.Sqrt(ux*ux + uy*uy + uz*uz);
+        if (ulen < 0.01) { ux = -nx*ny; uy = 1-ny*ny; uz = -ny*nz; ulen = Math.Sqrt(ux*ux+uy*uy+uz*uz); }
+        ux /= ulen; uy /= ulen; uz /= ulen;
+        double vx = ny*uz-nz*uy, vy = nz*ux-nx*uz, vz = nx*uy-ny*ux;
 
-        // Origin = centroid of cut-edge endpoints
-        double ox=0, oy=0, oz=0; int nPts=0;
-        foreach (var (ea,eb) in cutEdges)
-        { ox+=ea[0]; oy+=ea[1]; oz+=ea[2]; ox+=eb[0]; oy+=eb[1]; oz+=eb[2]; nPts+=2; }
-        if (nPts>0) { ox/=nPts; oy/=nPts; oz/=nPts; }
-
-        (double u, double v) To2D(float[] p) => (
-            (p[0]-ox)*ux + (p[1]-oy)*uy + (p[2]-oz)*uz,
-            (p[0]-ox)*vx + (p[1]-oy)*vy + (p[2]-oz)*vz);
-
-        // ── 3. Project loops to 2-D ────────────────────────────────────────────────
-        var loops2D = loops3D
-            .Select(lp => lp.Select(p => To2D(p)).ToList())
-            .ToList();
-
-        // Orientation check: the centroid of cut-edge endpoints is a known interior point.
-        // If PIP says it is outside, the projected boundary loop is inverted -- flip all tests.
-        var (refU,refV) = To2D(new float[]{ (float)ox,(float)oy,(float)oz });
-        bool pipInverted = (loops2D.Count(l=>Pip(refU,refV,l))&1)==0;
-
-        // ── 4. Recursively midpoint-subdivide polyplane to targetEdge mm ───────────
-        static float EL(float[] a, float[] b)
-        { float dx=a[0]-b[0],dy=a[1]-b[1],dz=a[2]-b[2]; return MathF.Sqrt(dx*dx+dy*dy+dz*dz); }
-        static float[] Md(float[] a, float[] b)
-            => new[]{ (a[0]+b[0])*.5f,(a[1]+b[1])*.5f,(a[2]+b[2])*.5f };
-
-        var subTris = new List<float[]>(pverts);
-        for (int level = 0; level < 9; level++)
+        // -- 3. Ear-clip triangulate each loop --------------------------------
+        foreach (var loop in loops3D)
         {
-            bool any = false;
-            var next = new List<float[]>(subTris.Count * 4);
-            for (int i = 0; i + 2 < subTris.Count; i += 3)
+            int n = loop.Count;
+            if (n < 3) continue;
+
+            // Project to 2D
+            var pts2D = new (double u, double v)[n];
+            for (int i = 0; i < n; i++)
             {
-                var a=subTris[i]; var b=subTris[i+1]; var c=subTris[i+2];
-                float me=Math.Max(EL(a,b),Math.Max(EL(b,c),EL(c,a)));
-                if (me > targetEdge)
+                float[] p = loop[i];
+                pts2D[i] = (p[0]*ux + p[1]*uy + p[2]*uz,
+                            p[0]*vx + p[1]*vy + p[2]*vz);
+            }
+
+            // Compute signed area to determine winding
+            double signedArea = 0;
+            for (int i = 0; i < n; i++)
+            {
+                int j = (i+1) % n;
+                signedArea += pts2D[i].u * pts2D[j].v - pts2D[j].u * pts2D[i].v;
+            }
+            // We want CCW; if CW, reverse the polygon
+            bool reversed = signedArea < 0;
+
+            // Build index list for ear clipping
+            var idx = new List<int>(n);
+            if (reversed)
+                for (int i = n-1; i >= 0; i--) idx.Add(i);
+            else
+                for (int i = 0; i < n; i++) idx.Add(i);
+
+            // Ear clipping
+            int safety = idx.Count * idx.Count;
+            while (idx.Count > 2 && safety-- > 0)
+            {
+                bool earFound = false;
+                int cnt = idx.Count;
+                for (int i = 0; i < cnt; i++)
                 {
-                    any=true;
-                    var mab=Md(a,b); var mbc=Md(b,c); var mca=Md(c,a);
-                    next.AddRange(new[]{ a,mab,mca }); next.AddRange(new[]{ mab,b,mbc });
-                    next.AddRange(new[]{ mca,mbc,c }); next.AddRange(new[]{ mab,mbc,mca });
+                    int prev = idx[(i - 1 + cnt) % cnt];
+                    int curr = idx[i];
+                    int next = idx[(i + 1) % cnt];
+
+                    double ax2 = pts2D[prev].u, ay2 = pts2D[prev].v;
+                    double bx2 = pts2D[curr].u, by2 = pts2D[curr].v;
+                    double cx2 = pts2D[next].u, cy2 = pts2D[next].v;
+
+                    // Cross product: must be positive (CCW ear)
+                    double cross = (bx2-ax2)*(cy2-ay2) - (by2-ay2)*(cx2-ax2);
+                    if (cross <= 1e-12) continue;  // reflex or degenerate
+
+                    // Check no other vertex is inside this triangle
+                    bool pointInside = false;
+                    for (int k = 0; k < cnt; k++)
+                    {
+                        int vi = idx[k];
+                        if (vi == prev || vi == curr || vi == next) continue;
+                        double px = pts2D[vi].u, py = pts2D[vi].v;
+                        // Barycentric check
+                        double d1 = (px-ax2)*(by2-ay2) - (bx2-ax2)*(py-ay2);
+                        double d2 = (px-bx2)*(cy2-by2) - (cx2-bx2)*(py-by2);
+                        double d3 = (px-cx2)*(ay2-cy2) - (ax2-cx2)*(py-cy2);
+                        if (d1 >= 0 && d2 >= 0 && d3 >= 0) { pointInside = true; break; }
+                    }
+                    if (pointInside) continue;
+
+                    // Emit ear triangle
+                    var p0 = loop[prev]; var p1 = loop[curr]; var p2 = loop[next];
+                    // above cap: normal should point along polyplane normal (toward below/distal)
+                    above.Add(p0); above.Add(p2); above.Add(p1);
+                    // below cap: opposite winding
+                    below.Add(p0); below.Add(p1); below.Add(p2);
+
+                    idx.RemoveAt(i);
+                    earFound = true;
+                    break;
                 }
-                else { next.Add(a); next.Add(b); next.Add(c); }
+                if (!earFound) break;  // degenerate polygon
             }
-            subTris = next;
-            if (!any) break;
         }
-
-        // ── 5. PIP even-odd test and add cap triangles ─────────────────────────────
-        static bool Pip(double pu, double pv, List<(double u, double v)> loop)
-        {
-            int x=0, n=loop.Count;
-            for (int i=0;i<n;i++)
-            {
-                var (au,av)=loop[i]; var (bu,bv)=loop[(i+1)%n];
-                if ((av<=pv&&bv>pv)||(bv<=pv&&av>pv))
-                    if (au+(pv-av)/(bv-av)*(bu-au)>pu) x++;
-            }
-            return (x&1)==1;
-        }
-
-        // -- 5. Adaptive PIP: tiles fully inside accept; boundary tiles subdivide --
-        // At depth 5, sub-tile edge is ~targetEdge/32 < 0.1 mm -- sub-clinical.
-        static float[] Md2(float[] a, float[] b)
-            => new[]{ (a[0]+b[0])*.5f,(a[1]+b[1])*.5f,(a[2]+b[2])*.5f };
-
-        void TryAddTile(float[] pa, float[] pb, float[] pc, int depth)
-        {
-            var (au,av)=To2D(pa); var (bu,bv)=To2D(pb); var (cw,cv2)=To2D(pc);
-            float[] cen={ (pa[0]+pb[0]+pc[0])/3f,(pa[1]+pb[1]+pc[1])/3f,(pa[2]+pb[2]+pc[2])/3f };
-            var (cnu,cnv)=To2D(cen);
-            // Skip: centroid outside boundary net
-            bool cenIn=(loops2D.Count(l=>Pip(cnu,cnv,l))&1)==1;
-            if (pipInverted) cenIn=!cenIn;
-            if (!cenIn) return;
-            // Accept: all vertices inside, or max depth reached
-            bool va_in=(loops2D.Count(l=>Pip(au,av,l))&1)==1;
-            bool vb_in=(loops2D.Count(l=>Pip(bu,bv,l))&1)==1;
-            bool vc_in=(loops2D.Count(l=>Pip(cw,cv2,l))&1)==1;
-            if (pipInverted) { va_in=!va_in; vb_in=!vb_in; vc_in=!vc_in; }
-            bool allIn=va_in && vb_in && vc_in;
-            if (allIn || depth>=5)
-            {
-                above.Add(pa); above.Add(pc); above.Add(pb);
-                below.Add(pa); below.Add(pb); below.Add(pc);
-                return;
-            }
-            var mab=Md2(pa,pb); var mbc=Md2(pb,pc); var mca=Md2(pc,pa);
-            TryAddTile(pa,mab,mca,depth+1);
-            TryAddTile(mab,pb,mbc,depth+1);
-            TryAddTile(mca,mbc,pc,depth+1);
-            TryAddTile(mab,mbc,mca,depth+1);
-        }
-
-        for (int i=0; i+2<subTris.Count; i+=3)
-            TryAddTile(subTris[i],subTris[i+1],subTris[i+2],0);
     }
 
 
@@ -1251,7 +1166,7 @@ public static class MeshOps
         }
 
         if (capEnds && cutEdges.Count >= 2)
-            CapFromPolyplaneSubdivided(cutEdges, polyplane, prox, dist);
+            CapFromCutEdges(cutEdges, polyplane, prox, dist);
 
         return (prox, dist);
     }
