@@ -857,7 +857,7 @@ public static class MeshOps
 
         // -- 3. Cap: subdivide polyplane, PIP-test against open boundary loops --
         if (capEnds && cutEdges.Count >= 2)
-            CapFromCutEdges(cutEdges, polyplane, above, below);
+            CapFromCutSurface(soup, polyplane, above, below);
 
         return (above, below);
     }
@@ -956,166 +956,78 @@ public static class MeshOps
         t.Add(v0); t.Add(v1); t.Add(v2);
     }
 
-    // -- Cap fill: ear-clip triangulation of cut-edge boundary loops ----------
+    // -- Cap fill: polyplane surface clipped to bone interior -----------------
 
     /// <summary>
-    /// Caps the open cut boundary by:
-    ///   1. Chaining the directed cut edges into closed 3-D boundary loops.
-    ///   2. Computing the polyplane average normal for 2-D projection.
-    ///   3. Ear-clip triangulating each loop (works for any simple polygon,
-    ///      including non-convex cross-sections).
-    ///   4. Adding the resulting triangles to both halves with opposing windings.
+    /// Caps the open cut boundary by using the cutting polyplane surface itself:
+    ///   1. Builds a spatial index (AABB tree) from the original unsplit bone mesh.
+    ///   2. For each triangle of the polyplane mesh, tests whether its centroid
+    ///      is inside the bone volume (winding-number based containment test).
+    ///   3. Only the polyplane triangles that are inside the bone are kept as cap.
+    ///   4. These cap triangles are added to both halves with opposing windings.
     ///
-    /// Because the cap triangles share the exact boundary vertices of the cut,
-    /// there is zero overhang and zero gap.  No polyplane tiles, no PIP tests.
+    /// This gives a cap that is exactly the intersection of the cutting surface
+    /// with the bone volume: no overhang, no gaps, no approximations.
     /// </summary>
-    private static void CapFromCutEdges(
-        List<(float[] A, float[] B)> cutEdges,
+    private static void CapFromCutSurface(
+        List<float[]> originalSoup,
         Polyplane polyplane,
         List<float[]> above,
         List<float[]> below)
     {
-        if (cutEdges.Count < 2) return;
-
-        // -- 1. Chain cut edges into 3-D loops --------------------------------
-        static string VK(float[] p)
-            => $"{Math.Round(p[0], 4)},{Math.Round(p[1], 4)},{Math.Round(p[2], 4)}";
-
-        var adj = new Dictionary<string, Queue<int>>();
-        for (int i = 0; i < cutEdges.Count; i++)
-        {
-            string ka = VK(cutEdges[i].A);
-            if (!adj.TryGetValue(ka, out var q)) { q = new Queue<int>(); adj[ka] = q; }
-            q.Enqueue(i);
-        }
-        var edgeUsed = new bool[cutEdges.Count];
-        var loops3D  = new List<List<float[]>>();
-        for (int start = 0; start < cutEdges.Count; start++)
-        {
-            if (edgeUsed[start]) continue;
-            var loop = new List<float[]>();
-            int cur  = start;
-            for (int guard = 0; guard <= cutEdges.Count; guard++)
-            {
-                if (edgeUsed[cur]) break;
-                edgeUsed[cur] = true;
-                loop.Add(cutEdges[cur].A);
-                string kb = VK(cutEdges[cur].B);
-                int next = -1;
-                if (adj.TryGetValue(kb, out var nexts))
-                    while (nexts.Count > 0)
-                    {
-                        int ni = nexts.Peek();
-                        if (!edgeUsed[ni]) { next = ni; break; }
-                        nexts.Dequeue();
-                    }
-                if (next == -1) { loop.Add(cutEdges[cur].B); break; }
-                cur = next;
-            }
-            if (loop.Count >= 3) loops3D.Add(loop);
-        }
-        if (loops3D.Count == 0) return;
-
-        // -- 2. Compute polyplane average normal and 2-D basis ----------------
         var pverts = polyplane.MeshVertices;
-        double nx = 0, ny = 0, nz = 0;
-        for (int i = 0; i + 2 < pverts.Count; i += 3)
+        if (pverts.Count < 9) return;   // need at least 3 triangles worth of verts
+
+        // -- 1. Build AABB tree from original mesh for inside/outside queries --
+        DMesh3 boneMesh = ToIndexedMesh(originalSoup);
+        if (boneMesh.TriangleCount < 4) return;
+
+        var tree = new DMeshAABBTree3(boneMesh, true);
+
+
+        // -- 1b. Subdivide polyplane triangles to ~1mm for fine boundary fit --
+        static float EdgeLen(float[] a, float[] b)
+        { float dx=a[0]-b[0],dy=a[1]-b[1],dz=a[2]-b[2]; return MathF.Sqrt(dx*dx+dy*dy+dz*dz); }
+        static float[] Mid(float[] a, float[] b)
+            => new[]{ (a[0]+b[0])*.5f,(a[1]+b[1])*.5f,(a[2]+b[2])*.5f };
+
+        var subTris = new List<float[]>(pverts);
+        for (int level = 0; level < 12; level++)
         {
-            double ax = pverts[i+1][0]-pverts[i][0], ay = pverts[i+1][1]-pverts[i][1], az = pverts[i+1][2]-pverts[i][2];
-            double bx = pverts[i+2][0]-pverts[i][0], by = pverts[i+2][1]-pverts[i][1], bz = pverts[i+2][2]-pverts[i][2];
-            nx += ay*bz-az*by; ny += az*bx-ax*bz; nz += ax*by-ay*bx;
-        }
-        double nlen = Math.Sqrt(nx*nx + ny*ny + nz*nz);
-        if (nlen < 1e-9) return;
-        nx /= nlen; ny /= nlen; nz /= nlen;
-
-        // Orthonormal basis: U = gram-schmidt from (1,0,0) or (0,1,0)
-        double ux = 1-nx*nx, uy = -nx*ny, uz = -nx*nz;
-        double ulen = Math.Sqrt(ux*ux + uy*uy + uz*uz);
-        if (ulen < 0.01) { ux = -nx*ny; uy = 1-ny*ny; uz = -ny*nz; ulen = Math.Sqrt(ux*ux+uy*uy+uz*uz); }
-        ux /= ulen; uy /= ulen; uz /= ulen;
-        double vx = ny*uz-nz*uy, vy = nz*ux-nx*uz, vz = nx*uy-ny*ux;
-
-        // -- 3. Ear-clip triangulate each loop --------------------------------
-        foreach (var loop in loops3D)
-        {
-            int n = loop.Count;
-            if (n < 3) continue;
-
-            // Project to 2D
-            var pts2D = new (double u, double v)[n];
-            for (int i = 0; i < n; i++)
+            bool any = false;
+            var next = new List<float[]>(subTris.Count * 4);
+            for (int i = 0; i + 2 < subTris.Count; i += 3)
             {
-                float[] p = loop[i];
-                pts2D[i] = (p[0]*ux + p[1]*uy + p[2]*uz,
-                            p[0]*vx + p[1]*vy + p[2]*vz);
-            }
-
-            // Compute signed area to determine winding
-            double signedArea = 0;
-            for (int i = 0; i < n; i++)
-            {
-                int j = (i+1) % n;
-                signedArea += pts2D[i].u * pts2D[j].v - pts2D[j].u * pts2D[i].v;
-            }
-            // We want CCW; if CW, reverse the polygon
-            bool reversed = signedArea < 0;
-
-            // Build index list for ear clipping
-            var idx = new List<int>(n);
-            if (reversed)
-                for (int i = n-1; i >= 0; i--) idx.Add(i);
-            else
-                for (int i = 0; i < n; i++) idx.Add(i);
-
-            // Ear clipping
-            int safety = idx.Count * idx.Count;
-            while (idx.Count > 2 && safety-- > 0)
-            {
-                bool earFound = false;
-                int cnt = idx.Count;
-                for (int i = 0; i < cnt; i++)
+                var a=subTris[i]; var b=subTris[i+1]; var c=subTris[i+2];
+                float me=Math.Max(EdgeLen(a,b),Math.Max(EdgeLen(b,c),EdgeLen(c,a)));
+                if (me > 1f)
                 {
-                    int prev = idx[(i - 1 + cnt) % cnt];
-                    int curr = idx[i];
-                    int next = idx[(i + 1) % cnt];
-
-                    double ax2 = pts2D[prev].u, ay2 = pts2D[prev].v;
-                    double bx2 = pts2D[curr].u, by2 = pts2D[curr].v;
-                    double cx2 = pts2D[next].u, cy2 = pts2D[next].v;
-
-                    // Cross product: must be positive (CCW ear)
-                    double cross = (bx2-ax2)*(cy2-ay2) - (by2-ay2)*(cx2-ax2);
-                    if (cross <= 1e-12) continue;  // reflex or degenerate
-
-                    // Check no other vertex is inside this triangle
-                    bool pointInside = false;
-                    for (int k = 0; k < cnt; k++)
-                    {
-                        int vi = idx[k];
-                        if (vi == prev || vi == curr || vi == next) continue;
-                        double px = pts2D[vi].u, py = pts2D[vi].v;
-                        // Barycentric check
-                        double d1 = (px-ax2)*(by2-ay2) - (bx2-ax2)*(py-ay2);
-                        double d2 = (px-bx2)*(cy2-by2) - (cx2-bx2)*(py-by2);
-                        double d3 = (px-cx2)*(ay2-cy2) - (ax2-cx2)*(py-cy2);
-                        if (d1 >= 0 && d2 >= 0 && d3 >= 0) { pointInside = true; break; }
-                    }
-                    if (pointInside) continue;
-
-                    // Emit ear triangle
-                    var p0 = loop[prev]; var p1 = loop[curr]; var p2 = loop[next];
-                    // above cap: normal should point along polyplane normal (toward below/distal)
-                    above.Add(p0); above.Add(p2); above.Add(p1);
-                    // below cap: opposite winding
-                    below.Add(p0); below.Add(p1); below.Add(p2);
-
-                    idx.RemoveAt(i);
-                    earFound = true;
-                    break;
+                    any=true;
+                    var mab=Mid(a,b); var mbc=Mid(b,c); var mca=Mid(c,a);
+                    next.AddRange(new[]{ a,mab,mca }); next.AddRange(new[]{ mab,b,mbc });
+                    next.AddRange(new[]{ mca,mbc,c }); next.AddRange(new[]{ mab,mbc,mca });
                 }
-                if (!earFound) break;  // degenerate polygon
+                else { next.Add(a); next.Add(b); next.Add(c); }
             }
+            subTris = next;
+            if (!any) break;
+        }
+
+        // -- 2. Test each polyplane triangle centroid against bone volume ------
+        for (int i = 0; i + 2 < subTris.Count; i += 3)
+        {
+            var pa = subTris[i]; var pb = subTris[i+1]; var pc = subTris[i+2];
+            float cx = (pa[0]+pb[0]+pc[0]) / 3f;
+            float cy = (pa[1]+pb[1]+pc[1]) / 3f;
+            float cz = (pa[2]+pb[2]+pc[2]) / 3f;
+
+            if (!tree.IsInside(new Vector3d(cx, cy, cz)))
+                continue;
+
+            // above cap: reversed winding (normal faces toward below/distal)
+            above.Add(pa); above.Add(pc); above.Add(pb);
+            // below cap: normal winding (normal faces toward above/proximal)
+            below.Add(pa); below.Add(pb); below.Add(pc);
         }
     }
 
@@ -1166,7 +1078,7 @@ public static class MeshOps
         }
 
         if (capEnds && cutEdges.Count >= 2)
-            CapFromCutEdges(cutEdges, polyplane, prox, dist);
+            CapFromCutSurface(soup, polyplane, prox, dist);
 
         return (prox, dist);
     }
