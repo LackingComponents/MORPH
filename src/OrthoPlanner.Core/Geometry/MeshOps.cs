@@ -956,18 +956,17 @@ public static class MeshOps
         t.Add(v0); t.Add(v1); t.Add(v2);
     }
 
-    // -- Cap fill: polyplane surface clipped to cut boundary ------------------
+    // -- Cap fill: polyplane surface clipped to bone interior -----------------
 
     /// <summary>
-    /// Caps the open cut boundary by tiling the cutting polyplane surface:
-    ///   1. Subdivides polyplane triangles to ~0.5mm tiles.
-    ///   2. Tests each tile centroid: first with AABB IsInside (fast, works for
-    ///      watertight meshes), then falls back to 2D winding-number PIP against
-    ///      the cutEdge boundary projected onto the cutting plane (works for any
-    ///      topology — non-watertight, split, thin shell meshes).
-    ///   3. Boundary cap vertices (edge adjacency) are welded to nearest
-    ///      cut-edge endpoint so the cap perimeter meets the bone edge exactly.
-    ///   4. Adds cap triangles to both halves with opposing windings.
+    /// Caps the open cut boundary by using the cutting polyplane surface itself:
+    ///   1. Builds a spatial index (AABB tree) from the original unsplit bone mesh.
+    ///   2. Subdivides polyplane triangles to ~1mm.
+    ///   3. Keeps only sub-triangles whose centroid is inside the bone volume.
+    ///   4. For boundary cap vertices (outside the bone), snaps them to the
+    ///      nearest point on the cut-edge boundary so the cap perimeter exactly
+    ///      coincides with the bone cut edge — closing the mesh locally.
+    ///   5. Adds cap triangles to both halves with opposing windings.
     /// </summary>
     private static void CapFromCutSurface(
         List<float[]> originalSoup,
@@ -978,9 +977,13 @@ public static class MeshOps
     {
         var pverts = polyplane.MeshVertices;
         if (pverts.Count < 9) return;
-        if (cutEdges.Count < 3) return;
 
-        // -- 1. Subdivide polyplane triangles to ~0.5mm -----------------------
+        // -- 1. Build AABB tree from original mesh for inside/outside queries --
+        DMesh3 boneMesh = ToIndexedMesh(originalSoup);
+        if (boneMesh.TriangleCount < 4) return;
+        var tree = new DMeshAABBTree3(boneMesh, true);
+
+        // -- 1b. Subdivide polyplane triangles to ~0.5mm for fine boundary fit --
         static float EdgeLen(float[] a, float[] b)
         { float dx=a[0]-b[0],dy=a[1]-b[1],dz=a[2]-b[2]; return MathF.Sqrt(dx*dx+dy*dy+dz*dz); }
         static float[] Mid(float[] a, float[] b)
@@ -1008,52 +1011,7 @@ public static class MeshOps
             if (!any) break;
         }
 
-        // -- 2. Build PIP test: 2D winding number against cutEdges projected --
-        // onto the cutting plane. Reliable for any mesh topology.
-        // Compute cutting plane normal from first polyplane triangle
-        float[] pn0 = pverts[0], pn1 = pverts[1], pn2 = pverts[2];
-        float nx = (pn1[1]-pn0[1])*(pn2[2]-pn0[2]) - (pn1[2]-pn0[2])*(pn2[1]-pn0[1]);
-        float ny = (pn1[2]-pn0[2])*(pn2[0]-pn0[0]) - (pn1[0]-pn0[0])*(pn2[2]-pn0[2]);
-        float nz = (pn1[0]-pn0[0])*(pn2[1]-pn0[1]) - (pn1[1]-pn0[1])*(pn2[0]-pn0[0]);
-        float nl = MathF.Sqrt(nx*nx+ny*ny+nz*nz);
-        if (nl < 1e-6f) return;
-        nx/=nl; ny/=nl; nz/=nl;
-
-        // Two orthonormal axes on the plane
-        float ux, uy, uz;
-        if (MathF.Abs(nx) < 0.9f) { ux=0; uy=nz; uz=-ny; }
-        else                       { ux=-nz; uy=0; uz=nx; }
-        float ul=MathF.Sqrt(ux*ux+uy*uy+uz*uz); ux/=ul; uy/=ul; uz/=ul;
-        float vx=ny*uz-nz*uy, vy=nz*ux-nx*uz, vz=nx*uy-ny*ux;
-
-        (float u, float v) Proj(float x, float y, float z)
-            => (x*ux+y*uy+z*uz, x*vx+y*vy+z*vz);
-
-        // Pre-project all cut-edge endpoints
-        var edgePts = new (float au, float av, float bu, float bv)[cutEdges.Count];
-        for (int i = 0; i < cutEdges.Count; i++)
-        {
-            var (ea, eb) = cutEdges[i];
-            var (au,av) = Proj(ea[0],ea[1],ea[2]);
-            var (bu,bv) = Proj(eb[0],eb[1],eb[2]);
-            edgePts[i] = (au,av,bu,bv);
-        }
-
-        // Winding-number PIP in 2D
-        bool PIP(float pu, float pv)
-        {
-            int w = 0;
-            foreach (var (au,av,bu,bv) in edgePts)
-            {
-                if (av <= pv)
-                { if (bv > pv && (bu-au)*(pv-av)-(bv-av)*(pu-au) > 0) w++; }
-                else
-                { if (bv <= pv && (bu-au)*(pv-av)-(bv-av)*(pu-au) < 0) w--; }
-            }
-            return w != 0;
-        }
-
-        // -- 3. Accept tiles whose centroid is inside the cut boundary --------
+        // -- 2. Collect accepted tiles ----------------------------------------
         var accepted = new List<(float[] a, float[] b, float[] c)>();
         for (int i = 0; i + 2 < subTris.Count; i += 3)
         {
@@ -1061,13 +1019,12 @@ public static class MeshOps
             float cx = (pa[0]+pb[0]+pc[0]) / 3f;
             float cy = (pa[1]+pb[1]+pc[1]) / 3f;
             float cz = (pa[2]+pb[2]+pc[2]) / 3f;
-            var (cu,cv) = Proj(cx,cy,cz);
-            if (PIP(cu,cv))
+            if (tree.IsInside(new Vector3d(cx, cy, cz)))
                 accepted.Add((pa, pb, pc));
         }
         if (accepted.Count == 0) return;
 
-        // -- 4. Identify boundary cap vertices via edge adjacency -------------
+        // -- 3. Identify boundary cap vertices via edge adjacency -------------
         static string VK(float[] p) => $"{p[0]:F4},{p[1]:F4},{p[2]:F4}";
         static string EKE(float[] a, float[] b)
         { string ka=VK(a),kb=VK(b); return string.CompareOrdinal(ka,kb)<0 ? ka+"|"+kb : kb+"|"+ka; }
@@ -1088,7 +1045,7 @@ public static class MeshOps
             Chk(a,b); Chk(b,c); Chk(c,a);
         }
 
-        // -- 5. Weld boundary vertices to nearest cut-edge endpoint -----------
+        // -- 4. Weld boundary vertices to nearest cut-edge endpoint -----------
         // Collect unique bone cut-edge endpoint positions
         var ceVerts = new List<float[]>();
         var ceSet   = new HashSet<string>();
@@ -1104,12 +1061,12 @@ public static class MeshOps
         foreach (var bk in bndVerts)
         {
             var parts = bk.Split(',');
-            float wx=float.Parse(parts[0]), wy=float.Parse(parts[1]), wz=float.Parse(parts[2]);
+            float vx=float.Parse(parts[0]), vy=float.Parse(parts[1]), vz=float.Parse(parts[2]);
             float bestD2 = weldR2;
             float[]? bestP = null;
             foreach (var ep in ceVerts)
             {
-                float dx=wx-ep[0], dy=wy-ep[1], dz=wz-ep[2];
+                float dx=vx-ep[0], dy=vy-ep[1], dz=vz-ep[2];
                 float d2=dx*dx+dy*dy+dz*dz;
                 if (d2 < bestD2) { bestD2=d2; bestP=ep; }
             }
@@ -1117,7 +1074,7 @@ public static class MeshOps
                 weldMap[bk] = new float[]{ bestP[0], bestP[1], bestP[2] };
         }
 
-        // -- 6. Emit cap tiles — every vertex is a fresh clone ----------------
+        // -- 5. Emit cap tiles — every vertex is a fresh clone ----------------
         // This guarantees zero shared references with bone mesh in above/below.
         float[] EmitV(float[] v)
         {
