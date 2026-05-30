@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using g3;
@@ -1037,53 +1037,46 @@ public static class MeshOps
         }
 
         // -- 3. Snap boundary cap vertices to nearest cut-edge point ----------
-        // Any cap vertex that is outside the bone gets moved to the nearest
-        // point on a cut-edge segment. This closes the gap locally without
-        // adding any new triangles — just moving the cap edge to meet the bone.
+        // Only vertices within snapRadius of a cut edge are boundary vertices.
+        // Interior cap vertices (far from any cut edge) are never touched.
+        // This avoids the unreliable IsInside test near the bone surface.
         if (cutEdges.Count < 2) return;
 
+        float snapRadius = 1.5f;  // mm — slightly larger than tile edge (~1mm)
+        float snapR2 = snapRadius * snapRadius;
+
+        // Shared: find nearest point on any cut-edge segment, return (point, dist²)
+        (float px, float py, float pz, float d2) NearestCutEdge(float[] v)
+        {
+            float bestD2 = float.MaxValue;
+            float bx = v[0], by = v[1], bz = v[2];
+            foreach (var (ea, eb) in cutEdges)
+            {
+                float ex=eb[0]-ea[0], ey=eb[1]-ea[1], ez=eb[2]-ea[2];
+                float len2 = ex*ex+ey*ey+ez*ez;
+                if (len2 < 1e-12f) continue;
+                float t = ((v[0]-ea[0])*ex+(v[1]-ea[1])*ey+(v[2]-ea[2])*ez) / len2;
+                t = Math.Clamp(t, 0f, 1f);
+                float qx=ea[0]+t*ex, qy=ea[1]+t*ey, qz=ea[2]+t*ez;
+                float dd=(v[0]-qx)*(v[0]-qx)+(v[1]-qy)*(v[1]-qy)+(v[2]-qz)*(v[2]-qz);
+                if (dd < bestD2) { bestD2=dd; bx=qx; by=qy; bz=qz; }
+            }
+            return (bx, by, bz, bestD2);
+        }
+
+        // Snap above cap vertices
         for (int i = capStartAbove; i < above.Count; i++)
         {
             float[] v = above[i];
-            if (tree.IsInside(new Vector3d(v[0], v[1], v[2]))) continue;
-
-            // Find nearest point on any cut-edge segment
-            float bestD2 = float.MaxValue;
-            float bx = v[0], by = v[1], bz = v[2];
-            foreach (var (ea, eb) in cutEdges)
-            {
-                float ex=eb[0]-ea[0], ey=eb[1]-ea[1], ez=eb[2]-ea[2];
-                float len2 = ex*ex+ey*ey+ez*ez;
-                if (len2 < 1e-12f) continue;
-                float t = ((v[0]-ea[0])*ex+(v[1]-ea[1])*ey+(v[2]-ea[2])*ez) / len2;
-                t = Math.Clamp(t, 0f, 1f);
-                float px=ea[0]+t*ex, py=ea[1]+t*ey, pz=ea[2]+t*ez;
-                float d2=(v[0]-px)*(v[0]-px)+(v[1]-py)*(v[1]-py)+(v[2]-pz)*(v[2]-pz);
-                if (d2 < bestD2) { bestD2=d2; bx=px; by=py; bz=pz; }
-            }
-            v[0]=bx; v[1]=by; v[2]=bz;
+            var (px, py, pz, d2) = NearestCutEdge(v);
+            if (d2 < snapR2) { v[0]=px; v[1]=py; v[2]=pz; }
         }
-
-        // Same for below
+        // Snap below cap vertices
         for (int i = capStartBelow; i < below.Count; i++)
         {
             float[] v = below[i];
-            if (tree.IsInside(new Vector3d(v[0], v[1], v[2]))) continue;
-
-            float bestD2 = float.MaxValue;
-            float bx = v[0], by = v[1], bz = v[2];
-            foreach (var (ea, eb) in cutEdges)
-            {
-                float ex=eb[0]-ea[0], ey=eb[1]-ea[1], ez=eb[2]-ea[2];
-                float len2 = ex*ex+ey*ey+ez*ez;
-                if (len2 < 1e-12f) continue;
-                float t = ((v[0]-ea[0])*ex+(v[1]-ea[1])*ey+(v[2]-ea[2])*ez) / len2;
-                t = Math.Clamp(t, 0f, 1f);
-                float px=ea[0]+t*ex, py=ea[1]+t*ey, pz=ea[2]+t*ez;
-                float d2=(v[0]-px)*(v[0]-px)+(v[1]-py)*(v[1]-py)+(v[2]-pz)*(v[2]-pz);
-                if (d2 < bestD2) { bestD2=d2; bx=px; by=py; bz=pz; }
-            }
-            v[0]=bx; v[1]=by; v[2]=bz;
+            var (px, py, pz, d2) = NearestCutEdge(v);
+            if (d2 < snapR2) { v[0]=px; v[1]=py; v[2]=pz; }
         }
     }
 
