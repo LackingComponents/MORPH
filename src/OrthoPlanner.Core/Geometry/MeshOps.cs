@@ -857,7 +857,7 @@ public static class MeshOps
 
         // -- 3. Cap: subdivide polyplane, PIP-test against open boundary loops --
         if (capEnds && cutEdges.Count >= 2)
-            CapFromCutSurface(soup, polyplane, above, below);
+            CapFromCutSurface(soup, cutEdges, polyplane, above, below);
 
         return (above, below);
     }
@@ -961,29 +961,27 @@ public static class MeshOps
     /// <summary>
     /// Caps the open cut boundary by using the cutting polyplane surface itself:
     ///   1. Builds a spatial index (AABB tree) from the original unsplit bone mesh.
-    ///   2. For each triangle of the polyplane mesh, tests whether its centroid
-    ///      is inside the bone volume (winding-number based containment test).
-    ///   3. Only the polyplane triangles that are inside the bone are kept as cap.
-    ///   4. These cap triangles are added to both halves with opposing windings.
-    ///
-    /// This gives a cap that is exactly the intersection of the cutting surface
-    /// with the bone volume: no overhang, no gaps, no approximations.
+    ///   2. Subdivides polyplane triangles to ~1mm.
+    ///   3. Keeps only sub-triangles whose centroid is inside the bone volume.
+    ///   4. For boundary cap vertices (outside the bone), snaps them to the
+    ///      nearest point on the cut-edge boundary so the cap perimeter exactly
+    ///      coincides with the bone cut edge — closing the mesh locally.
+    ///   5. Adds cap triangles to both halves with opposing windings.
     /// </summary>
     private static void CapFromCutSurface(
         List<float[]> originalSoup,
+        List<(float[] A, float[] B)> cutEdges,
         Polyplane polyplane,
         List<float[]> above,
         List<float[]> below)
     {
         var pverts = polyplane.MeshVertices;
-        if (pverts.Count < 9) return;   // need at least 3 triangles worth of verts
+        if (pverts.Count < 9) return;
 
         // -- 1. Build AABB tree from original mesh for inside/outside queries --
         DMesh3 boneMesh = ToIndexedMesh(originalSoup);
         if (boneMesh.TriangleCount < 4) return;
-
         var tree = new DMeshAABBTree3(boneMesh, true);
-
 
         // -- 1b. Subdivide polyplane triangles to ~1mm for fine boundary fit --
         static float EdgeLen(float[] a, float[] b)
@@ -1013,7 +1011,10 @@ public static class MeshOps
             if (!any) break;
         }
 
-        // -- 2. Test each polyplane triangle centroid against bone volume ------
+        // -- 2. Accept tiles whose centroid is inside the bone volume ----------
+        int capStartAbove = above.Count;
+        int capStartBelow = below.Count;
+
         for (int i = 0; i + 2 < subTris.Count; i += 3)
         {
             var pa = subTris[i]; var pb = subTris[i+1]; var pc = subTris[i+2];
@@ -1024,10 +1025,65 @@ public static class MeshOps
             if (!tree.IsInside(new Vector3d(cx, cy, cz)))
                 continue;
 
-            // above cap: reversed winding (normal faces toward below/distal)
-            above.Add(pa); above.Add(pc); above.Add(pb);
-            // below cap: normal winding (normal faces toward above/proximal)
-            below.Add(pa); below.Add(pb); below.Add(pc);
+            // Clone vertices so snapping doesn't affect other tiles
+            var ca = new float[]{ pa[0],pa[1],pa[2] };
+            var cb = new float[]{ pb[0],pb[1],pb[2] };
+            var cc = new float[]{ pc[0],pc[1],pc[2] };
+
+            // above cap: reversed winding
+            above.Add(ca); above.Add(cc); above.Add(cb);
+            // below cap: normal winding
+            below.Add((float[])ca.Clone()); below.Add((float[])cb.Clone()); below.Add((float[])cc.Clone());
+        }
+
+        // -- 3. Snap boundary cap vertices to nearest cut-edge point ----------
+        // Any cap vertex that is outside the bone gets moved to the nearest
+        // point on a cut-edge segment. This closes the gap locally without
+        // adding any new triangles — just moving the cap edge to meet the bone.
+        if (cutEdges.Count < 2) return;
+
+        for (int i = capStartAbove; i < above.Count; i++)
+        {
+            float[] v = above[i];
+            if (tree.IsInside(new Vector3d(v[0], v[1], v[2]))) continue;
+
+            // Find nearest point on any cut-edge segment
+            float bestD2 = float.MaxValue;
+            float bx = v[0], by = v[1], bz = v[2];
+            foreach (var (ea, eb) in cutEdges)
+            {
+                float ex=eb[0]-ea[0], ey=eb[1]-ea[1], ez=eb[2]-ea[2];
+                float len2 = ex*ex+ey*ey+ez*ez;
+                if (len2 < 1e-12f) continue;
+                float t = ((v[0]-ea[0])*ex+(v[1]-ea[1])*ey+(v[2]-ea[2])*ez) / len2;
+                t = Math.Clamp(t, 0f, 1f);
+                float px=ea[0]+t*ex, py=ea[1]+t*ey, pz=ea[2]+t*ez;
+                float d2=(v[0]-px)*(v[0]-px)+(v[1]-py)*(v[1]-py)+(v[2]-pz)*(v[2]-pz);
+                if (d2 < bestD2) { bestD2=d2; bx=px; by=py; bz=pz; }
+            }
+            v[0]=bx; v[1]=by; v[2]=bz;
+        }
+
+        // Same for below
+        for (int i = capStartBelow; i < below.Count; i++)
+        {
+            float[] v = below[i];
+            if (tree.IsInside(new Vector3d(v[0], v[1], v[2]))) continue;
+
+            float bestD2 = float.MaxValue;
+            float bx = v[0], by = v[1], bz = v[2];
+            foreach (var (ea, eb) in cutEdges)
+            {
+                float ex=eb[0]-ea[0], ey=eb[1]-ea[1], ez=eb[2]-ea[2];
+                float len2 = ex*ex+ey*ey+ez*ez;
+                if (len2 < 1e-12f) continue;
+                float t = ((v[0]-ea[0])*ex+(v[1]-ea[1])*ey+(v[2]-ea[2])*ez) / len2;
+                t = Math.Clamp(t, 0f, 1f);
+                float px=ea[0]+t*ex, py=ea[1]+t*ey, pz=ea[2]+t*ez;
+                float d2=(v[0]-px)*(v[0]-px)+(v[1]-py)*(v[1]-py)+(v[2]-pz)*(v[2]-pz);
+                if (d2 < bestD2) { bestD2=d2; bx=px; by=py; bz=pz; }
+            }
+            v[0]=bx; v[1]=by; v[2]=bz;
         }
     }
 
@@ -1078,7 +1134,7 @@ public static class MeshOps
         }
 
         if (capEnds && cutEdges.Count >= 2)
-            CapFromCutSurface(soup, polyplane, prox, dist);
+            CapFromCutSurface(soup, cutEdges, polyplane, prox, dist);
 
         return (prox, dist);
     }
