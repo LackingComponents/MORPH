@@ -1029,6 +1029,38 @@ public static class MeshOps
             // below cap: normal winding (normal faces toward above/proximal)
             below.Add(pa); below.Add(pb); below.Add(pc);
         }
+
+        // -- 3. Stitch boundary: fill gaps between cap tiles and bone cut edge --
+        // The cap tiles stop at the bone surface boundary (centroid test).
+        // This leaves thin perimeter gaps. Convert the combined mesh to DMesh3,
+        // find remaining open boundary loops, and fill each with SimpleHoleFiller.
+        try
+        {
+            DMesh3 combined = ToIndexedMesh(above);
+            if (combined.TriangleCount > 2)
+            {
+                var loops = new MeshBoundaryLoops(combined, true);
+                foreach (var loop in loops.Loops)
+                {
+                    var filler = new SimpleHoleFiller(combined, loop);
+                    if (!filler.Fill()) continue;
+                    if (filler.NewTriangles == null) continue;
+                    foreach (int tid in filler.NewTriangles)
+                    {
+                        var t = combined.GetTriangle(tid);
+                        var va = combined.GetVertex(t.a);
+                        var vb = combined.GetVertex(t.b);
+                        var vc = combined.GetVertex(t.c);
+                        var fa = new float[]{(float)va.x,(float)va.y,(float)va.z};
+                        var fb = new float[]{(float)vb.x,(float)vb.y,(float)vb.z};
+                        var fc = new float[]{(float)vc.x,(float)vc.y,(float)vc.z};
+                        above.Add(fa); above.Add(fb); above.Add(fc);
+                        below.Add(fa); below.Add(fc); below.Add(fb);
+                    }
+                }
+            }
+        }
+        catch { /* non-manifold mesh; cap tiles are still placed, just not stitched */ }
     }
 
 
