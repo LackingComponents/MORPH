@@ -1011,72 +1011,96 @@ public static class MeshOps
             if (!any) break;
         }
 
-        // -- 2. Accept tiles whose centroid is inside the bone volume ----------
-        int capStartAbove = above.Count;
-        int capStartBelow = below.Count;
+        // -- 2. Collect accepted tiles and identify boundary cap vertices ------
+        // First pass: collect all accepted tile indices.
+        // Build edge adjacency to find boundary edges (appear once, not shared).
+        // Boundary vertices are those on any boundary edge.
+        static string EK(float[] p) => $"{p[0]:F4},{p[1]:F4},{p[2]:F4}";
+        static string EdgeKey(float[] a, float[] b)
+        { string ka=EK(a), kb=EK(b); return string.CompareOrdinal(ka,kb)<0 ? ka+"|"+kb : kb+"|"+ka; }
 
+        // Collect accepted tiles as (a,b,c) triples
+        var accepted = new List<(float[] a, float[] b, float[] c)>();
         for (int i = 0; i + 2 < subTris.Count; i += 3)
         {
             var pa = subTris[i]; var pb = subTris[i+1]; var pc = subTris[i+2];
             float cx = (pa[0]+pb[0]+pc[0]) / 3f;
             float cy = (pa[1]+pb[1]+pc[1]) / 3f;
             float cz = (pa[2]+pb[2]+pc[2]) / 3f;
-
-            if (!tree.IsInside(new Vector3d(cx, cy, cz)))
-                continue;
-
-            // Clone vertices so snapping doesn't affect other tiles
-            var ca = new float[]{ pa[0],pa[1],pa[2] };
-            var cb = new float[]{ pb[0],pb[1],pb[2] };
-            var cc = new float[]{ pc[0],pc[1],pc[2] };
-
-            // above cap: reversed winding
-            above.Add(ca); above.Add(cc); above.Add(cb);
-            // below cap: normal winding
-            below.Add((float[])ca.Clone()); below.Add((float[])cb.Clone()); below.Add((float[])cc.Clone());
+            if (tree.IsInside(new Vector3d(cx, cy, cz)))
+                accepted.Add((pa, pb, pc));
         }
+        if (accepted.Count == 0) return;
 
-        // -- 3. Snap boundary cap vertices to nearest cut-edge point ----------
-        // Only vertices within snapRadius of a cut edge are boundary vertices.
-        // Interior cap vertices (far from any cut edge) are never touched.
-        // This avoids the unreliable IsInside test near the bone surface.
-        if (cutEdges.Count < 2) return;
-
-        float snapRadius = 1.5f;  // mm — slightly larger than tile edge (~1mm)
-        float snapR2 = snapRadius * snapRadius;
-
-        // Shared: find nearest point on any cut-edge segment, return (point, dist²)
-        (float px, float py, float pz, float d2) NearestCutEdge(float[] v)
+        // Count edge occurrences: boundary edges appear once, interior edges twice
+        var edgeCount = new Dictionary<string, int>();
+        foreach (var (a, b, c) in accepted)
         {
-            float bestD2 = float.MaxValue;
-            float bx = v[0], by = v[1], bz = v[2];
-            foreach (var (ea, eb) in cutEdges)
-            {
-                float ex=eb[0]-ea[0], ey=eb[1]-ea[1], ez=eb[2]-ea[2];
-                float len2 = ex*ex+ey*ey+ez*ez;
-                if (len2 < 1e-12f) continue;
-                float t = ((v[0]-ea[0])*ex+(v[1]-ea[1])*ey+(v[2]-ea[2])*ez) / len2;
-                t = Math.Clamp(t, 0f, 1f);
-                float qx=ea[0]+t*ex, qy=ea[1]+t*ey, qz=ea[2]+t*ez;
-                float dd=(v[0]-qx)*(v[0]-qx)+(v[1]-qy)*(v[1]-qy)+(v[2]-qz)*(v[2]-qz);
-                if (dd < bestD2) { bestD2=dd; bx=qx; by=qy; bz=qz; }
+            void Inc(float[] x, float[] y) {
+                string k = EdgeKey(x, y);
+                edgeCount[k] = edgeCount.GetValueOrDefault(k) + 1;
             }
-            return (bx, by, bz, bestD2);
+            Inc(a,b); Inc(b,c); Inc(c,a);
         }
 
-        // Snap above cap vertices
-        for (int i = capStartAbove; i < above.Count; i++)
+        // Mark boundary vertex keys (on any edge with count == 1)
+        var boundaryVerts = new HashSet<string>();
+        foreach (var (a, b, c) in accepted)
         {
-            float[] v = above[i];
-            var (px, py, pz, d2) = NearestCutEdge(v);
-            if (d2 < snapR2) { v[0]=px; v[1]=py; v[2]=pz; }
+            void Check(float[] x, float[] y) {
+                if (edgeCount.GetValueOrDefault(EdgeKey(x,y)) == 1)
+                { boundaryVerts.Add(EK(x)); boundaryVerts.Add(EK(y)); }
+            }
+            Check(a,b); Check(b,c); Check(c,a);
         }
-        // Snap below cap vertices
-        for (int i = capStartBelow; i < below.Count; i++)
+
+        // -- 3. Build snap map: boundary vertex → nearest cut-edge point ------
+        // Only boundary cap vertices are snapped. Interior vertices are untouched.
+        // All tiles sharing a boundary vertex get the same snapped position.
+        var snapMap = new Dictionary<string, float[]>();
+        if (cutEdges.Count >= 2)
         {
-            float[] v = below[i];
-            var (px, py, pz, d2) = NearestCutEdge(v);
-            if (d2 < snapR2) { v[0]=px; v[1]=py; v[2]=pz; }
+            foreach (var vk in boundaryVerts)
+            {
+                if (snapMap.ContainsKey(vk)) continue;
+                // Parse vertex key back to coordinates
+                var parts = vk.Split(',');
+                float vx = float.Parse(parts[0]), vy = float.Parse(parts[1]), vz = float.Parse(parts[2]);
+
+                // Find nearest point on any cut-edge segment
+                float bestD2 = float.MaxValue;
+                float bx = vx, by = vy, bz = vz;
+                foreach (var (ea, eb) in cutEdges)
+                {
+                    float ex=eb[0]-ea[0], ey=eb[1]-ea[1], ez=eb[2]-ea[2];
+                    float len2 = ex*ex+ey*ey+ez*ez;
+                    if (len2 < 1e-12f) continue;
+                    float t = ((vx-ea[0])*ex+(vy-ea[1])*ey+(vz-ea[2])*ez) / len2;
+                    t = Math.Clamp(t, 0f, 1f);
+                    float qx=ea[0]+t*ex, qy=ea[1]+t*ey, qz=ea[2]+t*ez;
+                    float dd=(vx-qx)*(vx-qx)+(vy-qy)*(vy-qy)+(vz-qz)*(vz-qz);
+                    if (dd < bestD2) { bestD2=dd; bx=qx; by=qy; bz=qz; }
+                }
+                snapMap[vk] = new float[]{ bx, by, bz };
+            }
+        }
+
+        // -- 4. Emit cap tiles with snapped boundary vertices -----------------
+        float[] Snap(float[] v)
+        {
+            string k = EK(v);
+            if (snapMap.TryGetValue(k, out var s))
+                return new float[]{ s[0], s[1], s[2] };
+            return new float[]{ v[0], v[1], v[2] };
+        }
+
+        foreach (var (a, b, c) in accepted)
+        {
+            var sa = Snap(a); var sb = Snap(b); var sc = Snap(c);
+            // above cap: reversed winding
+            above.Add(sa); above.Add(sc); above.Add(sb);
+            // below cap: normal winding (fresh clones)
+            below.Add((float[])sa.Clone()); below.Add((float[])sb.Clone()); below.Add((float[])sc.Clone());
         }
     }
 
