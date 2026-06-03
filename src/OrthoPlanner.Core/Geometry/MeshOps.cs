@@ -856,6 +856,7 @@ public static class MeshOps
         }
 
         // -- 3. Cap: subdivide polyplane, PIP-test against open boundary loops --
+        CapLog($"TrueSliceByPolyplane: soup={soup.Count/3} tris, above={above.Count/3}, below={below.Count/3}, cutEdges={cutEdges.Count}, capEnds={capEnds}");
         if (capEnds && cutEdges.Count >= 2)
             CapFromCutSurface(soup, cutEdges, polyplane, above, below);
 
@@ -958,6 +959,14 @@ public static class MeshOps
 
     // -- Cap fill: polyplane surface clipped to bone interior -----------------
 
+    private static readonly string _capLogPath = System.IO.Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "cap_debug.log");
+    private static void CapLog(string msg)
+    {
+        try { System.IO.File.AppendAllText(_capLogPath, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}\n"); }
+        catch { }
+    }
+
     /// <summary>
     /// Caps the open cut boundary by using the cutting polyplane surface itself:
     ///   1. Builds a spatial index (AABB tree) from the original unsplit bone mesh.
@@ -976,11 +985,13 @@ public static class MeshOps
         List<float[]> below)
     {
         var pverts = polyplane.MeshVertices;
-        if (pverts.Count < 9) return;
+        CapLog($"CapFromCutSurface ENTER: originalSoup={originalSoup.Count/3} tris, cutEdges={cutEdges.Count}, polyplane tris={pverts.Count/3}");
+        if (pverts.Count < 3) { CapLog("EARLY EXIT: pverts < 3"); return; }
 
         // -- 1. Build AABB tree from original mesh for inside/outside queries --
         DMesh3 boneMesh = ToIndexedMesh(originalSoup);
-        if (boneMesh.TriangleCount < 4) return;
+        CapLog($"  ToIndexedMesh: {boneMesh.VertexCount} verts, {boneMesh.TriangleCount} tris");
+        if (boneMesh.TriangleCount < 4) { CapLog("EARLY EXIT: boneMesh < 4 tris"); return; }
         var tree = new DMeshAABBTree3(boneMesh, true);
 
         // -- 1b. Pre-filter: skip polyplane triangles outside bone AABB --------
@@ -1014,7 +1025,8 @@ public static class MeshOps
                 continue; // triangle entirely outside bone bbox — skip
             filteredPverts.Add(ta); filteredPverts.Add(tb); filteredPverts.Add(tc);
         }
-        if (filteredPverts.Count < 3) return;
+        CapLog($"  AABB filter: {pverts.Count/3} input tris -> {filteredPverts.Count/3} kept, boneBBox=[{bxMin:F1}..{bxMax:F1}]x[{byMin:F1}..{byMax:F1}]x[{bzMin:F1}..{bzMax:F1}]");
+        if (filteredPverts.Count < 3) { CapLog("EARLY EXIT: filteredPverts < 3"); return; }
 
         // -- 1c. Subdivide filtered polyplane triangles to ~0.5mm ---------------
         static float EdgeLen(float[] a, float[] b)
@@ -1043,6 +1055,7 @@ public static class MeshOps
             subTris = next;
             if (!any) break;
         }
+        CapLog($"  Subdivision: {filteredPverts.Count/3} -> {subTris.Count/3} tiles");
 
         // -- 2. Collect accepted tiles ----------------------------------------
         // Try AABB IsInside first (works for watertight solid meshes).
@@ -1058,6 +1071,7 @@ public static class MeshOps
             if (tree.IsInside(new Vector3d(cx, cy, cz)))
                 accepted.Add((pa, pb, pc));
         }
+        CapLog($"  IsInside accepted: {accepted.Count} tiles out of {subTris.Count/3}");
 
         // -- 2b. Fallback: 2D PIP against cutEdges projected onto cutting plane --
         if (accepted.Count == 0 && cutEdges.Count >= 3)
@@ -1112,8 +1126,9 @@ public static class MeshOps
                         accepted.Add((pa, pb, pc));
                 }
             }
+        CapLog($"  After PIP fallback: {accepted.Count} tiles");
         }
-        if (accepted.Count == 0) return;
+        if (accepted.Count == 0) { CapLog("EARLY EXIT: 0 accepted tiles after both stages"); return; }
 
         // -- 3. Identify boundary cap vertices via edge adjacency -------------
         static string VK(float[] p) => $"{p[0]:F4},{p[1]:F4},{p[2]:F4}";
