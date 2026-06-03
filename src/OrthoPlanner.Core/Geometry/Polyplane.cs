@@ -303,6 +303,21 @@ public class Polyplane
         return (vSign >= 0) == (refSign >= 0);
     }
 
+    /// <summary>
+    /// Computes segment-plane intersection parameter t for segment a→b
+    /// against the first plane equation. Returns t or NaN if parallel.
+    /// Works for infinite planes (no barycentric bounds check).
+    /// </summary>
+    public double PlaneIntersectT(float[] a, float[] b)
+    {
+        var pl = _planes[0];
+        float dx = b[0]-a[0], dy = b[1]-a[1], dz = b[2]-a[2];
+        float denom = pl.A*dx + pl.B*dy + pl.C*dz;
+        if (MathF.Abs(denom) < 1e-12f) return double.NaN; // parallel
+        float numer = -(pl.A*a[0] + pl.B*a[1] + pl.C*a[2] + pl.D);
+        return numer / denom;
+    }
+
     // ─── Fast side test via nearest-plane signed distance ────────────────────────
 
     private float[]? _refSigns; // cached sign of reference point per plane

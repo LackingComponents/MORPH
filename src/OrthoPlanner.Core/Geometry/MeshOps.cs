@@ -874,16 +874,28 @@ public static class MeshOps
     /// <summary>
     /// Returns the intersection point of segment (a→b) with the polyplane,
     /// or null if the edge does not cross (crossEdge=false) or no hit is found.
+    /// For single-plane polyplanes, uses the plane equation directly (infinite plane).
     /// </summary>
     private static float[]? EdgeCross(Polyplane pp, float[] a, float[] b, bool crossEdge)
     {
         if (!crossEdge) return null;
-        double[] ad = { a[0], a[1], a[2] };
-        double[] bd = { b[0], b[1], b[2] };
-        double t = pp.SegmentIntersectT(ad, bd);
-        if (double.IsNaN(t))
+
+        double t;
+        if (pp.IsSinglePlane)
         {
-            // Fallback: midpoint (edge must cross but SegmentIntersectT missed)
+            // Plane equation intersection: t = -(N·A + D) / (N·(B-A))
+            t = pp.PlaneIntersectT(a, b);
+        }
+        else
+        {
+            double[] ad = { a[0], a[1], a[2] };
+            double[] bd = { b[0], b[1], b[2] };
+            t = pp.SegmentIntersectT(ad, bd);
+        }
+
+        if (double.IsNaN(t) || t < 0.0 || t > 1.0)
+        {
+            // Last resort fallback: midpoint
             return new float[] { (a[0]+b[0])*0.5f, (a[1]+b[1])*0.5f, (a[2]+b[2])*0.5f };
         }
         return new float[]
