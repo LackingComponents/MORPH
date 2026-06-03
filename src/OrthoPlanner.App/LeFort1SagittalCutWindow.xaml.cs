@@ -285,8 +285,15 @@ public partial class LeFort1SagittalCutWindow : Window
         LeftResult  = L;
         RightResult = R;
         MainGroup.Children.Remove(_boneMesh);
+        // Add opaque bone segments first
         MainGroup.Children.Add(MakeMesh(L, Color.FromRgb(100, 200, 255), 1.0));
         MainGroup.Children.Add(MakeMesh(R, Color.FromRgb(120, 220, 210), 1.0));
+        // Move transparent plane visuals to end for proper transparency
+        foreach (var g in new object[]{ _planeMesh, _linesGroup, _handlesGroup })
+        {
+            if (g is Element3D el && MainGroup.Children.Contains(el))
+            { MainGroup.Children.Remove(el); MainGroup.Children.Add(el); }
+        }
         AcceptBtn.Visibility = Visibility.Visible;
         CutBtn.IsEnabled = false;
         StatusText.Text = $"Done -- L: {L.Count/3} tris | R: {R.Count/3} tris";

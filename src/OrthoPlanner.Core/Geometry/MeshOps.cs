@@ -795,11 +795,15 @@ public static class MeshOps
     /// <param name="aboveReference">A world-space point known to be on the "above" side
     ///   (e.g. highest-Z centroid of the mesh). Used to orient the parity test.</param>
     /// <param name="capEnds">When true, open boundary loops are fan-filled.</param>
+    /// <param name="secondaryPlane">Optional. When set, a vertex is "above" only if it's
+    ///   above both the primary polyplane AND this secondary plane. Used for Y-cut
+    ///   (arm + stem) compound classification.</param>
     public static (List<float[]> Above, List<float[]> Below) TrueSliceByPolyplane(
         List<float[]> soup,
         Polyplane polyplane,
         double[] aboveReference,
-        bool capEnds = true)
+        bool capEnds = true,
+        Polyplane? secondaryPlane = null)
     {
         var above = new List<float[]>();
         var below = new List<float[]>();
@@ -826,6 +830,9 @@ public static class MeshOps
                     double[] vd = { v[0], v[1], v[2] };
                     side = polyplane.SameSideAs(vd, aboveReference);
                 }
+                // Compound: must also be above secondary plane
+                if (side && secondaryPlane != null)
+                    side = secondaryPlane.SameSideByPlaneEq(v, aboveReference);
                 vertSide[key] = side;
             }
             return side;
