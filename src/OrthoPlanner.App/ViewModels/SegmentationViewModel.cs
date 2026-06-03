@@ -192,7 +192,7 @@ public partial class MainViewModel
 
         if (count == 0)
         {
-            StatusText = $"No voxels found in range {min}ÔÇô{max} HU";
+            StatusText = $"No voxels found in range {min}\u2013{max} HU";
             IsLoading = false;
             return;
         }
@@ -250,7 +250,7 @@ public partial class MainViewModel
 
         await GenerateSegmentMeshAsync(label);
 
-        StatusText = $"Segmented {count:N0} voxels ({min}ÔÇô{max} HU)";
+        StatusText = $"Segmented {count:N0} voxels ({min}\u2013{max} HU)";
         LoadProgress = 100;
 
         // Isolate the pure bone mask so that subsequent segmentations (e.g., Dental) do not overwrite and destroy it
@@ -411,14 +411,14 @@ public partial class MainViewModel
 
         if (components.Count < 2)
         {
-            StatusText = "Only 1 connected region found ÔÇö cannot split";
+            StatusText = "Only 1 connected region found \u2014 cannot split";
             IsLoading = false;
             return;
         }
 
         // Keep only the 2 largest components (mandible + skull/maxilla), discard small fragments
         var sorted = components.OrderByDescending(c => c.voxelCount).ToList();
-        StatusText = $"Found {components.Count} components ÔÇö keeping top 2...";
+        StatusText = $"Found {components.Count} components \u2014 keeping top 2...";
 
         // Remove all small fragment labels
         for (int i = 2; i < sorted.Count; i++)

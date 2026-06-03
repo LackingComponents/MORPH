@@ -139,7 +139,7 @@ public partial class MainViewModel
             var root = doc.RootElement;
 
             PatientName = root.GetProperty("PatientName").GetString() ?? "";
-            StudyDate = root.GetProperty("StudyDate").GetString() ?? "";
+            StudyDate = FormatStudyDate(root.GetProperty("StudyDate").GetString() ?? "");
             WindowCenter = root.GetProperty("WindowCenter").GetDouble();
             WindowWidth = root.GetProperty("WindowWidth").GetDouble();
             var segNode = root.GetProperty("Segmentation");

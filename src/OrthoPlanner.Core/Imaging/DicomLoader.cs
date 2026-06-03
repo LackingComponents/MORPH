@@ -1,4 +1,4 @@
-﻿using FellowOakDicom;
+using FellowOakDicom;
 using FellowOakDicom.Imaging;
 
 namespace OrthoPlanner.Core.Imaging;
@@ -268,6 +268,6 @@ public static class DicomLoader
         if (string.IsNullOrWhiteSpace(dicomDate) || dicomDate.Length != 8) 
             return dicomDate;
 
-        return $"{dicomDate.Substring(6, 2)}/{dicomDate.Substring(4, 2)}/{dicomDate.Substring(0, 4)}";
+        return $"{dicomDate.Substring(6, 2)}-{dicomDate.Substring(4, 2)}-{dicomDate.Substring(0, 4)}";
     }
 }

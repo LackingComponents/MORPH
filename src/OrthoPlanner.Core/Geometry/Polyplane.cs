@@ -280,4 +280,53 @@ public class Polyplane
         }
         return (crossings % 2) == 0;
     }
+
+    // ─── Fast side test via nearest-plane signed distance ────────────────────────
+
+    private float[]? _refSigns; // cached sign of reference point per plane
+
+    /// <summary>
+    /// Pre-caches the signed distance of the reference point to every plane in the
+    /// polyplane. Must be called once before using <see cref="SameSideAsFast"/>.
+    /// </summary>
+    public void CacheReferenceSide(double[] reference)
+    {
+        _refSigns = new float[_planes.Count];
+        for (int i = 0; i < _planes.Count; i++)
+        {
+            var pl = _planes[i];
+            _refSigns[i] = pl.A*(float)reference[0] + pl.B*(float)reference[1]
+                         + pl.C*(float)reference[2] + pl.D;
+        }
+    }
+
+    /// <summary>
+    /// Fast side classification: finds the polyplane triangle nearest to the vertex
+    /// (by point-to-triangle distance) and checks whether the vertex is on the same
+    /// side of that triangle's plane as the reference. Much faster than ray-casting
+    /// because it avoids Möller-Trumbore per triangle.
+    /// <para>Requires <see cref="CacheReferenceSide"/> to have been called first.</para>
+    /// </summary>
+    public bool SameSideAsFast(float[] v)
+    {
+        if (_refSigns == null || _planes.Count == 0) return true;
+
+        double px = v[0], py = v[1], pz = v[2];
+        double[] pt = { px, py, pz };
+        double bestDist = double.MaxValue;
+        int bestPlane = 0;
+
+        int nTri = MeshVertices.Count / 3;
+        for (int i = 0; i < nTri; i++)
+        {
+            var a = MeshVertices[i*3]; var b = MeshVertices[i*3+1]; var c = MeshVertices[i*3+2];
+            double[] da = {a[0],a[1],a[2]}, db = {b[0],b[1],b[2]}, dc = {c[0],c[1],c[2]};
+            double d = DistancePointToTriangleSq(pt, da, db, dc);
+            if (d < bestDist) { bestDist = d; bestPlane = i; }
+        }
+
+        var pl = _planes[bestPlane];
+        float sign = pl.A*v[0] + pl.B*v[1] + pl.C*v[2] + pl.D;
+        return (sign >= 0) == (_refSigns[bestPlane] >= 0);
+    }
 }

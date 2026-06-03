@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Input;
@@ -57,7 +57,7 @@ public partial class MainViewModel : ObservableObject
     // ÔöÇÔöÇÔöÇ Viewport (headlamp, modelCenter, geometry, toggles, lighting) ÔåÆ ViewportViewModel.cs ÔöÇÔöÇÔöÇ
 
     // ÔöÇÔöÇÔöÇ Status / Loading (shared, kept here) ÔöÇÔöÇÔöÇ
-    [ObservableProperty] private string _statusText = "Ready ÔÇö Open a DICOM folder to begin";
+    [ObservableProperty] private string _statusText = "Ready \u2014 Open a DICOM folder to begin";
     [ObservableProperty] private double _loadProgress;
     [ObservableProperty] private bool _isLoading;
 

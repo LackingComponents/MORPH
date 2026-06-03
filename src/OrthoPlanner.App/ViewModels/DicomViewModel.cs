@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -198,9 +198,9 @@ public partial class MainViewModel
 
             // Update UI state
             PatientName = Volume.PatientName;
-            StudyDate = Volume.StudyDate;
+            StudyDate = FormatStudyDate(Volume.StudyDate);
             SeriesDescription = Volume.SeriesDescription;
-            VolumeDimensions = $"{Volume.Width} ├ù {Volume.Height} ├ù {Volume.Depth}";
+            VolumeDimensions = $"{Volume.Width} \u00d7 {Volume.Height} \u00d7 {Volume.Depth}";
 
             if (Volume == null) return;
 
@@ -233,7 +233,7 @@ public partial class MainViewModel
             UpdateHistograms();
             RefreshCombinedModel(); // Force UI Camera to center on the raw Volume bounds
 
-            StatusText = $"Loaded: {Volume.PatientName} ÔÇö {Volume.Depth} slices";
+            StatusText = $"Loaded: {Volume.PatientName} \u2014 {Volume.Depth} slices";
         }
         catch (Exception ex)
         {
@@ -591,5 +591,33 @@ public partial class MainViewModel
             StatusText = "NHP Alignment Complete. Model frozen.";
             OnPropertyChanged(nameof(IsNhpDirty));
         });
+    }
+
+    private static string FormatStudyDate(string dateStr)
+    {
+        if (string.IsNullOrWhiteSpace(dateStr))
+            return "";
+
+        string clean = dateStr.Trim();
+
+        // 1. Raw DICOM format YYYYMMDD
+        if (clean.Length == 8 && long.TryParse(clean, out _))
+        {
+            return $"{clean.Substring(6, 2)}-{clean.Substring(4, 2)}-{clean.Substring(0, 4)}";
+        }
+
+        // 2. Format with slashes DD/MM/YYYY
+        if (clean.Length == 10 && clean[2] == '/' && clean[5] == '/')
+        {
+            return $"{clean.Substring(0, 2)}-{clean.Substring(3, 2)}-{clean.Substring(6, 4)}";
+        }
+
+        // 3. Try parsing with standard DateTime parser
+        if (System.DateTime.TryParse(clean, out var parsed))
+        {
+            return parsed.ToString("dd-MM-yyyy");
+        }
+
+        return clean;
     }
 }

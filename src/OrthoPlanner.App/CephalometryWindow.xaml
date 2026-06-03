@@ -233,7 +233,7 @@
                             <Border HorizontalAlignment="Right" VerticalAlignment="Bottom"
                                     Background="#AA1E4A8A" CornerRadius="3"
                                     Padding="5,2" Margin="0,0,5,5">
-                                <TextBlock Text="2├ù" Foreground="#FFD0D8E0"
+                                <TextBlock Text="2x" Foreground="#FFD0D8E0"
                                            FontSize="10" FontWeight="SemiBold"
                                            FontFamily="Consolas"/>
                             </Border>

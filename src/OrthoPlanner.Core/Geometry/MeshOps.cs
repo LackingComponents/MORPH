@@ -805,10 +805,11 @@ public static class MeshOps
         var below = new List<float[]>();
 
         // ── 1. Classify every vertex as above (true) or below (false) ─────────
-        // We use parity ray-casting (SameSideAs) from each vertex to aboveReference.
-        // A vertex is "above" iff the polyplane is crossed an even number of times
-        // on the segment from that vertex to aboveReference.
+        // Uses nearest-plane signed distance for fast classification.
         int nTri = soup.Count / 3;
+
+        // Pre-cache reference side for fast classification
+        polyplane.CacheReferenceSide(aboveReference);
 
         // Cache vertex-side classification; use quantised key to avoid re-testing
         // shared vertices multiple times.
@@ -818,8 +819,7 @@ public static class MeshOps
             string key = $"{Math.Round(v[0],2)},{Math.Round(v[1],2)},{Math.Round(v[2],2)}";
             if (!vertSide.TryGetValue(key, out bool side))
             {
-                double[] vd = { v[0], v[1], v[2] };
-                side = polyplane.SameSideAs(vd, aboveReference);
+                side = polyplane.SameSideAsFast(v);
                 vertSide[key] = side;
             }
             return side;
@@ -983,13 +983,46 @@ public static class MeshOps
         if (boneMesh.TriangleCount < 4) return;
         var tree = new DMeshAABBTree3(boneMesh, true);
 
-        // -- 1b. Subdivide polyplane triangles to ~0.5mm for fine boundary fit --
+        // -- 1b. Pre-filter: skip polyplane triangles outside bone AABB --------
+        // The polyplane often extends far beyond the bone (100mm+ extensions for
+        // robust SameSideAs). No point subdividing triangles that will all fail
+        // IsInside anyway.
+        float bxMin=float.MaxValue,bxMax=float.MinValue;
+        float byMin=float.MaxValue,byMax=float.MinValue;
+        float bzMin=float.MaxValue,bzMax=float.MinValue;
+        foreach (var v in originalSoup)
+        {
+            if(v[0]<bxMin)bxMin=v[0]; if(v[0]>bxMax)bxMax=v[0];
+            if(v[1]<byMin)byMin=v[1]; if(v[1]>byMax)byMax=v[1];
+            if(v[2]<bzMin)bzMin=v[2]; if(v[2]>bzMax)bzMax=v[2];
+        }
+        // Pad by 1mm to avoid clipping boundary tiles
+        bxMin-=1f; byMin-=1f; bzMin-=1f;
+        bxMax+=1f; byMax+=1f; bzMax+=1f;
+
+        var filteredPverts = new List<float[]>();
+        for (int i = 0; i + 2 < pverts.Count; i += 3)
+        {
+            var ta=pverts[i]; var tb=pverts[i+1]; var tc=pverts[i+2];
+            float txMin=Math.Min(ta[0],Math.Min(tb[0],tc[0]));
+            float txMax=Math.Max(ta[0],Math.Max(tb[0],tc[0]));
+            float tyMin=Math.Min(ta[1],Math.Min(tb[1],tc[1]));
+            float tyMax=Math.Max(ta[1],Math.Max(tb[1],tc[1]));
+            float tzMin=Math.Min(ta[2],Math.Min(tb[2],tc[2]));
+            float tzMax=Math.Max(ta[2],Math.Max(tb[2],tc[2]));
+            if (txMax<bxMin||txMin>bxMax||tyMax<byMin||tyMin>byMax||tzMax<bzMin||tzMin>bzMax)
+                continue; // triangle entirely outside bone bbox — skip
+            filteredPverts.Add(ta); filteredPverts.Add(tb); filteredPverts.Add(tc);
+        }
+        if (filteredPverts.Count < 3) return;
+
+        // -- 1c. Subdivide filtered polyplane triangles to ~0.5mm ---------------
         static float EdgeLen(float[] a, float[] b)
         { float dx=a[0]-b[0],dy=a[1]-b[1],dz=a[2]-b[2]; return MathF.Sqrt(dx*dx+dy*dy+dz*dz); }
         static float[] Mid(float[] a, float[] b)
             => new[]{ (a[0]+b[0])*.5f,(a[1]+b[1])*.5f,(a[2]+b[2])*.5f };
 
-        var subTris = new List<float[]>(pverts);
+        var subTris = new List<float[]>(filteredPverts);
         for (int level = 0; level < 12; level++)
         {
             bool any = false;
