@@ -281,6 +281,28 @@ public class Polyplane
         return (crossings % 2) == 0;
     }
 
+    // ─── Plane-equation side test (for single-plane polyplanes) ──────────────
+
+    /// <summary>True when the polyplane is a single flat plane (1 quad = 2 tris with same normal).</summary>
+    public bool IsSinglePlane => _planes.Count == 2
+        && MathF.Abs(_planes[0].A - _planes[1].A) < 1e-4f
+        && MathF.Abs(_planes[0].B - _planes[1].B) < 1e-4f
+        && MathF.Abs(_planes[0].C - _planes[1].C) < 1e-4f;
+
+    /// <summary>
+    /// Fast, exact side classification for single-plane polyplanes.
+    /// Uses the plane equation Ax+By+Cz+D: same sign as reference → same side.
+    /// Works for infinite planes — never misses regardless of quad size.
+    /// </summary>
+    public bool SameSideByPlaneEq(float[] v, double[] reference)
+    {
+        var pl = _planes[0];
+        float refSign = pl.A*(float)reference[0] + pl.B*(float)reference[1]
+                      + pl.C*(float)reference[2] + pl.D;
+        float vSign   = pl.A*v[0] + pl.B*v[1] + pl.C*v[2] + pl.D;
+        return (vSign >= 0) == (refSign >= 0);
+    }
+
     // ─── Fast side test via nearest-plane signed distance ────────────────────────
 
     private float[]? _refSigns; // cached sign of reference point per plane

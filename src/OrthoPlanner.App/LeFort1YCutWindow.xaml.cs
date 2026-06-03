@@ -228,48 +228,17 @@ public partial class LeFort1YCutWindow : Window
         var lFT = _lFT; var lFB = _lFB;
         var jT  = _jT;  var jB  = _jB;
 
-        // Build finite Polyplane for each arm — extend along edge directions
-        // to cover the full mesh while preserving exact plane orientation.
+        // Build finite Polyplane for each arm from the exact visual quads.
+        // Vertex classification now uses the plane equation (IsSinglePlane path)
+        // so the quad size doesn't matter for classification — only for EdgeCross.
         float[] F(Point3D p) => new float[]{ (float)p.X, (float)p.Y, (float)p.Z };
-
-        // Extend a planar quad along its own edge directions (preserves plane equation).
-        // a,b = one edge (top: far→junction), d,c = opposite edge (bottom: far→junction).
-        // Extends: far end away from junction, junction away from far end,
-        //          top upward, bottom downward.
-        const float EXT = 150f; // mm extension along each direction
-        static float[] Add(float[] p, float dx, float dy, float dz)
-            => new[]{ p[0]+dx, p[1]+dy, p[2]+dz };
-
-        (float[],float[],float[],float[]) ExtendArmQuad(
-            Point3D farTop, Point3D junTop, Point3D junBot, Point3D farBot)
-        {
-            // Edge directions (in-plane)
-            // Arm direction: far → junction
-            double ax=junTop.X-farTop.X, ay=junTop.Y-farTop.Y, az=junTop.Z-farTop.Z;
-            double al=Math.Sqrt(ax*ax+ay*ay+az*az); if(al>0){ax/=al;ay/=al;az/=al;}
-            // Vertical direction: top → bottom
-            double vx=junBot.X-junTop.X, vy=junBot.Y-junTop.Y, vz=junBot.Z-junTop.Z;
-            double vl=Math.Sqrt(vx*vx+vy*vy+vz*vz); if(vl>0){vx/=vl;vy/=vl;vz/=vl;}
-
-            // Extend: far end pushed away from junction (+arm coverage),
-            // junction end NOT pushed past junction (would invade stem area),
-            // both ends pushed vertically (top up, bottom down).
-            float[] eFT = Add(F(farTop), (float)(-ax*EXT - vx*EXT), (float)(-ay*EXT - vy*EXT), (float)(-az*EXT - vz*EXT));
-            float[] eJT = Add(F(junTop), (float)(        - vx*EXT), (float)(        - vy*EXT), (float)(        - vz*EXT));
-            float[] eJB = Add(F(junBot), (float)(        + vx*EXT), (float)(        + vy*EXT), (float)(        + vz*EXT));
-            float[] eFB = Add(F(farBot), (float)(-ax*EXT + vx*EXT), (float)(-ay*EXT + vy*EXT), (float)(-az*EXT + vz*EXT));
-            return (eFT, eJT, eJB, eFB);
-        }
-
-        var (rA,rB,rC,rD) = ExtendArmQuad(rFT, jT, jB, rFB);
         var ppRight = new Polyplane(0.0);
         ppRight.SetMeshFromQuads(new List<(float[],float[],float[],float[])>{
-            (rA,rB,rC,rD)
+            (F(rFT), F(jT), F(jB), F(rFB))
         });
-        var (lA,lB,lC,lD) = ExtendArmQuad(lFT, jT, jB, lFB);
         var ppLeft = new Polyplane(0.0);
         ppLeft.SetMeshFromQuads(new List<(float[],float[],float[],float[])>{
-            (lA,lB,lC,lD)
+            (F(lFT), F(jT), F(jB), F(lFB))
         });
 
         List<float[]> L, R, C;

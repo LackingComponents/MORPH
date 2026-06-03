@@ -805,10 +805,11 @@ public static class MeshOps
         var below = new List<float[]>();
 
         // ── 1. Classify every vertex as above (true) or below (false) ─────────
-        // We use parity ray-casting (SameSideAs) from each vertex to aboveReference.
-        // A vertex is "above" iff the polyplane is crossed an even number of times
-        // on the segment from that vertex to aboveReference.
+        // For single-plane polyplanes (sagittal, Y-cut arms): use plane equation
+        // directly — Ax+By+Cz+D, compare sign with reference. O(1), exact, infinite.
+        // For multi-panel polyplanes (LeFort horizontal): use parity ray-casting.
         int nTri = soup.Count / 3;
+        bool usePlaneEq = polyplane.IsSinglePlane;
 
         // Cache vertex-side classification; use quantised key to avoid re-testing
         // shared vertices multiple times.
@@ -818,8 +819,13 @@ public static class MeshOps
             string key = $"{Math.Round(v[0],2)},{Math.Round(v[1],2)},{Math.Round(v[2],2)}";
             if (!vertSide.TryGetValue(key, out bool side))
             {
-                double[] vd = { v[0], v[1], v[2] };
-                side = polyplane.SameSideAs(vd, aboveReference);
+                if (usePlaneEq)
+                    side = polyplane.SameSideByPlaneEq(v, aboveReference);
+                else
+                {
+                    double[] vd = { v[0], v[1], v[2] };
+                    side = polyplane.SameSideAs(vd, aboveReference);
+                }
                 vertSide[key] = side;
             }
             return side;
