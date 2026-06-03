@@ -251,10 +251,12 @@ public partial class LeFort1YCutWindow : Window
             double vx=junBot.X-junTop.X, vy=junBot.Y-junTop.Y, vz=junBot.Z-junTop.Z;
             double vl=Math.Sqrt(vx*vx+vy*vy+vz*vz); if(vl>0){vx/=vl;vy/=vl;vz/=vl;}
 
-            // Extend each corner outward
+            // Extend: far end pushed away from junction (+arm coverage),
+            // junction end NOT pushed past junction (would invade stem area),
+            // both ends pushed vertically (top up, bottom down).
             float[] eFT = Add(F(farTop), (float)(-ax*EXT - vx*EXT), (float)(-ay*EXT - vy*EXT), (float)(-az*EXT - vz*EXT));
-            float[] eJT = Add(F(junTop), (float)( ax*EXT - vx*EXT), (float)( ay*EXT - vy*EXT), (float)( az*EXT - vz*EXT));
-            float[] eJB = Add(F(junBot), (float)( ax*EXT + vx*EXT), (float)( ay*EXT + vy*EXT), (float)( az*EXT + vz*EXT));
+            float[] eJT = Add(F(junTop), (float)(        - vx*EXT), (float)(        - vy*EXT), (float)(        - vz*EXT));
+            float[] eJB = Add(F(junBot), (float)(        + vx*EXT), (float)(        + vy*EXT), (float)(        + vz*EXT));
             float[] eFB = Add(F(farBot), (float)(-ax*EXT + vx*EXT), (float)(-ay*EXT + vy*EXT), (float)(-az*EXT + vz*EXT));
             return (eFT, eJT, eJB, eFB);
         }
