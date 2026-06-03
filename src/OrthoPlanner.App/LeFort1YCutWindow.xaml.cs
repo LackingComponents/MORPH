@@ -228,15 +228,46 @@ public partial class LeFort1YCutWindow : Window
         var lFT = _lFT; var lFB = _lFB;
         var jT  = _jT;  var jB  = _jB;
 
-        // Build finite Polyplane for each arm from the exact quads drawn by Rebuild()
+        // Build finite Polyplane for each arm — extend along edge directions
+        // to cover the full mesh while preserving exact plane orientation.
         float[] F(Point3D p) => new float[]{ (float)p.X, (float)p.Y, (float)p.Z };
+
+        // Extend a planar quad along its own edge directions (preserves plane equation).
+        // a,b = one edge (top: far→junction), d,c = opposite edge (bottom: far→junction).
+        // Extends: far end away from junction, junction away from far end,
+        //          top upward, bottom downward.
+        const float EXT = 150f; // mm extension along each direction
+        static float[] Add(float[] p, float dx, float dy, float dz)
+            => new[]{ p[0]+dx, p[1]+dy, p[2]+dz };
+
+        (float[],float[],float[],float[]) ExtendArmQuad(
+            Point3D farTop, Point3D junTop, Point3D junBot, Point3D farBot)
+        {
+            // Edge directions (in-plane)
+            // Arm direction: far → junction
+            double ax=junTop.X-farTop.X, ay=junTop.Y-farTop.Y, az=junTop.Z-farTop.Z;
+            double al=Math.Sqrt(ax*ax+ay*ay+az*az); if(al>0){ax/=al;ay/=al;az/=al;}
+            // Vertical direction: top → bottom
+            double vx=junBot.X-junTop.X, vy=junBot.Y-junTop.Y, vz=junBot.Z-junTop.Z;
+            double vl=Math.Sqrt(vx*vx+vy*vy+vz*vz); if(vl>0){vx/=vl;vy/=vl;vz/=vl;}
+
+            // Extend each corner outward
+            float[] eFT = Add(F(farTop), (float)(-ax*EXT - vx*EXT), (float)(-ay*EXT - vy*EXT), (float)(-az*EXT - vz*EXT));
+            float[] eJT = Add(F(junTop), (float)( ax*EXT - vx*EXT), (float)( ay*EXT - vy*EXT), (float)( az*EXT - vz*EXT));
+            float[] eJB = Add(F(junBot), (float)( ax*EXT + vx*EXT), (float)( ay*EXT + vy*EXT), (float)( az*EXT + vz*EXT));
+            float[] eFB = Add(F(farBot), (float)(-ax*EXT + vx*EXT), (float)(-ay*EXT + vy*EXT), (float)(-az*EXT + vz*EXT));
+            return (eFT, eJT, eJB, eFB);
+        }
+
+        var (rA,rB,rC,rD) = ExtendArmQuad(rFT, jT, jB, rFB);
         var ppRight = new Polyplane(0.0);
         ppRight.SetMeshFromQuads(new List<(float[],float[],float[],float[])>{
-            (F(rFT), F(jT), F(jB), F(rFB))   // right arm: DrawQuad(_rFT,_jT,_jB,_rFB)
+            (rA,rB,rC,rD)
         });
+        var (lA,lB,lC,lD) = ExtendArmQuad(lFT, jT, jB, lFB);
         var ppLeft = new Polyplane(0.0);
         ppLeft.SetMeshFromQuads(new List<(float[],float[],float[],float[])>{
-            (F(lFT), F(jT), F(jB), F(lFB))   // left arm:  DrawQuad(_lFT,_jT,_jB,_lFB)
+            (lA,lB,lC,lD)
         });
 
         List<float[]> L, R, C;
