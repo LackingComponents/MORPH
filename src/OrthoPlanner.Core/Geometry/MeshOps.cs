@@ -1045,6 +1045,9 @@ public static class MeshOps
         }
 
         // -- 2. Collect accepted tiles ----------------------------------------
+        // Try AABB IsInside first (works for watertight solid meshes).
+        // Fall back to 2D PIP against cutEdges if IsInside returns 0 tiles
+        // (happens for thin-shell meshes like the capped LeFort maxilla).
         var accepted = new List<(float[] a, float[] b, float[] c)>();
         for (int i = 0; i + 2 < subTris.Count; i += 3)
         {
@@ -1054,6 +1057,61 @@ public static class MeshOps
             float cz = (pa[2]+pb[2]+pc[2]) / 3f;
             if (tree.IsInside(new Vector3d(cx, cy, cz)))
                 accepted.Add((pa, pb, pc));
+        }
+
+        // -- 2b. Fallback: 2D PIP against cutEdges projected onto cutting plane --
+        if (accepted.Count == 0 && cutEdges.Count >= 3)
+        {
+            // Compute cutting plane normal from first polyplane triangle
+            float[] pn0 = pverts[0], pn1 = pverts[1], pn2 = pverts[2];
+            float nx = (pn1[1]-pn0[1])*(pn2[2]-pn0[2]) - (pn1[2]-pn0[2])*(pn2[1]-pn0[1]);
+            float ny = (pn1[2]-pn0[2])*(pn2[0]-pn0[0]) - (pn1[0]-pn0[0])*(pn2[2]-pn0[2]);
+            float nz = (pn1[0]-pn0[0])*(pn2[1]-pn0[1]) - (pn1[1]-pn0[1])*(pn2[0]-pn0[0]);
+            float nl = MathF.Sqrt(nx*nx+ny*ny+nz*nz);
+            if (nl > 1e-6f)
+            {
+                nx/=nl; ny/=nl; nz/=nl;
+                // Two orthonormal axes on the plane
+                float ux, uy, uz;
+                if (MathF.Abs(nx) < 0.9f) { ux=0; uy=nz; uz=-ny; }
+                else                       { ux=-nz; uy=0; uz=nx; }
+                float ul=MathF.Sqrt(ux*ux+uy*uy+uz*uz); ux/=ul; uy/=ul; uz/=ul;
+                float vx=ny*uz-nz*uy, vy=nz*ux-nx*uz, vz=nx*uy-ny*ux;
+
+                // Project cut-edge endpoints
+                var edgePts = new (float au, float av, float bu, float bv)[cutEdges.Count];
+                for (int i = 0; i < cutEdges.Count; i++)
+                {
+                    var (ea, eb) = cutEdges[i];
+                    edgePts[i] = (ea[0]*ux+ea[1]*uy+ea[2]*uz, ea[0]*vx+ea[1]*vy+ea[2]*vz,
+                                  eb[0]*ux+eb[1]*uy+eb[2]*uz, eb[0]*vx+eb[1]*vy+eb[2]*vz);
+                }
+
+                // Winding-number PIP
+                bool PIP(float pu, float pv)
+                {
+                    int w = 0;
+                    foreach (var (au,av,bu,bv) in edgePts)
+                    {
+                        if (av <= pv)
+                        { if (bv > pv && (bu-au)*(pv-av)-(bv-av)*(pu-au) > 0) w++; }
+                        else
+                        { if (bv <= pv && (bu-au)*(pv-av)-(bv-av)*(pu-au) < 0) w--; }
+                    }
+                    return w != 0;
+                }
+
+                for (int i = 0; i + 2 < subTris.Count; i += 3)
+                {
+                    var pa = subTris[i]; var pb = subTris[i+1]; var pc = subTris[i+2];
+                    float cx = (pa[0]+pb[0]+pc[0]) / 3f;
+                    float cy = (pa[1]+pb[1]+pc[1]) / 3f;
+                    float cz = (pa[2]+pb[2]+pc[2]) / 3f;
+                    float cu = cx*ux+cy*uy+cz*uz, cv = cx*vx+cy*vy+cz*vz;
+                    if (PIP(cu, cv))
+                        accepted.Add((pa, pb, pc));
+                }
+            }
         }
         if (accepted.Count == 0) return;
 
