@@ -227,18 +227,56 @@ public partial class LeFort1YCutWindow : Window
         var rFT = _rFT; var rFB = _rFB;
         var lFT = _lFT; var lFB = _lFB;
         var jT  = _jT;  var jB  = _jB;
+        var sBT = _sBT; var sBB = _sBB;
 
-        // Build finite Polyplane for each arm from the exact visual quads.
-        // Vertex classification now uses the plane equation (IsSinglePlane path)
-        // so the quad size doesn't matter for classification — only for EdgeCross.
+        // Build L-shaped Polyplane for each arm: arm quad + stem quad.
+        // The stem (jT→sBT→sBB→jB) is the posterior boundary of the
+        // central piece — without it the two arm planes diverge and the
+        // central piece extends too far backward.
+        //
+        // Extend the outer edges of each quad so that SameSideAs ray-casting
+        // never misses (the quads must be large enough to intercept any
+        // vertex-to-reference segment). Junction corners stay shared.
         float[] F(Point3D p) => new float[]{ (float)p.X, (float)p.Y, (float)p.Z };
+        const float E = 150f;
+
+        // Extend arm far-end corners along arm direction + vertically
+        float[] ExtF(Point3D far, Point3D jun, Point3D junOther, float signV)
+        {
+            // Arm direction: away from junction
+            double ax=far.X-jun.X, ay=far.Y-jun.Y, az=far.Z-jun.Z;
+            double al=Math.Sqrt(ax*ax+ay*ay+az*az); if(al>0){ax/=al;ay/=al;az/=al;}
+            // Vertical direction: from junT to junB (or vice versa)
+            double vx=junOther.X-jun.X, vy=junOther.Y-jun.Y, vz=junOther.Z-jun.Z;
+            double vl=Math.Sqrt(vx*vx+vy*vy+vz*vz); if(vl>0){vx/=vl;vy/=vl;vz/=vl;}
+            return new[]{(float)(far.X+ax*E+vx*signV*E),(float)(far.Y+ay*E+vy*signV*E),(float)(far.Z+az*E+vz*signV*E)};
+        }
+        // Extend stem far-end corners along stem direction + vertically
+        float[] ExtS(Point3D far, Point3D jun, Point3D junOther, float signV)
+        {
+            double sx=far.X-jun.X, sy=far.Y-jun.Y, sz=far.Z-jun.Z;
+            double sl=Math.Sqrt(sx*sx+sy*sy+sz*sz); if(sl>0){sx/=sl;sy/=sl;sz/=sl;}
+            double vx=junOther.X-jun.X, vy=junOther.Y-jun.Y, vz=junOther.Z-jun.Z;
+            double vl=Math.Sqrt(vx*vx+vy*vy+vz*vz); if(vl>0){vx/=vl;vy/=vl;vz/=vl;}
+            return new[]{(float)(far.X+sx*E+vx*signV*E),(float)(far.Y+sy*E+vy*signV*E),(float)(far.Z+sz*E+vz*signV*E)};
+        }
+
+        var erFT = ExtF(rFT, jT, jB, -1); // extend right far-top: away from junction, upward
+        var erFB = ExtF(rFB, jB, jT, -1);  // extend right far-bot: away from junction, downward
+        var elFT = ExtF(lFT, jT, jB, -1);
+        var elFB = ExtF(lFB, jB, jT, -1);
+        var esBT = ExtS(sBT, jT, jB, -1);  // extend stem far-top: away from junction, upward
+        var esBB = ExtS(sBB, jB, jT, -1);  // extend stem far-bot: away from junction, downward
+
         var ppRight = new Polyplane(0.0);
         ppRight.SetMeshFromQuads(new List<(float[],float[],float[],float[])>{
-            (F(rFT), F(jT), F(jB), F(rFB))
+            (erFT, F(jT), F(jB), erFB),       // right arm (extended far end)
+            (F(jT), esBT,  esBB,  F(jB))      // stem (extended far end)
         });
         var ppLeft = new Polyplane(0.0);
         ppLeft.SetMeshFromQuads(new List<(float[],float[],float[],float[])>{
-            (F(lFT), F(jT), F(jB), F(lFB))
+            (elFT, F(jT), F(jB), elFB),       // left arm (extended far end)
+            (F(jT), esBT,  esBB,  F(jB))      // stem (extended far end)
         });
 
         List<float[]> L, R, C;
@@ -252,14 +290,13 @@ public partial class LeFort1YCutWindow : Window
                 foreach (var v in maxillaVerts)
                     if (v[2] > bestZ) { bestZ = v[2]; crRef = new double[]{ v[0], v[1], v[2] }; }
 
-                // ── Step 1: cut along right arm ────────────────────────────────────
-                // "above" (same side as crRef) = the side that includes the central piece
+                // ── Step 1: cut along right arm + stem ──────────────────────────
+                // "above" (same side as crRef) = central + left lateral
                 // "below" = right lateral segment
                 var (central1, rightSeg) = MeshOps.TrueSliceByPolyplane(
                     maxillaVerts, ppRight, crRef, capEnds: true);
 
-                // ── Step 2: cut along left arm on the central+right remnant ─────────
-                // Reference stays the same (cranial direction)
+                // ── Step 2: cut along left arm + stem on central+left remnant ───
                 double bestZ2 = double.MinValue;
                 double[] crRef2 = crRef;
                 foreach (var v in central1)
