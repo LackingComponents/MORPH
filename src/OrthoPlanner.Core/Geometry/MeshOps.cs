@@ -805,11 +805,10 @@ public static class MeshOps
         var below = new List<float[]>();
 
         // ── 1. Classify every vertex as above (true) or below (false) ─────────
-        // Uses nearest-plane signed distance for fast classification.
+        // We use parity ray-casting (SameSideAs) from each vertex to aboveReference.
+        // A vertex is "above" iff the polyplane is crossed an even number of times
+        // on the segment from that vertex to aboveReference.
         int nTri = soup.Count / 3;
-
-        // Pre-cache reference side for fast classification
-        polyplane.CacheReferenceSide(aboveReference);
 
         // Cache vertex-side classification; use quantised key to avoid re-testing
         // shared vertices multiple times.
@@ -819,7 +818,8 @@ public static class MeshOps
             string key = $"{Math.Round(v[0],2)},{Math.Round(v[1],2)},{Math.Round(v[2],2)}";
             if (!vertSide.TryGetValue(key, out bool side))
             {
-                side = polyplane.SameSideAsFast(v);
+                double[] vd = { v[0], v[1], v[2] };
+                side = polyplane.SameSideAs(vd, aboveReference);
                 vertSide[key] = side;
             }
             return side;
