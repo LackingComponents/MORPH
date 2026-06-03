@@ -244,13 +244,23 @@ public partial class LeFort1SagittalCutWindow : Window
         var maxillaVerts = _maxillaVerts;
         double xMid = _xMid, yFront = _yFront, yBack = _yBack, zTop = _zTop, zBot = _zBot;
 
-        // Build a finite Polyplane from the exact visual plane bounds used by RebuildPlane().
-        // The plane is a rectangle at x=xMid spanning [yFront..yBack] × [zBot..zTop].
-        // Quad corners: FrontTop, BackTop, BackBot, FrontBot  (same winding as addSection())
-        float[] FT = { (float)xMid, (float)yFront, (float)zTop };
-        float[] BT = { (float)xMid, (float)yBack,  (float)zTop };
-        float[] BB = { (float)xMid, (float)yBack,  (float)zBot };
-        float[] FB = { (float)xMid, (float)yFront, (float)zBot };
+        // Build a finite Polyplane at x=xMid.
+        // The quad must extend well past the mesh bounding box in Y and Z so that
+        // SameSideAs (finite-triangle intersection) never misses a vertex-to-reference
+        // segment. Use the mesh bbox + generous margin for robustness.
+        float yMin = float.MaxValue, yMax = float.MinValue;
+        float zMin = float.MaxValue, zMax = float.MinValue;
+        foreach (var v in maxillaVerts)
+        {
+            if (v[1] < yMin) yMin = v[1]; if (v[1] > yMax) yMax = v[1];
+            if (v[2] < zMin) zMin = v[2]; if (v[2] > zMax) zMax = v[2];
+        }
+        float yMargin = (yMax - yMin) * 0.5f + 50f;
+        float zMargin = (zMax - zMin) * 0.5f + 50f;
+        float[] FT = { (float)xMid, yMin - yMargin, zMax + zMargin };
+        float[] BT = { (float)xMid, yMax + yMargin, zMax + zMargin };
+        float[] BB = { (float)xMid, yMax + yMargin, zMin - zMargin };
+        float[] FB = { (float)xMid, yMin - yMargin, zMin - zMargin };
         var polyplane = new Polyplane(0.0);
         polyplane.SetMeshFromQuads(new List<(float[], float[], float[], float[])>{
             (FT, BT, BB, FB)

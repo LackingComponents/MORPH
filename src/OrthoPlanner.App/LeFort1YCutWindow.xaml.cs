@@ -228,15 +228,50 @@ public partial class LeFort1YCutWindow : Window
         var lFT = _lFT; var lFB = _lFB;
         var jT  = _jT;  var jB  = _jB;
 
-        // Build finite Polyplane for each arm from the exact quads drawn by Rebuild()
+        // Build finite Polyplane for each arm — extend each quad far enough
+        // to cover the entire mesh bbox so SameSideAs never misses a segment.
         float[] F(Point3D p) => new float[]{ (float)p.X, (float)p.Y, (float)p.Z };
+
+        // Compute mesh bbox diagonal to determine required plane extent
+        float bxMin=float.MaxValue,bxMax=float.MinValue;
+        float byMin=float.MaxValue,byMax=float.MinValue;
+        float bzMin=float.MaxValue,bzMax=float.MinValue;
+        foreach (var v in maxillaVerts)
+        {
+            if(v[0]<bxMin)bxMin=v[0]; if(v[0]>bxMax)bxMax=v[0];
+            if(v[1]<byMin)byMin=v[1]; if(v[1]>byMax)byMax=v[1];
+            if(v[2]<bzMin)bzMin=v[2]; if(v[2]>bzMax)bzMax=v[2];
+        }
+        float bboxDiag = MathF.Sqrt((bxMax-bxMin)*(bxMax-bxMin) +
+                                     (byMax-byMin)*(byMax-byMin) +
+                                     (bzMax-bzMin)*(bzMax-bzMin)) + 50f;
+
+        // Extend a quad defined by 4 coplanar points outward from its centroid
+        static (float[],float[],float[],float[]) ExtendQuad(
+            float[] a, float[] b, float[] c, float[] d, float extent)
+        {
+            float cx=(a[0]+b[0]+c[0]+d[0])*.25f;
+            float cy=(a[1]+b[1]+c[1]+d[1])*.25f;
+            float cz=(a[2]+b[2]+c[2]+d[2])*.25f;
+            float[] Ext(float[] p) {
+                float dx=p[0]-cx, dy=p[1]-cy, dz=p[2]-cz;
+                float len=MathF.Sqrt(dx*dx+dy*dy+dz*dz);
+                if(len<1e-6f) return new[]{p[0],p[1],p[2]};
+                float scale = extent/len;
+                return new[]{cx+dx*scale, cy+dy*scale, cz+dz*scale};
+            }
+            return (Ext(a),Ext(b),Ext(c),Ext(d));
+        }
+
+        var (rA,rB,rC,rD) = ExtendQuad(F(rFT),F(jT),F(jB),F(rFB), bboxDiag);
         var ppRight = new Polyplane(0.0);
         ppRight.SetMeshFromQuads(new List<(float[],float[],float[],float[])>{
-            (F(rFT), F(jT), F(jB), F(rFB))   // right arm: DrawQuad(_rFT,_jT,_jB,_rFB)
+            (rA,rB,rC,rD)
         });
+        var (lA,lB,lC,lD) = ExtendQuad(F(lFT),F(jT),F(jB),F(lFB), bboxDiag);
         var ppLeft = new Polyplane(0.0);
         ppLeft.SetMeshFromQuads(new List<(float[],float[],float[],float[])>{
-            (F(lFT), F(jT), F(jB), F(lFB))   // left arm:  DrawQuad(_lFT,_jT,_jB,_lFB)
+            (lA,lB,lC,lD)
         });
 
         List<float[]> L, R, C;
