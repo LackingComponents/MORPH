@@ -1,4 +1,4 @@
-﻿using System.Windows.Media;
+using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -62,4 +62,5 @@ public partial class MainViewModel
 
     // ÔöÇÔöÇÔöÇ Cephalometry ÔöÇÔöÇÔöÇ
     [ObservableProperty] private bool _isCephalometryOpen;
+    [ObservableProperty] private bool _showCephLandmarksIn3D;
 }

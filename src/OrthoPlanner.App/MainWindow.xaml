@@ -980,7 +980,8 @@
 
                     <!-- 3D Viewport. ShowViewCube="False" = custom NavCube active.
                          To revert to built-in: change ShowViewCube to True and set NavCube Visibility=Collapsed below. -->
-                    <hx:Viewport3DX x:Name="Viewport3D" Grid.Row="1"
+                    <Border x:Name="ViewportHostBorder" Grid.Row="1">
+                        <hx:Viewport3DX x:Name="Viewport3D"
                                     BackgroundColor="#FF0C1018"
                                     ShowCoordinateSystem="True"
                                     CoordinateSystemLabelForeground="#00000000"
@@ -1037,6 +1038,7 @@
                             </hx:ItemsModel3D.ItemTemplate>
                         </hx:ItemsModel3D>
                     </hx:Viewport3DX>
+                    </Border>
 
                     <!-- Reset Camera Button Group -->
                     <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="10">
@@ -1205,7 +1207,11 @@
                             <TextBlock Text="CUSTOM MEASUREMENTS" Foreground="White" FontSize="11" FontWeight="Bold" Margin="0,0,0,8" />
                             <TextBlock Text="Right-click on 3D models or slice views to place distance and angle measurements." Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" FontStyle="Italic" TextWrapping="Wrap" Margin="0,0,0,16" />
                             <TextBlock Text="CEPHALOMETRY" Foreground="White" FontSize="11" FontWeight="Bold" Margin="0,0,0,8" />
-                            <TextBlock Text="Place landmarks, trace cephalometric planes, and compute angular and linear measurements." Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" FontStyle="Italic" TextWrapping="Wrap" />
+                            <TextBlock Text="Place landmarks, trace cephalometric planes, and compute angular and linear measurements." Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" FontStyle="Italic" TextWrapping="Wrap" Margin="0,0,0,12" />
+                            
+                            <CheckBox Content="Show cephalometric landmarks in 3D views" 
+                                      IsChecked="{Binding ShowCephLandmarksIn3D}" 
+                                      Foreground="White" FontSize="11" />
                         </StackPanel>
                     </Border>
                 </Grid>

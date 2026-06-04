@@ -20,6 +20,8 @@ public partial class MainWindow : Window
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 
     public HelixToolkit.Wpf.SharpDX.Viewport3DX MainViewport => Viewport3D;
+    public Border SharedViewportHost => ViewportHostBorder;
+    public FrameworkElement Viewport3DHost => ViewportHostBorder;
 
     public MainWindow()
     {
@@ -96,6 +98,10 @@ public partial class MainWindow : Window
                     case nameof(ViewModels.MainViewModel.IsCephalometryOpen):
                         if (VM!.IsCephalometryOpen && VM.Volume != null)
                             CephalometryPanel.SetVolume(VM.Volume);
+                        break;
+
+                    case nameof(ViewModels.MainViewModel.ShowCephLandmarksIn3D):
+                        CephalometryPanel.UpdateLandmarkSphereVisibility(VM!.ShowCephLandmarksIn3D);
                         break;
                 }
             };
