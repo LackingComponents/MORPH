@@ -316,13 +316,39 @@ public partial class MainViewModel
 
             StatusText = "Opening Cranium/Mandible Split wizard...";
 
-            // Use the in-memory bone-only backup if available
-            OrthoPlanner.Core.Segmentation.SegmentationVolume? boneOnlySegVol = null;
-            if (_boneOnlySegVolume != null)
+            bool HasUsableBoneMask(OrthoPlanner.Core.Segmentation.SegmentationVolume? segVolume, byte boneLabel) =>
+                Volume != null &&
+                segVolume != null &&
+                segVolume.Width == Volume.Width &&
+                segVolume.Height == Volume.Height &&
+                segVolume.Depth == Volume.Depth &&
+                segVolume.CountVoxels(boneLabel) > 0;
+
+            OrthoPlanner.Core.Segmentation.SegmentationVolume? GetValidSplitTargetVolume(byte boneLabel) =>
+                HasUsableBoneMask(_boneOnlySegVolume, boneLabel)
+                    ? _boneOnlySegVolume
+                    : HasUsableBoneMask(_segVolume, boneLabel) ? _segVolume : null;
+
+            var splitTargetVolume = GetValidSplitTargetVolume(boneSegment.Label);
+
+            if (splitTargetVolume == null)
             {
-                boneOnlySegVol = _boneOnlySegVolume;
+                StatusText = "Bone mask is out of date after NHP. Recomputing bone model...";
+                await RunSegmentInternalAsync("Bone", BoneMinHU, BoneMaxHU, 230, 210, 180,
+                    HardTissueModel, enhanceThinBone: EnhanceSegmentation, confirmOverwrite: false);
+
+                boneSegment = HardTissueModel;
+                splitTargetVolume = boneSegment != null ? GetValidSplitTargetVolume(boneSegment.Label) : null;
+
+                if (boneSegment?.Vertices == null || boneSegment.Vertices.Length < 100 || splitTargetVolume == null)
+                {
+                    System.Windows.MessageBox.Show(
+                        "The current bone segmentation mask could not be regenerated for the NHP CT volume. Please recompute the bone model manually before splitting.",
+                        "Bone Segmentation Required", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+                    StatusText = "Cranium/Mandible split requires a valid bone segmentation for the current NHP volume.";
+                    return;
+                }
             }
-            var splitTargetVolume = boneOnlySegVol ?? _segVolume;
 
             var wizard = new CondyleSplitWindow(
                 MeshHelper.ToVertexList(boneSegment.Vertices),

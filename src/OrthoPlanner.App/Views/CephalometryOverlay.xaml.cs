@@ -11,9 +11,9 @@ using OrthoPlanner.App.ViewModels;
 using HelixToolkit.Wpf.SharpDX;
 using HxGeom = HelixToolkit.SharpDX;
 
-namespace OrthoPlanner.App;
+namespace OrthoPlanner.App.Views;
 
-public partial class CephalometryWindow : UserControl
+public partial class CephalometryOverlay : UserControl
 {
     // ÔöÇÔöÇ Reusable Brushes ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     private static readonly SolidColorBrush CyanBrush = new(Color.FromRgb(0x00, 0xE5, 0xFF));
@@ -58,6 +58,8 @@ public partial class CephalometryWindow : UserControl
     private readonly List<MeshGeometryModel3D> _landmarkSpheres3D = new();
     private Vector3? _pending3DHit;
     private System.Windows.Point _mouseDown3DScreenPos;
+    private bool _shiftHeld;
+    private Window? _hostWindow;
 
     // ÔöÇÔöÇ 3D Measurements ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     private sealed class Meas3D
@@ -86,7 +88,7 @@ public partial class CephalometryWindow : UserControl
     // Constructor
     // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
 
-    public CephalometryWindow()
+    public CephalometryOverlay()
     {
         InitializeComponent();
 
@@ -131,10 +133,27 @@ public partial class CephalometryWindow : UserControl
         // Default tool highlight
         UpdateToolButtonHighlights();
 
-        // 3D click detection (no-op with VisualBrush, safe guards in each handler)
+        // 3D click detection: in navigation mode the central overlay becomes
+        // mouse-transparent so HelixToolkit receives its native controls. In
+        // placement mode, ViewportGrid is re-enabled and clicks are ray-cast into
+        // the shared viewport to place landmarks/measurements.
         ViewportGrid.PreviewMouseLeftButtonUp += OnViewport3DMouseLeftButtonUp;
         ViewportGrid.PreviewMouseLeftButtonDown += Viewport3D_PreviewMouseLeftButtonDown;
+
+        // Forward navigation gestures (right/middle/wheel) to the shared MainViewport
+        // while ViewportGrid is hit-testable (placement mode), so the user can still
+        // rotate/pan/zoom without first leaving placement mode.
+        ViewportGrid.PreviewMouseRightButtonDown += ViewportGrid_PreviewMouseRightButtonDown;
+        ViewportGrid.PreviewMouseRightButtonUp   += ViewportGrid_PreviewMouseRightButtonUp;
+        ViewportGrid.PreviewMouseDown            += ViewportGrid_PreviewMouseDown;
+        ViewportGrid.PreviewMouseUp              += ViewportGrid_PreviewMouseUp;
+        ViewportGrid.PreviewMouseWheel           += ViewportGrid_PreviewMouseWheel;
+        ViewportGrid.MouseEnter                  += (_, _) => UpdateViewportGridHitTest();
+
         IsVisibleChanged += OnCephVisibilityChanged;
+
+        // Apply initial hit-test state (default = 2D mode -> fully hit-testable).
+        UpdateViewportGridHitTest();
     }
 
     // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
@@ -532,7 +551,8 @@ public partial class CephalometryWindow : UserControl
 
         if (_is3DMode)
         {
-            // Hide DRR overlay — 3D mirror (background) stays visible
+            // Hide DRR overlay so the live HelixViewport3D in MainWindow shows through
+            // the transparent ViewportGrid behind this overlay.
             ViewportBorder.Visibility = Visibility.Collapsed;
 
             // Backfill Position3D for any landmark placed in 2D without a 3D coord
@@ -569,47 +589,168 @@ public partial class CephalometryWindow : UserControl
             RefreshLandmarkOverlay();
             StatusLeft.Text = "2D Mode — Left-click to place landmark, right-drag for W/L";
         }
+
+        UpdateViewportGridHitTest();
     }
 
     private HelixToolkit.Wpf.SharpDX.Viewport3DX? SharedViewport3D =>
         (Application.Current.MainWindow as MainWindow)?.MainViewport;
 
-    // ─── Ceph window visibility: start/stop mirror ───────────────────────────
+    // ─── 3D viewport pass-through / placement routing ────────────────────────
+    // In 3D Select mode (no Shift), the central ViewportGrid is not hit-testable:
+    // the real Helix viewport underneath receives mouse input directly, preserving
+    // its native rotate / pan / zoom controls.
+    // In 3D placement mode (non-Select tool, or Shift held), ViewportGrid becomes
+    // hit-testable again so clicks can be ray-cast onto the 3D surface.
+    // In 2D mode, the DRR canvas remains fully interactive.
+
+    private bool ShouldCaptureLeftClickForPlacement()
+    {
+        if (!_is3DMode) return false;
+        bool shift = _shiftHeld
+                  || Keyboard.IsKeyDown(Key.LeftShift)
+                  || Keyboard.IsKeyDown(Key.RightShift);
+        return _toolState.ActiveTool != CephTool.Select || shift;
+    }
+
+    private void UpdateViewportGridHitTest()
+    {
+        bool shouldCapture = !_is3DMode || ShouldCaptureLeftClickForPlacement();
+
+        ViewportGrid.IsHitTestVisible = shouldCapture;
+        ViewportGrid.Background = shouldCapture ? Brushes.Transparent : null;
+    }
+
+    private void AttachHostKeyboardHandlers()
+    {
+        var window = Window.GetWindow(this) ?? Application.Current.MainWindow;
+        if (window == null) return;
+
+        if (_hostWindow != null && _hostWindow != window)
+            DetachHostKeyboardHandlers();
+
+        _hostWindow = window;
+        _hostWindow.PreviewKeyDown -= CephOverlay_PreviewKeyDown;
+        _hostWindow.PreviewKeyUp -= CephOverlay_PreviewKeyUp;
+        _hostWindow.PreviewKeyDown += CephOverlay_PreviewKeyDown;
+        _hostWindow.PreviewKeyUp += CephOverlay_PreviewKeyUp;
+    }
+
+    private void DetachHostKeyboardHandlers()
+    {
+        if (_hostWindow == null) return;
+
+        _hostWindow.PreviewKeyDown -= CephOverlay_PreviewKeyDown;
+        _hostWindow.PreviewKeyUp -= CephOverlay_PreviewKeyUp;
+        _hostWindow = null;
+        _shiftHeld = false;
+    }
+
+    private void CephOverlay_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.LeftShift || e.Key == Key.RightShift)
+        {
+            _shiftHeld = true;
+            UpdateViewportGridHitTest();
+        }
+    }
+
+    private void CephOverlay_PreviewKeyUp(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.LeftShift || e.Key == Key.RightShift)
+        {
+            _shiftHeld = false;
+            UpdateViewportGridHitTest();
+        }
+    }
+
+    // Forwarders. These fire only when ViewportGrid is hit-test-visible (i.e. 2D
+    // mode, or 3D placement mode). In 2D mode they no-op so the DRR handlers run.
+    // In 3D placement mode we forward to the shared viewport so navigation still
+    // works without exiting placement.
+
+    private void ViewportGrid_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (!_is3DMode) return;
+        var vp = SharedViewport3D;
+        if (vp == null) return;
+        var args = new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta)
+        {
+            RoutedEvent = Mouse.MouseWheelEvent,
+            Source = vp
+        };
+        vp.RaiseEvent(args);
+        e.Handled = true;
+    }
+
+    private void ViewportGrid_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (!_is3DMode) return;
+        ForwardMouseButton(e, MouseButton.Right, isDown: true);
+    }
+
+    private void ViewportGrid_PreviewMouseRightButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_is3DMode) return;
+        ForwardMouseButton(e, MouseButton.Right, isDown: false);
+    }
+
+    private void ViewportGrid_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (!_is3DMode) return;
+        if (e.ChangedButton != MouseButton.Middle) return;
+        ForwardMouseButton(e, MouseButton.Middle, isDown: true);
+    }
+
+    private void ViewportGrid_PreviewMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_is3DMode) return;
+        if (e.ChangedButton != MouseButton.Middle) return;
+        ForwardMouseButton(e, MouseButton.Middle, isDown: false);
+    }
+
+    private void ForwardMouseButton(MouseButtonEventArgs original, MouseButton button, bool isDown)
+    {
+        var vp = SharedViewport3D;
+        if (vp == null) return;
+        RoutedEvent routed = (button, isDown) switch
+        {
+            (MouseButton.Left, true)   => UIElement.MouseLeftButtonDownEvent,
+            (MouseButton.Left, false)  => UIElement.MouseLeftButtonUpEvent,
+            (MouseButton.Right, true)  => UIElement.MouseRightButtonDownEvent,
+            (MouseButton.Right, false) => UIElement.MouseRightButtonUpEvent,
+            _                          => isDown ? Mouse.MouseDownEvent : Mouse.MouseUpEvent
+        };
+        var args = new MouseButtonEventArgs(original.MouseDevice, original.Timestamp, button)
+        {
+            RoutedEvent = routed,
+            Source = vp
+        };
+        vp.RaiseEvent(args);
+        original.Handled = true;
+    }
+
+    // ─── Ceph overlay visibility: refresh spheres on enter, hide on exit ────
 
     private void OnCephVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
         if ((bool)e.NewValue)
         {
-            // Became visible: start mirror and ensure spheres are showing
-            Show3DViewportMirror();
+            AttachHostKeyboardHandlers();
+            // Became visible: rebuild landmark spheres on the shared viewport
             if (_initialized) Refresh3DLandmarks();
+            UpdateViewportGridHitTest();
         }
         else
         {
-            // Became hidden: respect the global "show in 3D" toggle
+            DetachHostKeyboardHandlers();
+            // Became hidden: respect the global "show in 3D" toggle on MainWindow's
+            // Measurements tab — landmark data stays in the ViewModel but visuals
+            // disappear from the 3D viewport unless explicitly kept visible.
             var vm = (Application.Current.MainWindow as MainWindow)?.DataContext as ViewModels.MainViewModel;
             bool keepVisible = vm?.ShowCephLandmarksIn3D ?? false;
             foreach (var s in _landmarkSpheres3D) s.IsRendering = keepVisible;
-            Hide3DViewportMirror();
         }
-    }
-
-    private void Show3DViewportMirror()
-    {
-        var mainWindow = Application.Current.MainWindow as MainWindow;
-        if (mainWindow == null) return;
-        var source = mainWindow.Viewport3DHost;
-        if (source == null) return;
-        if (Viewport3DMirror.Fill is VisualBrush) return; // already set
-
-        var brush = new VisualBrush(source) { Stretch = Stretch.Uniform };
-        RenderOptions.SetBitmapScalingMode(Viewport3DMirror, BitmapScalingMode.HighQuality);
-        Viewport3DMirror.Fill = brush;
-    }
-
-    private void Hide3DViewportMirror()
-    {
-        Viewport3DMirror.Fill = null;
     }
 
     /// <summary>
@@ -632,7 +773,16 @@ public partial class CephalometryWindow : UserControl
 
     private void Viewport3D_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (!_is3DMode) return;
+        // Only intercept the left click when we are about to place something.
+        // Otherwise let it fall through to HelixToolkit (camera rotation).
+        if (!ShouldCaptureLeftClickForPlacement())
+        {
+            if (_is3DMode)
+            {
+                ForwardMouseButton(e, MouseButton.Left, isDown: true);
+            }
+            return;
+        }
         var vp = SharedViewport3D;
         if (vp == null) return;
         var hit = vp.FindHits(e.GetPosition(vp)).FirstOrDefault();
@@ -640,6 +790,8 @@ public partial class CephalometryWindow : UserControl
         {
             _pending3DHit = (Vector3)hit.PointHit;
             _mouseDown3DScreenPos = e.GetPosition(ViewportGrid);
+            // Consume so HelixToolkit doesn't also start a camera rotation.
+            e.Handled = true;
         }
     }
 
@@ -1054,6 +1206,7 @@ public partial class CephalometryWindow : UserControl
             UpdateToolButtonHighlights();
             UpdateToolStatus();
             RefreshMeasurementOverlay();
+            UpdateViewportGridHitTest();
         }
     }
 
