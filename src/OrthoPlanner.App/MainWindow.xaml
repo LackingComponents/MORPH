@@ -427,8 +427,8 @@
                                         <ctrl:RangeSlider Minimum="{Binding IsoMin}" Maximum="{Binding IsoMax}" Height="20"
                                                           LowerValue="{Binding BoneMinHU, Mode=TwoWay}" UpperValue="{Binding BoneMaxHU, Mode=TwoWay}" />
                                         <DockPanel Margin="0,2,0,0">
-                                            <TextBox Width="45" FontSize="9" TextAlignment="Center" Text="{Binding BoneMinHU, UpdateSourceTrigger=LostFocus}" />
-                                            <TextBox DockPanel.Dock="Right" Width="45" FontSize="9" TextAlignment="Center" HorizontalAlignment="Right"
+                                            <TextBox Width="45" FontSize="9" TextAlignment="Center" Padding="2,0" VerticalContentAlignment="Center" Text="{Binding BoneMinHU, UpdateSourceTrigger=LostFocus}" />
+                                            <TextBox DockPanel.Dock="Right" Width="45" FontSize="9" TextAlignment="Center" HorizontalAlignment="Right" Padding="2,0" VerticalContentAlignment="Center"
                                                      Text="{Binding BoneMaxHU, UpdateSourceTrigger=LostFocus}" />
                                             <TextBlock />
                                         </DockPanel>
@@ -512,8 +512,8 @@
                                         <ctrl:RangeSlider Minimum="{Binding IsoMin}" Maximum="{Binding IsoMax}" Height="20"
                                                           LowerValue="{Binding SoftMinHU, Mode=TwoWay}" UpperValue="{Binding SoftMaxHU, Mode=TwoWay}" />
                                         <DockPanel Margin="0,2,0,0">
-                                            <TextBox Width="45" FontSize="9" TextAlignment="Center" Text="{Binding SoftMinHU, UpdateSourceTrigger=LostFocus}" />
-                                            <TextBox DockPanel.Dock="Right" Width="45" FontSize="9" TextAlignment="Center" HorizontalAlignment="Right"
+                                            <TextBox Width="45" FontSize="9" TextAlignment="Center" Padding="2,0" VerticalContentAlignment="Center" Text="{Binding SoftMinHU, UpdateSourceTrigger=LostFocus}" />
+                                            <TextBox DockPanel.Dock="Right" Width="45" FontSize="9" TextAlignment="Center" HorizontalAlignment="Right" Padding="2,0" VerticalContentAlignment="Center"
                                                      Text="{Binding SoftMaxHU, UpdateSourceTrigger=LostFocus}" />
                                             <TextBlock />
                                         </DockPanel>
@@ -601,8 +601,8 @@
                                         <ctrl:RangeSlider Minimum="{Binding IsoMin}" Maximum="{Binding IsoMax}" Height="20"
                                                           LowerValue="{Binding DentalMinHU, Mode=TwoWay}" UpperValue="{Binding DentalMaxHU, Mode=TwoWay}" />
                                         <DockPanel Margin="0,2,0,0">
-                                            <TextBox Width="45" FontSize="9" TextAlignment="Center" Text="{Binding DentalMinHU, UpdateSourceTrigger=LostFocus}" />
-                                            <TextBox DockPanel.Dock="Right" Width="45" FontSize="9" TextAlignment="Center" HorizontalAlignment="Right"
+                                            <TextBox Width="45" FontSize="9" TextAlignment="Center" Padding="2,0" VerticalContentAlignment="Center" Text="{Binding DentalMinHU, UpdateSourceTrigger=LostFocus}" />
+                                            <TextBox DockPanel.Dock="Right" Width="45" FontSize="9" TextAlignment="Center" HorizontalAlignment="Right" Padding="2,0" VerticalContentAlignment="Center"
                                                      Text="{Binding DentalMaxHU, UpdateSourceTrigger=LostFocus}" />
                                             <TextBlock />
                                         </DockPanel>
@@ -684,8 +684,8 @@
                                         <ctrl:RangeSlider Minimum="{Binding IsoMin}" Maximum="{Binding IsoMax}" Height="20"
                                                           LowerValue="{Binding CustomMinHU, Mode=TwoWay}" UpperValue="{Binding CustomMaxHU, Mode=TwoWay}" />
                                         <DockPanel Margin="0,2,0,0">
-                                            <TextBox Width="45" FontSize="9" TextAlignment="Center" Text="{Binding CustomMinHU, UpdateSourceTrigger=LostFocus}" />
-                                            <TextBox DockPanel.Dock="Right" Width="45" FontSize="9" TextAlignment="Center" HorizontalAlignment="Right"
+                                            <TextBox Width="45" FontSize="9" TextAlignment="Center" Padding="2,0" VerticalContentAlignment="Center" Text="{Binding CustomMinHU, UpdateSourceTrigger=LostFocus}" />
+                                            <TextBox DockPanel.Dock="Right" Width="45" FontSize="9" TextAlignment="Center" HorizontalAlignment="Right" Padding="2,0" VerticalContentAlignment="Center"
                                                      Text="{Binding CustomMaxHU, UpdateSourceTrigger=LostFocus}" />
                                             <TextBlock />
                                         </DockPanel>
