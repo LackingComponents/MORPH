@@ -40,7 +40,7 @@
                                                      IsChecked="{Binding IsUpper, Mode=TwoWay}" Foreground="#FF8AB4F8" Margin="0,0,12,0"
                                                      VerticalAlignment="Center" FontWeight="Medium"/>
                                         <RadioButton Content="Lower" GroupName="{Binding GroupKey}" Tag="Lower"
-                                                     IsChecked="{Binding IsLower, Mode=TwoWay}" Foreground="#FFF472B6" Margin="0,0,12,0"
+                                                     IsChecked="{Binding IsLower, Mode=TwoWay}" Foreground="#FF8AB4F8" Margin="0,0,12,0"
                                                      VerticalAlignment="Center" FontWeight="Medium"/>
                                         <RadioButton Content="Other" GroupName="{Binding GroupKey}" Tag="Other"
                                                      IsChecked="{Binding IsOther, Mode=TwoWay}" Foreground="{StaticResource TextSecondaryBrush}"

@@ -50,8 +50,28 @@ public partial class App : Application
                 int useImmersiveDarkMode = 1;
                 try
                 {
+                    // 1. Enable immersive dark mode
                     DwmSetWindowAttribute(hwnd, 20, ref useImmersiveDarkMode, sizeof(int));
                     DwmSetWindowAttribute(hwnd, 19, ref useImmersiveDarkMode, sizeof(int));
+
+                    // Default to BgDark color (#0D1117)
+                    int colorRef = 0x0D | (0x11 << 8) | (0x17 << 16);
+
+                    if (window.Background is System.Windows.Media.SolidColorBrush brush)
+                    {
+                        var color = brush.Color;
+                        colorRef = color.R | (color.G << 8) | (color.B << 16);
+                    }
+
+                    // 2. Set Caption Color to match background (DWMWA_CAPTION_COLOR = 35)
+                    DwmSetWindowAttribute(hwnd, 35, ref colorRef, sizeof(int));
+
+                    // 3. Set Window Border Color to match background (DWMWA_BORDER_COLOR = 34)
+                    DwmSetWindowAttribute(hwnd, 34, ref colorRef, sizeof(int));
+
+                    // 4. Set Title Text Color to light grey (DWMWA_TEXT_COLOR = 36)
+                    int textColorRef = 0xD0 | (0xD8 << 8) | (0xE0 << 16); // #D0D8E0
+                    DwmSetWindowAttribute(hwnd, 36, ref textColorRef, sizeof(int));
                 }
                 catch { /* Ignore on older OS */ }
             }
