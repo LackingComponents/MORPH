@@ -217,6 +217,40 @@
         </Setter>
     </Style>
 
+    <!-- ═══ RADIO BUTTON ═══ -->
+    <Style TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Grid Width="16" Height="16" Margin="0,0,6,0">
+                            <!-- Outer Circle -->
+                            <Ellipse x:Name="OuterCircle" Stroke="{StaticResource BorderBrush}" StrokeThickness="1.5" Fill="{StaticResource BgLightBrush}" />
+                            <!-- Inner Dot -->
+                            <Ellipse x:Name="InnerDot" Width="8" Height="8" Fill="{TemplateBinding Foreground}" Visibility="Collapsed" />
+                        </Grid>
+                        <ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="True" />
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="InnerDot" Property="Visibility" Value="Visible" />
+                            <Setter TargetName="OuterCircle" Property="Stroke" Value="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}" />
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="OuterCircle" Property="Stroke" Value="{StaticResource AccentHoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- ═══ EXPANDER ═══ -->
     <Style x:Key="TransparentExpander" TargetType="Expander">
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />

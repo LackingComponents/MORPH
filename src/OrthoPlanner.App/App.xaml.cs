@@ -28,10 +28,34 @@ public partial class App : Application
 
         base.OnStartup(e);
 
+        // Register global Loaded handler for Windows to apply dark title bar
+        EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent, new RoutedEventHandler(OnWindowLoaded));
+
         // Clear any temporary files left from previous sessions
         AppTempStorage.Initialize();
 
         SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
+    }
+
+    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+    private static void OnWindowLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is Window window)
+        {
+            var hwnd = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+            if (hwnd != IntPtr.Zero)
+            {
+                int useImmersiveDarkMode = 1;
+                try
+                {
+                    DwmSetWindowAttribute(hwnd, 20, ref useImmersiveDarkMode, sizeof(int));
+                    DwmSetWindowAttribute(hwnd, 19, ref useImmersiveDarkMode, sizeof(int));
+                }
+                catch { /* Ignore on older OS */ }
+            }
+        }
     }
 
     private void SystemEvents_PowerModeChanged(object sender, PowerModeChangedEventArgs e)
