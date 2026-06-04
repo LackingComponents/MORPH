@@ -15,7 +15,7 @@
 
             <!-- Splash Image -->
             <Image x:Name="SplashImage" Grid.Row="0" Margin="0,8" Stretch="Uniform" 
-                   VerticalAlignment="Center" HorizontalAlignment="Center" Source="Resources/splash.png"/>
+                   VerticalAlignment="Center" HorizontalAlignment="Center" Source="pack://application:,,,/OrthoPlanner;component/Resources/splash.png"/>
 
             <!-- Progress Indicator -->
             <ProgressBar Grid.Row="1" IsIndeterminate="True" Height="4" Margin="12,16,12,12" 

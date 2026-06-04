@@ -36,4 +36,9 @@
     <PackageReference Include="ManifoldNET" Version="1.0.7-alpha" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Resource Include="Resources\app.png" />
+    <Resource Include="Resources\splash.png" />
+  </ItemGroup>
+
 </Project>
