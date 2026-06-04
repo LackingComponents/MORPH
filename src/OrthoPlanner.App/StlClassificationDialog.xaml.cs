@@ -43,6 +43,7 @@ public partial class StlClassificationDialog : Window
 {
     public List<StlFileEntry> Entries { get; } = new();
     public bool Accepted { get; private set; }
+    private bool _isUpdating;
 
     public StlClassificationDialog(string[] filePaths)
     {
@@ -50,9 +51,42 @@ public partial class StlClassificationDialog : Window
 
         foreach (var path in filePaths)
         {
-            Entries.Add(new StlFileEntry { FilePath = path });
+            var entry = new StlFileEntry { FilePath = path };
+            entry.PropertyChanged += Entry_PropertyChanged;
+            Entries.Add(entry);
         }
         FileList.ItemsSource = Entries;
+    }
+
+    private void Entry_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_isUpdating) return;
+        if (Entries.Count != 2) return;
+        if (sender is not StlFileEntry changedEntry) return;
+
+        if (e.PropertyName == nameof(StlFileEntry.IsUpper) || e.PropertyName == nameof(StlFileEntry.IsLower))
+        {
+            _isUpdating = true;
+            try
+            {
+                var otherEntry = Entries.FirstOrDefault(x => x != changedEntry);
+                if (otherEntry != null)
+                {
+                    if (e.PropertyName == nameof(StlFileEntry.IsUpper) && changedEntry.IsUpper)
+                    {
+                        otherEntry.IsLower = true;
+                    }
+                    else if (e.PropertyName == nameof(StlFileEntry.IsLower) && changedEntry.IsLower)
+                    {
+                        otherEntry.IsUpper = true;
+                    }
+                }
+            }
+            finally
+            {
+                _isUpdating = false;
+            }
+        }
     }
 
     private void Ok_Click(object sender, RoutedEventArgs e)

@@ -287,7 +287,67 @@ public partial class MainViewModel
     [RelayCommand]
     private async Task EditDentalCastsAsync()
     {
-        await Task.Yield();
-        System.Windows.MessageBox.Show("Dental Cast Editor placeholder.", "Edit Dental Casts", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+        // Collect all imported meshes (visible or not) to pass to the editor
+        var meshesForEditor = ImportedMeshes
+            .Where(m => m.Vertices != null && m.Vertices.Length >= 9)
+            .Select(m => (m.Name, m.Vertices!, m.ColorR, m.ColorG, m.ColorB))
+            .ToList();
+
+        if (meshesForEditor.Count == 0)
+        {
+            System.Windows.MessageBox.Show(
+                "No dental scans have been imported yet.\nUse 'Load Dental Scans' first.",
+                "No Models", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            return;
+        }
+
+        var editor = new DentalCastEditorWindow(
+            meshesForEditor.Select(m => (m.Name, m.Item2, m.ColorR, m.ColorG, m.ColorB)));
+        editor.Owner = System.Windows.Application.Current.MainWindow;
+
+        if (editor.ShowDialog() != true || !editor.Accepted) return;
+
+        // Apply edited meshes back — each key is the mesh name
+        bool modified = false;
+        foreach (var (editedName, editedVerts) in editor.EditedMeshes)
+        {
+            var target = ImportedMeshes.FirstOrDefault(m => m.Name == editedName);
+            if (target == null) continue;
+
+            SaveStateForUndo();
+
+            // Store a copy of originals in a hidden mesh (name-prefixed) if not already backed up
+            string backupName = $"[Original] {editedName}";
+            if (!ImportedMeshes.Any(m => m.Name == backupName))
+            {
+                // Keep original as invisible backup
+                var backup = new MeshViewModel
+                {
+                    Name      = backupName,
+                    Vertices  = (float[])target.Vertices!.Clone(),
+                    ColorR    = target.ColorR,
+                    ColorG    = target.ColorG,
+                    ColorB    = target.ColorB,
+                    ScanType  = target.ScanType,
+                    IsVisible = false
+                };
+                backup.OnVisibilityChanged = RefreshCombinedModel;
+                backup.BuildModel();
+                ImportedMeshes.Add(backup);
+            }
+
+            // Apply edited verts
+            target.Vertices = MeshHelper.ToFlatArray(editedVerts);
+            target.BuildModel();
+            modified = true;
+        }
+
+        if (modified)
+        {
+            RefreshCombinedModel();
+            StatusText = $"Dental cast edits applied — {editor.EditedMeshes.Count} model(s) updated.";
+        }
+
+        await Task.CompletedTask;
     }
 }
