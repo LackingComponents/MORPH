@@ -283,4 +283,11 @@ public partial class MainViewModel
         ImportedMeshes.Remove(mesh);
         RefreshCombinedModel();
     }
+
+    [RelayCommand]
+    private async Task EditDentalCastsAsync()
+    {
+        await Task.Yield();
+        System.Windows.MessageBox.Show("Dental Cast Editor placeholder.", "Edit Dental Casts", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+    }
 }

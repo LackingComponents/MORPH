@@ -549,6 +549,82 @@ public static class SegmentationEngine
     }
 
     /// <summary>
+    /// Finds the largest N connected components of the given label and clears all other
+    /// disconnected regions with the same label to remove scatter noise.
+    /// </summary>
+    public static void KeepLargestComponents(SegmentationVolume segVol, byte label, int countToKeep, Action<double>? progress = null)
+    {
+        if (countToKeep <= 0) return;
+
+        int w = segVol.Width, h = segVol.Height, d = segVol.Depth;
+        int total = w * h * d;
+        var visited = new bool[total];
+
+        var components = new List<List<(int, int, int)>>();
+
+        int[][] neighbors =
+        [
+            [1,0,0], [-1,0,0], [0,1,0], [0,-1,0], [0,0,1], [0,0,-1]
+        ];
+
+        for (int z = 0; z < d; z++)
+        for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++)
+        {
+            int idx = x + y * w + z * w * h;
+            if (visited[idx] || segVol.Labels[idx] != label) continue;
+
+            // Found a new component, flood fill to find its size
+            var queue = new Queue<(int, int, int)>();
+            var compVoxels = new List<(int, int, int)>();
+
+            queue.Enqueue((x, y, z));
+            visited[idx] = true;
+
+            while (queue.Count > 0)
+            {
+                var (cx, cy, cz) = queue.Dequeue();
+                compVoxels.Add((cx, cy, cz));
+
+                foreach (var n in neighbors)
+                {
+                    int nx = cx + n[0], ny = cy + n[1], nz = cz + n[2];
+                    if (nx < 0 || nx >= w || ny < 0 || ny >= h || nz < 0 || nz >= d) continue;
+                    int nIdx = nx + ny * w + nz * w * h;
+                    if (!visited[nIdx] && segVol.Labels[nIdx] == label)
+                    {
+                        visited[nIdx] = true;
+                        queue.Enqueue((nx, ny, nz));
+                    }
+                }
+            }
+
+            components.Add(compVoxels);
+
+            if (progress != null && components.Count % 50 == 0)
+                progress(Math.Min(0.5, (double)z / d));
+        }
+
+        // Sort descending by size
+        components.Sort((a, b) => b.Count.CompareTo(a.Count));
+
+        // Clear all components starting from countToKeep index
+        int clearCount = 0;
+        for (int i = countToKeep; i < components.Count; i++)
+        {
+            foreach (var (cx, cy, cz) in components[i])
+            {
+                segVol.SetLabel(cx, cy, cz, 0); // clear
+            }
+            clearCount++;
+            if (progress != null && clearCount % 50 == 0)
+                progress(0.5 + Math.Min(0.5, (double)clearCount / components.Count * 0.5));
+        }
+
+        progress?.Invoke(1.0);
+    }
+
+    /// <summary>
     /// Performs a Morphological Closing (Dilation followed by Erosion) on a given label.
     /// Dilation expands the mask by 1 voxel to bridge small gaps and holes.
     /// Erosion shrinks the mask by 1 voxel to restore original thickness without reopening the bridged holes.
@@ -729,7 +805,8 @@ public static class SegmentationEngine
     /// </summary>
     public static float[] ExtractSegmentMesh(
         VolumeData volume, SegmentationVolume segVol,
-        byte label, int stepSize = 1, Action<double>? progress = null)
+        byte label, int stepSize = 1, Action<double>? progress = null,
+        double smoothingAmount = 0.6666667, int smoothingPasses = 1)
     {
         var vertices = new List<float>();
         int w = volume.Width, h = volume.Height, d = volume.Depth;
@@ -745,35 +822,45 @@ public static class SegmentationEngine
             for (int i = 0; i < field.Length; i++)
                 field[i] = segVol.Labels[i] == label ? 100f : 0f;
 
-            // 2. Separable 3D Box Blur applied 1 time (A nice balance between smoothness and detail retention)
             smooth = new float[w * h * d];
-            
-            for (int pass = 0; pass < 1; pass++)
+
+            if (smoothingPasses > 0)
             {
-                // X-blur
-                for (int z = 0; z < d; z++)
-                for (int y = 0; y < h; y++)
-                for (int x = 1; x < w - 1; x++)
-                    smooth[x+y*w+z*w*h] = (field[x-1+y*w+z*w*h] + field[x+y*w+z*w*h] + field[x+1+y*w+z*w*h]) * 0.3333333f;
-                    
-                // Y-blur
-                for (int z = 0; z < d; z++)
-                for (int y = 1; y < h - 1; y++)
-                for (int x = 0; x < w; x++)
-                    field[x+y*w+z*w*h] = (smooth[x+(y-1)*w+z*w*h] + smooth[x+y*w+z*w*h] + smooth[x+(y+1)*w+z*w*h]) * 0.3333333f;
-                    
-                // Z-blur
-                for (int z = 1; z < d - 1; z++)
-                for (int y = 0; y < h; y++)
-                for (int x = 0; x < w; x++)
-                    smooth[x+y*w+z*w*h] = (field[x+y*w+(z-1)*w*h] + field[x+y*w+z*w*h] + field[x+y*w+(z+1)*w*h]) * 0.3333333f;
-                
-                // Copy smoothed output back to input for the next iter
-                if (pass < 0) Array.Copy(smooth, field, smooth.Length);
+                float s = (float)smoothingAmount;
+                float wCenter = 1.0f - s;
+                float wNeighbors = s / 2.0f;
+
+                for (int pass = 0; pass < smoothingPasses; pass++)
+                {
+                    // X-blur
+                    for (int z = 0; z < d; z++)
+                    for (int y = 0; y < h; y++)
+                    for (int x = 1; x < w - 1; x++)
+                        smooth[x+y*w+z*w*h] = field[x+y*w+z*w*h] * wCenter + (field[x-1+y*w+z*w*h] + field[x+1+y*w+z*w*h]) * wNeighbors;
+
+                    // Y-blur
+                    for (int z = 0; z < d; z++)
+                    for (int y = 1; y < h - 1; y++)
+                    for (int x = 0; x < w; x++)
+                        field[x+y*w+z*w*h] = smooth[x+y*w+z*w*h] * wCenter + (smooth[x+(y-1)*w+z*w*h] + smooth[x+(y+1)*w+z*w*h]) * wNeighbors;
+
+                    // Z-blur
+                    for (int z = 1; z < d - 1; z++)
+                    for (int y = 0; y < h; y++)
+                    for (int x = 0; x < w; x++)
+                        smooth[x+y*w+z*w*h] = field[x+y*w+z*w*h] * wCenter + (field[x+y*w+(z-1)*w*h] + field[x+y*w+(z+1)*w*h]) * wNeighbors;
+
+                    // Copy smoothed output back to input for the next iter
+                    if (pass < smoothingPasses - 1) Array.Copy(smooth, field, smooth.Length);
+                }
+            }
+            else
+            {
+                Array.Copy(field, smooth, field.Length);
             }
 
             // Lowered isoLevel captures thinner bones that get diluted down in probability, preventing holes
-            isoLevel = 35.0; 
+            isoLevel = 35.0;
         }
         else
         {

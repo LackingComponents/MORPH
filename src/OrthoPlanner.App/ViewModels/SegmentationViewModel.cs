@@ -119,6 +119,30 @@ public partial class MainViewModel
     [ObservableProperty] private bool _closeHolesAfterMerge = false;
     [ObservableProperty] private bool _cleanDentalSegmentation = true;
 
+    // --- Bone Options ---
+    [ObservableProperty] private int _bonePartsKept = 1;
+    [ObservableProperty] private bool _boneKeepAllParts = false;
+    [ObservableProperty] private double _boneSmoothingAmount = 0.6666667;
+    [ObservableProperty] private int _boneSmoothingPasses = 1;
+
+    // --- Soft Tissue Options ---
+    [ObservableProperty] private int _softPartsKept = 1;
+    [ObservableProperty] private bool _softKeepAllParts = false;
+    [ObservableProperty] private double _softSmoothingAmount = 0.6666667;
+    [ObservableProperty] private int _softSmoothingPasses = 1;
+
+    // --- Dental Options ---
+    [ObservableProperty] private int _dentalPartsKept = 1;
+    [ObservableProperty] private bool _dentalKeepAllParts = true;
+    [ObservableProperty] private double _dentalSmoothingAmount = 0.6666667;
+    [ObservableProperty] private int _dentalSmoothingPasses = 1;
+
+    // --- Custom Options ---
+    [ObservableProperty] private int _customPartsKept = 1;
+    [ObservableProperty] private bool _customKeepAllParts = false;
+    [ObservableProperty] private double _customSmoothingAmount = 0.6666667;
+    [ObservableProperty] private int _customSmoothingPasses = 1;
+
     public ObservableCollection<(int X, int Y, int Z, byte ClassLabel)> MultiSeeds { get; } = new();
 
     [RelayCommand]
@@ -192,7 +216,7 @@ public partial class MainViewModel
 
         if (count == 0)
         {
-            StatusText = $"No voxels found in range {min}\u2013{max} HU";
+            StatusText = $"No voxels found in range {min}–{max} HU";
             IsLoading = false;
             return;
         }
@@ -211,25 +235,98 @@ public partial class MainViewModel
             SegmentationEngine.MorphologicalClosing(_segVolume, label, morphologyIterations,
                 p => Application.Current.Dispatcher.Invoke(() => LoadProgress = 30 + p * 10)));
 
-        if (applyNoiseRemoval)
-        {
-            StatusText = "Removing noise (keeping largest component)...";
-            LoadProgress = 40;
-            await Task.Run(() =>
-                SegmentationEngine.KeepLargestComponent(_segVolume, label,
-                    p => Application.Current.Dispatcher.Invoke(() => LoadProgress = 40 + p * 10)));
+        // Resolve custom options based on segment name
+        bool keepAll = false;
+        int partsToKeep = -1;
+        bool usePercentageFilter = false;
+        double smoothingAmount = 0.6666667;
+        int smoothingPasses = 1;
 
-            count = _segVolume.CountVoxels(label); // update count after noise removal
+        if (name.StartsWith("Bone"))
+        {
+            keepAll = BoneKeepAllParts;
+            partsToKeep = BonePartsKept;
+            smoothingAmount = BoneSmoothingAmount;
+            smoothingPasses = BoneSmoothingPasses;
         }
-        else if (cleanDental)
+        else if (name.StartsWith("Soft Tissue"))
         {
-            StatusText = "Removing 70% of smaller objects (keeping top 30%)...";
-            LoadProgress = 40;
-            await Task.Run(() =>
-                SegmentationEngine.KeepTopPercentageComponents(_segVolume, label, 0.30,
-                    p => Application.Current.Dispatcher.Invoke(() => LoadProgress = 40 + p * 10)));
+            keepAll = SoftKeepAllParts;
+            partsToKeep = SoftPartsKept;
+            smoothingAmount = SoftSmoothingAmount;
+            smoothingPasses = SoftSmoothingPasses;
+        }
+        else if (name.StartsWith("Custom"))
+        {
+            keepAll = CustomKeepAllParts;
+            partsToKeep = CustomPartsKept;
+            smoothingAmount = CustomSmoothingAmount;
+            smoothingPasses = CustomSmoothingPasses;
+        }
+        else if (name.StartsWith("Dental"))
+        {
+            smoothingAmount = DentalSmoothingAmount;
+            smoothingPasses = DentalSmoothingPasses;
+            if (!DentalKeepAllParts)
+            {
+                partsToKeep = DentalPartsKept;
+            }
+            else
+            {
+                if (CleanDentalSegmentation)
+                {
+                    usePercentageFilter = true;
+                }
+                else
+                {
+                    keepAll = true;
+                }
+            }
+        }
 
-            count = _segVolume.CountVoxels(label); // update count after noise removal
+        // Apply noise removal or parts keeping
+        if (!keepAll)
+        {
+            if (partsToKeep > 0)
+            {
+                StatusText = $"Removing noise (keeping top {partsToKeep} components)...";
+                LoadProgress = 40;
+                await Task.Run(() =>
+                    SegmentationEngine.KeepLargestComponents(_segVolume, label, partsToKeep,
+                        p => Application.Current.Dispatcher.Invoke(() => LoadProgress = 40 + p * 10)));
+
+                count = _segVolume.CountVoxels(label);
+            }
+            else if (usePercentageFilter)
+            {
+                StatusText = "Removing 70% of smaller objects (keeping top 30%)...";
+                LoadProgress = 40;
+                await Task.Run(() =>
+                    SegmentationEngine.KeepTopPercentageComponents(_segVolume, label, 0.30,
+                        p => Application.Current.Dispatcher.Invoke(() => LoadProgress = 40 + p * 10)));
+
+                count = _segVolume.CountVoxels(label);
+            }
+            else if (applyNoiseRemoval)
+            {
+                StatusText = "Removing noise (keeping largest component)...";
+                LoadProgress = 40;
+                await Task.Run(() =>
+                    SegmentationEngine.KeepLargestComponent(_segVolume, label,
+                        p => Application.Current.Dispatcher.Invoke(() => LoadProgress = 40 + p * 10)));
+
+                count = _segVolume.CountVoxels(label);
+            }
+            else if (cleanDental)
+            {
+                StatusText = "Removing 70% of smaller objects (keeping top 30%)...";
+                LoadProgress = 40;
+                await Task.Run(() =>
+                    SegmentationEngine.KeepTopPercentageComponents(_segVolume, label, 0.30,
+                        p => Application.Current.Dispatcher.Invoke(() => LoadProgress = 40 + p * 10)));
+
+                count = _segVolume.CountVoxels(label);
+            }
         }
 
         if (count == 0)
@@ -248,7 +345,7 @@ public partial class MainViewModel
         StatusText = $"Generating mesh from {count:N0} voxels...";
         LoadProgress = 50;
 
-        await GenerateSegmentMeshAsync(label);
+        await GenerateSegmentMeshAsync(label, smoothingAmount: smoothingAmount, smoothingPasses: smoothingPasses);
 
         StatusText = $"Segmented {count:N0} voxels ({min}\u2013{max} HU)";
         LoadProgress = 100;
@@ -471,7 +568,14 @@ public partial class MainViewModel
         return count > 0 ? (double)sumZ / count : 0;
     }
 
-    private async Task GenerateSegmentMeshAsync(byte label, string? nameOverride = null, byte? r = null, byte? g = null, byte? b = null)
+    private async Task GenerateSegmentMeshAsync(
+        byte label,
+        string? nameOverride = null,
+        byte? r = null,
+        byte? g = null,
+        byte? b = null,
+        double smoothingAmount = 0.6666667,
+        int smoothingPasses = 1)
     {
         if (Volume == null || _segVolume == null) return;
 
@@ -483,7 +587,8 @@ public partial class MainViewModel
         var vertices = await Task.Run(() =>
             SegmentationEngine.ExtractSegmentMesh(vol, segVol, label, step,
                 p => Application.Current.Dispatcher.Invoke(() =>
-                    LoadProgress = Math.Min(99, LoadProgress + p * 10))));
+                    LoadProgress = Math.Min(99, LoadProgress + p * 10)),
+                smoothingAmount, smoothingPasses));
 
         if (vertices.Length < 9) return;
 

@@ -37,6 +37,9 @@ public class VolumeData
     /// <summary>Patient name from DICOM metadata.</summary>
     public string PatientName { get; set; } = string.Empty;
 
+    /// <summary>Patient date of birth from DICOM metadata.</summary>
+    public string PatientDOB { get; set; } = string.Empty;
+
     /// <summary>Study date from DICOM metadata.</summary>
     public string StudyDate { get; set; } = string.Empty;
 

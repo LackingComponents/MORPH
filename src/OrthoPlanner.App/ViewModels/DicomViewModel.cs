@@ -20,6 +20,7 @@ public partial class MainViewModel
 
     // ÔöÇÔöÇÔöÇ Patient Info ÔöÇÔöÇÔöÇ
     [ObservableProperty] private string _patientName = "";
+    [ObservableProperty] private string _patientDOB = "";
     [ObservableProperty] private string _studyDate = "";
     [ObservableProperty] private string _seriesDescription = "";
     [ObservableProperty] private string _volumeDimensions = "";
@@ -197,7 +198,8 @@ public partial class MainViewModel
             OriginalVolume = null; // Reset starting position for new DICOM
 
             // Update UI state
-            PatientName = Volume.PatientName;
+            PatientName = Volume.PatientName?.Replace("^", " ") ?? "";
+            PatientDOB = Volume.PatientDOB;
             StudyDate = FormatStudyDate(Volume.StudyDate);
             SeriesDescription = Volume.SeriesDescription;
             VolumeDimensions = $"{Volume.Width} \u00d7 {Volume.Height} \u00d7 {Volume.Depth}";

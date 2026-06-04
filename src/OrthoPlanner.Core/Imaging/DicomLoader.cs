@@ -195,6 +195,7 @@ public static class DicomLoader
 
         var volume = new VolumeData(width, height, depth, [psX, psY, sliceSpacing]);
         volume.PatientName = first.GetSingleValueOrDefault(DicomTag.PatientName, "Unknown");
+        volume.PatientDOB = FormatDicomDate(first.GetSingleValueOrDefault(DicomTag.PatientBirthDate, "Unknown"));
         volume.StudyDate = first.GetSingleValueOrDefault(DicomTag.StudyDate, "");
         volume.SeriesDescription = first.GetSingleValueOrDefault(DicomTag.SeriesDescription, "");
 

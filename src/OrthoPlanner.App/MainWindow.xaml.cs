@@ -778,6 +778,24 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OptionsTextBox_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Up || e.Key == System.Windows.Input.Key.Down)
+        {
+            if (sender is TextBox tb)
+            {
+                int delta = (e.Key == System.Windows.Input.Key.Up) ? 1 : -1;
+                if (int.TryParse(tb.Text, out int val))
+                {
+                    tb.Text = Math.Max(0, val + delta).ToString();
+                    var bindingExpression = tb.GetBindingExpression(TextBox.TextProperty);
+                    bindingExpression?.UpdateSource();
+                    e.Handled = true;
+                }
+            }
+        }
+    }
+
     // ═══ NavCube: Orbital arrow rotation ═══
 
     private void OrbitCamera(double dAzimuthDeg, double dElevationDeg)

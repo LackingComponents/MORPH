@@ -82,6 +82,42 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        
+        <Style x:Key="GearToggleButtonStyle" TargetType="ToggleButton">
+            <Setter Property="Background" Value="{StaticResource BgLightBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="4" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4" Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource BgHoverBrush}" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentBrush}" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                <Setter Property="Foreground" Value="White" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid>
@@ -285,10 +321,61 @@
                         </Border>
                     </Popup>
 
-                    <TextBlock Text="{Binding PatientName}" Style="{StaticResource StatusText}"
-                               VerticalAlignment="Center" Margin="0,0,16,0" />
-                    <TextBlock Text="{Binding StudyDate}" Style="{StaticResource StatusText}"
-                               VerticalAlignment="Center" Margin="0,0,16,0" />
+                    <!-- Patient Metadata Button & Popup -->
+                    <ToggleButton x:Name="MetadataToggleButton" Cursor="Hand" Margin="0,0,16,0" Padding="4" ToolTip="View DICOM Metadata">
+                        <ToggleButton.Template>
+                            <ControlTemplate TargetType="ToggleButton">
+                                <Border Background="Transparent">
+                                    <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                                </Border>
+                            </ControlTemplate>
+                        </ToggleButton.Template>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding PatientName}" Style="{StaticResource StatusText}"
+                                       VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <TextBlock Text="{Binding StudyDate}" Style="{StaticResource StatusText}"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                    </ToggleButton>
+                    <Popup IsOpen="{Binding IsChecked, ElementName=MetadataToggleButton, Mode=TwoWay}" StaysOpen="False" PlacementTarget="{Binding ElementName=MetadataToggleButton}" Placement="Bottom" VerticalOffset="4">
+                        <Border Background="#FF21252B" BorderBrush="#FF30343D" BorderThickness="1" CornerRadius="4" Padding="12" Width="280">
+                            <StackPanel>
+                                <TextBlock Text="PATIENT INFORMATION" Foreground="White" FontSize="11" FontWeight="Bold" Margin="0,0,0,10" />
+                                
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="90"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Name:" Foreground="#FFA0AAB5" FontSize="11" />
+                                    <TextBlock Grid.Column="1" Text="{Binding PatientName}" Foreground="White" FontSize="11" TextWrapping="Wrap" />
+                                </Grid>
+                                
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="90"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Date of Birth:" Foreground="#FFA0AAB5" FontSize="11" />
+                                    <TextBlock Grid.Column="1" Text="{Binding PatientDOB}" Foreground="White" FontSize="11" />
+                                </Grid>
+                                
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="90"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Study Date:" Foreground="#FFA0AAB5" FontSize="11" />
+                                    <TextBlock Grid.Column="1" Text="{Binding StudyDate}" Foreground="White" FontSize="11" />
+                                </Grid>
+
+                                <TextBlock Text="SCAN PARAMETERS" Foreground="White" FontSize="11" FontWeight="Bold" Margin="0,0,0,10" />
+
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="90"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Description:" Foreground="#FFA0AAB5" FontSize="11" />
+                                    <TextBlock Grid.Column="1" Text="{Binding SeriesDescription}" Foreground="White" FontSize="11" TextWrapping="Wrap" />
+                                </Grid>
+                                
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="90"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Dimensions:" Foreground="#FFA0AAB5" FontSize="11" />
+                                    <TextBlock Grid.Column="1" Text="{Binding VolumeDimensions}" Foreground="White" FontSize="11" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </Popup>
                 </StackPanel>
 
                 <TextBlock />
@@ -318,8 +405,16 @@
                         <StackPanel>
 
                             <!-- 1. SEGMENTATION -->
-                            <Expander Header="💀  Segmentation" IsExpanded="True" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                            <Expander IsExpanded="True" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
                                       Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
+                                <Expander.Header>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Path Data="F0 M 12,2 A 9,9 0 0 0 3,11 C 3,13.86 4.34,16.4 6.4,18.07 L 6,20.47 A 1,1 0 0 0 6.98,21.64 H 17.02 A 1,1 0 0 0 18,20.47 L 17.6,18.07 C 19.66,16.4 21,13.86 21,11 A 9,9 0 0 0 12,2 Z M 9,10 A 1.5,1.5 0 1 1 9,13 A 1.5,1.5 0 0 1 9,10 Z M 15,10 A 1.5,1.5 0 1 1 15,13 A 1.5,1.5 0 0 1 15,10 Z M 10.5,15.5 L 12,13.5 L 13.5,15.5 Z M 8,18 H 16 V 20 H 8 Z"
+                                              Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Expander}}"
+                                              Width="14" Height="14" Stretch="Uniform" Margin="0,0,8,0"/>
+                                        <TextBlock Text="Segmentation" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                </Expander.Header>
                                 <StackPanel Margin="4,6,4,4">
                                     <!-- 1. BONE SEGMENTATION -->
                                 <Expander Header="🦴  Bone Model" IsExpanded="True" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
@@ -343,8 +438,66 @@
                                                   Visibility="Collapsed" Margin="0,4,0,0" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
                                         <CheckBox Content="Enhance Segmentation" IsChecked="{Binding EnhanceSegmentation}"
                                                   Margin="0,4,0,4" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
-                                        <Button Content="🔧 Compute Bone Model" Command="{Binding RunBoneSegmentCommand}"
-                                                Margin="0,0,0,6" IsEnabled="{Binding IsVolumeLoaded}" />
+                                        <Grid Margin="0,0,0,6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Button Grid.Column="0" Content="Compute Model" Command="{Binding RunBoneSegmentCommand}"
+                                                    IsEnabled="{Binding IsVolumeLoaded}" Margin="0,0,4,0"/>
+                                            <ToggleButton Grid.Column="1" x:Name="BoneOptionsToggle" Width="28" Height="28" Padding="0"
+                                                          Style="{StaticResource GearToggleButtonStyle}" IsEnabled="{Binding IsVolumeLoaded}">
+                                                <Path Data="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"
+                                                      Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
+                                                      Width="14" Height="14" Stretch="Uniform" />
+                                            </ToggleButton>
+                                        </Grid>
+                                        <Popup IsOpen="{Binding IsChecked, ElementName=BoneOptionsToggle, Mode=TwoWay}" StaysOpen="False" PlacementTarget="{Binding ElementName=BoneOptionsToggle}" Placement="Bottom" VerticalOffset="4">
+                                            <Border Background="#FF21252B" BorderBrush="#FF30343D" BorderThickness="1" CornerRadius="4" Padding="12" Width="220">
+                                                <StackPanel>
+                                                    <TextBlock Text="BONE OPTIONS" Foreground="White" FontSize="11" FontWeight="Bold" Margin="0,0,0,10" />
+                                                    
+                                                    <!-- Keep All Parts / Parts Kept -->
+                                                    <CheckBox x:Name="BoneKeepAllCheck" Content="Keep All Parts" IsChecked="{Binding BoneKeepAllParts}" Foreground="White" FontSize="11" Margin="0,0,0,8" />
+                                                    
+                                                    <Grid Margin="0,0,0,8">
+                                                        <Grid.Style>
+                                                            <Style TargetType="Grid">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding BoneKeepAllParts}" Value="True">
+                                                                        <Setter Property="IsEnabled" Value="False"/>
+                                                                        <Setter Property="Opacity" Value="0.4"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Grid.Style>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="110"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="Parts Kept:" Foreground="#FFA0AAB5" FontSize="11" VerticalAlignment="Center" />
+                                                        <TextBox Grid.Column="1" Text="{Binding BonePartsKept, UpdateSourceTrigger=LostFocus}" Background="#FF30343D" Foreground="White" BorderThickness="0" TextAlignment="Center" Padding="2" FontSize="11" PreviewKeyDown="OptionsTextBox_PreviewKeyDown"/>
+                                                    </Grid>
+                                                    
+                                                    <!-- Smoothing Amount -->
+                                                    <TextBlock Text="Smoothing Amount:" Foreground="#FFA0AAB5" FontSize="11" Margin="0,0,0,4" />
+                                                    <DockPanel Margin="0,0,0,8">
+                                                        <TextBlock DockPanel.Dock="Right" Text="{Binding BoneSmoothingAmount, StringFormat=\{0:F2\}, UpdateSourceTrigger=PropertyChanged}" Width="35" Foreground="White" FontSize="11" TextAlignment="Right" VerticalAlignment="Center"/>
+                                                        <Slider Minimum="0" Maximum="1" TickFrequency="0.05" IsSnapToTickEnabled="True" Value="{Binding BoneSmoothingAmount}" VerticalAlignment="Center"/>
+                                                    </DockPanel>
+                                                    
+                                                    <!-- Smoothing Passes -->
+                                                    <Grid Margin="0,0,0,4">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="110"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="Smoothing Passes:" Foreground="#FFA0AAB5" FontSize="11" VerticalAlignment="Center" />
+                                                        <TextBox Grid.Column="1" Text="{Binding BoneSmoothingPasses, UpdateSourceTrigger=LostFocus}" Background="#FF30343D" Foreground="White" BorderThickness="0" TextAlignment="Center" Padding="2" FontSize="11" PreviewKeyDown="OptionsTextBox_PreviewKeyDown"/>
+                                                    </Grid>
+                                                </StackPanel>
+                                            </Border>
+                                        </Popup>
                                     </StackPanel>
                                 </Expander>
 
@@ -366,14 +519,80 @@
                                         </DockPanel>
                                         <CheckBox Content="Preview Overlay" IsChecked="{Binding ShowSoftOverlay}"
                                                   Margin="0,4,0,4" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
-                                        <Button Content="🔧 Compute Soft Model" Command="{Binding RunSoftTissueSegmentCommand}"
-                                                Margin="0,0,0,6" IsEnabled="{Binding IsVolumeLoaded}" />
+                                        <Grid Margin="0,0,0,6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Button Grid.Column="0" Content="Compute Model" Command="{Binding RunSoftTissueSegmentCommand}"
+                                                    IsEnabled="{Binding IsVolumeLoaded}" Margin="0,0,4,0"/>
+                                            <ToggleButton Grid.Column="1" x:Name="SoftOptionsToggle" Width="28" Height="28" Padding="0"
+                                                          Style="{StaticResource GearToggleButtonStyle}" IsEnabled="{Binding IsVolumeLoaded}">
+                                                <Path Data="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"
+                                                      Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
+                                                      Width="14" Height="14" Stretch="Uniform" />
+                                            </ToggleButton>
+                                        </Grid>
+                                        <Popup IsOpen="{Binding IsChecked, ElementName=SoftOptionsToggle, Mode=TwoWay}" StaysOpen="False" PlacementTarget="{Binding ElementName=SoftOptionsToggle}" Placement="Bottom" VerticalOffset="4">
+                                            <Border Background="#FF21252B" BorderBrush="#FF30343D" BorderThickness="1" CornerRadius="4" Padding="12" Width="220">
+                                                <StackPanel>
+                                                    <TextBlock Text="SOFT TISSUE OPTIONS" Foreground="White" FontSize="11" FontWeight="Bold" Margin="0,0,0,10" />
+                                                    
+                                                    <!-- Keep All Parts / Parts Kept -->
+                                                    <CheckBox x:Name="SoftKeepAllCheck" Content="Keep All Parts" IsChecked="{Binding SoftKeepAllParts}" Foreground="White" FontSize="11" Margin="0,0,0,8" />
+                                                    
+                                                    <Grid Margin="0,0,0,8">
+                                                        <Grid.Style>
+                                                            <Style TargetType="Grid">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding SoftKeepAllParts}" Value="True">
+                                                                        <Setter Property="IsEnabled" Value="False"/>
+                                                                        <Setter Property="Opacity" Value="0.4"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Grid.Style>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="110"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="Parts Kept:" Foreground="#FFA0AAB5" FontSize="11" VerticalAlignment="Center" />
+                                                        <TextBox Grid.Column="1" Text="{Binding SoftPartsKept, UpdateSourceTrigger=LostFocus}" Background="#FF30343D" Foreground="White" BorderThickness="0" TextAlignment="Center" Padding="2" FontSize="11" PreviewKeyDown="OptionsTextBox_PreviewKeyDown"/>
+                                                    </Grid>
+                                                    
+                                                    <!-- Smoothing Amount -->
+                                                    <TextBlock Text="Smoothing Amount:" Foreground="#FFA0AAB5" FontSize="11" Margin="0,0,0,4" />
+                                                    <DockPanel Margin="0,0,0,8">
+                                                        <TextBlock DockPanel.Dock="Right" Text="{Binding SoftSmoothingAmount, StringFormat=\{0:F2\}, UpdateSourceTrigger=PropertyChanged}" Width="35" Foreground="White" FontSize="11" TextAlignment="Right" VerticalAlignment="Center"/>
+                                                        <Slider Minimum="0" Maximum="1" TickFrequency="0.05" IsSnapToTickEnabled="True" Value="{Binding SoftSmoothingAmount}" VerticalAlignment="Center"/>
+                                                    </DockPanel>
+                                                    
+                                                    <!-- Smoothing Passes -->
+                                                    <Grid Margin="0,0,0,4">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="110"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="Smoothing Passes:" Foreground="#FFA0AAB5" FontSize="11" VerticalAlignment="Center" />
+                                                        <TextBox Grid.Column="1" Text="{Binding SoftSmoothingPasses, UpdateSourceTrigger=LostFocus}" Background="#FF30343D" Foreground="White" BorderThickness="0" TextAlignment="Center" Padding="2" FontSize="11" PreviewKeyDown="OptionsTextBox_PreviewKeyDown"/>
+                                                    </Grid>
+                                                </StackPanel>
+                                            </Border>
+                                        </Popup>
                                     </StackPanel>
                                 </Expander>
 
                                 <!-- 3. DENTAL SEGMENTATION -->
-                                <Expander Header="🦷  Dental Model" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                                <Expander IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
                                           Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
+                                    <Expander.Header>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Path Data="M 12,5.5 C 10,4.5 7,4 7,7.5 C 7,10 7.5,14 7.5,17 C 7.5,19.5 9,20.5 9.5,20.5 C 10,20.5 11.5,17 12,15.5 C 12.5,17 14,20.5 14.5,20.5 C 15,20.5 16.5,19.5 16.5,17 C 16.5,14 17,10 17,7.5 C 17,4 14,4.5 12,5.5 Z"
+                                                  Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Expander}}"
+                                                  Width="14" Height="14" Stretch="Uniform" Margin="0,0,8,0"/>
+                                            <TextBlock Text="Dental Model" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold"/>
+                                        </StackPanel>
+                                    </Expander.Header>
                                     <StackPanel Margin="4,6,4,4">
                                         <TextBlock Text="DENTAL THRESHOLD (HU)" Style="{StaticResource PanelHeader}" FontSize="9" />
                                         <Border Margin="0,4,0,2" CornerRadius="3" ClipToBounds="True" Background="#FF101418" Height="60">
@@ -391,13 +610,71 @@
                                                   Margin="0,4,0,4" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
                                         <CheckBox Content="Decimate parts" IsChecked="{Binding CleanDentalSegmentation}"
                                                   Margin="0,0,0,8" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
-                                        <Button Content="🔧 Compute Dental Model" Command="{Binding RunDentalSegmentCommand}"
-                                                Margin="0,0,0,6" IsEnabled="{Binding IsVolumeLoaded}" />
+                                        <Grid Margin="0,0,0,6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Button Grid.Column="0" Content="Compute Model" Command="{Binding RunDentalSegmentCommand}"
+                                                    IsEnabled="{Binding IsVolumeLoaded}" Margin="0,0,4,0"/>
+                                            <ToggleButton Grid.Column="1" x:Name="DentalOptionsToggle" Width="28" Height="28" Padding="0"
+                                                          Style="{StaticResource GearToggleButtonStyle}" IsEnabled="{Binding IsVolumeLoaded}">
+                                                <Path Data="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"
+                                                      Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
+                                                      Width="14" Height="14" Stretch="Uniform" />
+                                            </ToggleButton>
+                                        </Grid>
+                                        <Popup IsOpen="{Binding IsChecked, ElementName=DentalOptionsToggle, Mode=TwoWay}" StaysOpen="False" PlacementTarget="{Binding ElementName=DentalOptionsToggle}" Placement="Bottom" VerticalOffset="4">
+                                            <Border Background="#FF21252B" BorderBrush="#FF30343D" BorderThickness="1" CornerRadius="4" Padding="12" Width="220">
+                                                <StackPanel>
+                                                    <TextBlock Text="DENTAL OPTIONS" Foreground="White" FontSize="11" FontWeight="Bold" Margin="0,0,0,10" />
+                                                    
+                                                    <!-- Keep All Parts / Parts Kept -->
+                                                    <CheckBox x:Name="DentalKeepAllCheck" Content="Keep All Parts" IsChecked="{Binding DentalKeepAllParts}" Foreground="White" FontSize="11" Margin="0,0,0,8" />
+                                                    
+                                                    <Grid Margin="0,0,0,8">
+                                                        <Grid.Style>
+                                                            <Style TargetType="Grid">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding DentalKeepAllParts}" Value="True">
+                                                                        <Setter Property="IsEnabled" Value="False"/>
+                                                                        <Setter Property="Opacity" Value="0.4"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Grid.Style>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="110"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="Parts Kept:" Foreground="#FFA0AAB5" FontSize="11" VerticalAlignment="Center" />
+                                                        <TextBox Grid.Column="1" Text="{Binding DentalPartsKept, UpdateSourceTrigger=LostFocus}" Background="#FF30343D" Foreground="White" BorderThickness="0" TextAlignment="Center" Padding="2" FontSize="11" PreviewKeyDown="OptionsTextBox_PreviewKeyDown"/>
+                                                    </Grid>
+                                                    
+                                                    <!-- Smoothing Amount -->
+                                                    <TextBlock Text="Smoothing Amount:" Foreground="#FFA0AAB5" FontSize="11" Margin="0,0,0,4" />
+                                                    <DockPanel Margin="0,0,0,8">
+                                                        <TextBlock DockPanel.Dock="Right" Text="{Binding DentalSmoothingAmount, StringFormat=\{0:F2\}, UpdateSourceTrigger=PropertyChanged}" Width="35" Foreground="White" FontSize="11" TextAlignment="Right" VerticalAlignment="Center"/>
+                                                        <Slider Minimum="0" Maximum="1" TickFrequency="0.05" IsSnapToTickEnabled="True" Value="{Binding DentalSmoothingAmount}" VerticalAlignment="Center"/>
+                                                    </DockPanel>
+                                                    
+                                                    <!-- Smoothing Passes -->
+                                                    <Grid Margin="0,0,0,4">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="110"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="Smoothing Passes:" Foreground="#FFA0AAB5" FontSize="11" VerticalAlignment="Center" />
+                                                        <TextBox Grid.Column="1" Text="{Binding DentalSmoothingPasses, UpdateSourceTrigger=LostFocus}" Background="#FF30343D" Foreground="White" BorderThickness="0" TextAlignment="Center" Padding="2" FontSize="11" PreviewKeyDown="OptionsTextBox_PreviewKeyDown"/>
+                                                    </Grid>
+                                                </StackPanel>
+                                            </Border>
+                                        </Popup>
                                     </StackPanel>
                                 </Expander>
 
                                 <!-- 4. CUSTOM REGION SEGMENTATION -->
-                                <Expander Header="⚙️  Custom Region" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                                <Expander Header="➕  Custom Region" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
                                           Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
                                     <StackPanel Margin="4,6,4,4">
                                         <TextBlock Text="CUSTOM THRESHOLD (HU)" Style="{StaticResource PanelHeader}" FontSize="9" />
@@ -414,8 +691,66 @@
                                         </DockPanel>
                                         <CheckBox Content="Preview Overlay" IsChecked="{Binding ShowCustomOverlay}"
                                                   Margin="0,4,0,4" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" />
-                                        <Button Content="➕ Compute Custom Part" Command="{Binding RunCustomSegmentCommand}"
-                                                Margin="0,0,0,6" IsEnabled="{Binding IsVolumeLoaded}" />
+                                        <Grid Margin="0,0,0,6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Button Grid.Column="0" Content="Compute Model" Command="{Binding RunCustomSegmentCommand}"
+                                                    IsEnabled="{Binding IsVolumeLoaded}" Margin="0,0,4,0"/>
+                                            <ToggleButton Grid.Column="1" x:Name="CustomOptionsToggle" Width="28" Height="28" Padding="0"
+                                                          Style="{StaticResource GearToggleButtonStyle}" IsEnabled="{Binding IsVolumeLoaded}">
+                                                <Path Data="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"
+                                                      Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
+                                                      Width="14" Height="14" Stretch="Uniform" />
+                                            </ToggleButton>
+                                        </Grid>
+                                        <Popup IsOpen="{Binding IsChecked, ElementName=CustomOptionsToggle, Mode=TwoWay}" StaysOpen="False" PlacementTarget="{Binding ElementName=CustomOptionsToggle}" Placement="Bottom" VerticalOffset="4">
+                                            <Border Background="#FF21252B" BorderBrush="#FF30343D" BorderThickness="1" CornerRadius="4" Padding="12" Width="220">
+                                                <StackPanel>
+                                                    <TextBlock Text="CUSTOM OPTIONS" Foreground="White" FontSize="11" FontWeight="Bold" Margin="0,0,0,10" />
+                                                    
+                                                    <!-- Keep All Parts / Parts Kept -->
+                                                    <CheckBox x:Name="CustomKeepAllCheck" Content="Keep All Parts" IsChecked="{Binding CustomKeepAllParts}" Foreground="White" FontSize="11" Margin="0,0,0,8" />
+                                                    
+                                                    <Grid Margin="0,0,0,8">
+                                                        <Grid.Style>
+                                                            <Style TargetType="Grid">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding CustomKeepAllParts}" Value="True">
+                                                                        <Setter Property="IsEnabled" Value="False"/>
+                                                                        <Setter Property="Opacity" Value="0.4"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Grid.Style>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="110"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="Parts Kept:" Foreground="#FFA0AAB5" FontSize="11" VerticalAlignment="Center" />
+                                                        <TextBox Grid.Column="1" Text="{Binding CustomPartsKept, UpdateSourceTrigger=LostFocus}" Background="#FF30343D" Foreground="White" BorderThickness="0" TextAlignment="Center" Padding="2" FontSize="11" PreviewKeyDown="OptionsTextBox_PreviewKeyDown"/>
+                                                    </Grid>
+                                                    
+                                                    <!-- Smoothing Amount -->
+                                                    <TextBlock Text="Smoothing Amount:" Foreground="#FFA0AAB5" FontSize="11" Margin="0,0,0,4" />
+                                                    <DockPanel Margin="0,0,0,8">
+                                                        <TextBlock DockPanel.Dock="Right" Text="{Binding CustomSmoothingAmount, StringFormat=\{0:F2\}, UpdateSourceTrigger=PropertyChanged}" Width="35" Foreground="White" FontSize="11" TextAlignment="Right" VerticalAlignment="Center"/>
+                                                        <Slider Minimum="0" Maximum="1" TickFrequency="0.05" IsSnapToTickEnabled="True" Value="{Binding CustomSmoothingAmount}" VerticalAlignment="Center"/>
+                                                    </DockPanel>
+                                                    
+                                                    <!-- Smoothing Passes -->
+                                                    <Grid Margin="0,0,0,4">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="110"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="Smoothing Passes:" Foreground="#FFA0AAB5" FontSize="11" VerticalAlignment="Center" />
+                                                        <TextBox Grid.Column="1" Text="{Binding CustomSmoothingPasses, UpdateSourceTrigger=LostFocus}" Background="#FF30343D" Foreground="White" BorderThickness="0" TextAlignment="Center" Padding="2" FontSize="11" PreviewKeyDown="OptionsTextBox_PreviewKeyDown"/>
+                                                    </Grid>
+                                                </StackPanel>
+                                            </Border>
+                                        </Popup>
                                     </StackPanel>
                                 </Expander>
 
@@ -424,19 +759,25 @@
                             </Expander>
 
                         <!-- 2. PREPARE SURGICAL MODELS -->
-                        <Expander Header="🦷  Prepare Surgical Models" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
+                        <Expander IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
                                   Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
+                            <Expander.Header>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Path Data="M 12,5.5 C 10,4.5 7,4 7,7.5 C 7,10 7.5,14 7.5,17 C 7.5,19.5 9,20.5 9.5,20.5 C 10,20.5 11.5,17 12,15.5 C 12.5,17 14,20.5 14.5,20.5 C 15,20.5 16.5,19.5 16.5,17 C 16.5,14 17,10 17,7.5 C 17,4 14,4.5 12,5.5 Z"
+                                          Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Expander}}"
+                                          Width="14" Height="14" Stretch="Uniform" Margin="0,0,8,0"/>
+                                    <TextBlock Text="Prepare Surgical Models" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold"/>
+                                </StackPanel>
+                            </Expander.Header>
                             <StackPanel Margin="4,6,4,4">
                                 <TextBlock Text="Import dental cast STL files and align them to the CT volume."
                                            TextWrapping="Wrap" FontSize="10" FontWeight="Normal"
                                            Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6" />
-                                <Button Content="📥 Load Dental Scans" Command="{Binding ImportStlCommand}" Margin="0,0,0,4" />
-                                <Button Content="🔄 Align to CT" Command="{Binding AlignDentalScansCommand}" Margin="0,0,0,4"
-                                        Background="#FF1B98E0" Foreground="White" FontWeight="Bold" />
-                                <Button Content="🔪 Split Cranium / Mandible" Command="{Binding SplitCraniumMandibleCommand}" Margin="0,0,0,4"
-                                        Background="#FF1B98E0" Foreground="White" FontWeight="Bold" />
-                                <Button Content="🧹 Clean &amp; Merge Cast" Command="{Binding CleanMergeCastCommand}" Margin="0,0,0,4"
-                                        Background="#FFA020F0" Foreground="White" FontWeight="Bold" />
+                                <Button Content="Load Dental Scans" Command="{Binding ImportStlCommand}" Margin="0,0,0,4" />
+                                <Button Content="Edit Dental Scans" Command="{Binding EditDentalCastsCommand}" Margin="0,0,0,4" />
+                                <Button Content="Split Cranium / Mandible" Command="{Binding SplitCraniumMandibleCommand}" Margin="0,0,0,4" />
+                                <Button Content="Align to CT" Command="{Binding AlignDentalScansCommand}" Margin="0,0,0,4" />
+                                <Button Content="Clean &amp; Merge Casts" Command="{Binding CleanMergeCastCommand}" Margin="0,0,0,4" />
                                 <CheckBox Content="Make meshes watertight" IsChecked="{Binding CloseHolesAfterMerge}" 
                                           Margin="0,0,0,8" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" />
                                 <ItemsControl ItemsSource="{Binding ImportedMeshes}">
@@ -502,19 +843,19 @@
                                 <TextBlock Text="Define cut planes for Le Fort I, BSSO, and genioplasty osteotomies."
                                            TextWrapping="Wrap" FontSize="10" FontWeight="Normal"
                                            Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6" />
-                                <Button Content="✂ Plan Le Fort 1" Command="{Binding PlanLeFort1Command}" Margin="0,0,0,4"
+                                <Button Content="Plan Le Fort 1" Command="{Binding PlanLeFort1Command}" Margin="0,0,0,4"
                                         Background="#FF1B98E0" Foreground="White" FontWeight="Bold" />
-                                <Button Content="✂ LeFort 1 — 2-Piece Sagittal" Command="{Binding PlanLeFort1SagittalCutCommand}"
+                                <Button Content="LeFort 1 — 2-Piece Sagittal" Command="{Binding PlanLeFort1SagittalCutCommand}"
                                         Margin="0,0,0,4" IsEnabled="{Binding HasLeFort1Maxilla}"
                                         Background="#FF1B6AB0" Foreground="White" FontWeight="Normal"
                                         ToolTip="Splits the separated LeFort 1 maxilla with a sagittal midline cut (requires LeFort 1 to be performed first)"/>
-                                <Button Content="✂ LeFort 1 — 3-Piece Y-Cut" Command="{Binding PlanLeFort1YCutCommand}"
+                                <Button Content="LeFort 1 — 3-Piece Y-Cut" Command="{Binding PlanLeFort1YCutCommand}"
                                         Margin="0,0,0,4" IsEnabled="{Binding HasLeFort1Maxilla}"
                                         Background="#FF1B6AB0" Foreground="White" FontWeight="Normal"
                                         ToolTip="Splits the separated LeFort 1 maxilla with a Y-shaped cut yielding Left, Right and Central segments (requires LeFort 1 to be performed first)"/>
-                                <Button Content="✂ Plan BSSO" Command="{Binding PlanBssoCommand}" Margin="0,0,0,4"
+                                <Button Content="Plan BSSO" Command="{Binding PlanBssoCommand}" Margin="0,0,0,4"
                                         Background="#FF1B98E0" Foreground="White" FontWeight="Bold" />
-                                <Button Content="✂ Plan Genioplasty" Command="{Binding PlanGenioplastyCommand}" Margin="0,0,0,4"
+                                <Button Content="Plan Genioplasty" Command="{Binding PlanGenioplastyCommand}" Margin="0,0,0,4"
                                         Background="#FF1B98E0" Foreground="White" FontWeight="Bold" />
                             </StackPanel>
                         </Expander>
