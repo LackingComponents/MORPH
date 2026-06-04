@@ -44,6 +44,17 @@ public partial class App : Application
     {
         if (sender is Window window)
         {
+            // Set the window icon if not already set
+            if (window.Icon == null)
+            {
+                try
+                {
+                    var iconUri = new Uri("pack://application:,,,/OrthoPlanner;component/Resources/app.png", UriKind.Absolute);
+                    window.Icon = System.Windows.Media.Imaging.BitmapFrame.Create(iconUri);
+                }
+                catch { /* Ignore if resource is not found/loaded yet */ }
+            }
+
             var hwnd = new System.Windows.Interop.WindowInteropHelper(window).Handle;
             if (hwnd != IntPtr.Zero)
             {

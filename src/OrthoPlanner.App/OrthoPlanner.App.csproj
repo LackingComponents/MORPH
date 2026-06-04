@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <ApplicationIcon />
+    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
     <AssemblyName>OrthoPlanner</AssemblyName>
     <RootNamespace>OrthoPlanner.App</RootNamespace>
     <!-- Required for ManifoldNET native DLL targets to activate on x64 -->
