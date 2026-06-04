@@ -15,26 +15,46 @@ namespace OrthoPlanner.App;
 /// </summary>
 public partial class App : Application
 {
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
-        // Register fo-dicom native codecs so JPEG Lossless (and other compressed
-        // transfer syntaxes) are automatically decompressed when reading pixel data.
-        new DicomSetupBuilder()
-            .RegisterServices(s => s
-                .AddFellowOakDicom()
-                .AddTranscoderManager<NativeTranscoderManager>())
-            .SkipValidation()
-            .Build();
-
         base.OnStartup(e);
+
+        // 1. Show the splash screen immediately
+        var splash = new SplashWindow();
+        splash.Show();
+
+        // 2. Initialize background services asynchronously
+        splash.Status = "Registering DICOM codecs...";
+        await System.Threading.Tasks.Task.Run(() => {
+            new DicomSetupBuilder()
+                .RegisterServices(s => s
+                    .AddFellowOakDicom()
+                    .AddTranscoderManager<NativeTranscoderManager>())
+                .SkipValidation()
+                .Build();
+        });
+
+        splash.Status = "Initializing file storage...";
+        await System.Threading.Tasks.Task.Run(() => {
+            AppTempStorage.Initialize();
+        });
 
         // Register global Loaded handler for Windows to apply dark title bar
         EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent, new RoutedEventHandler(OnWindowLoaded));
 
-        // Clear any temporary files left from previous sessions
-        AppTempStorage.Initialize();
-
         SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
+
+        // 3. Load the Main Window
+        splash.Status = "Starting 3D graphics engine...";
+
+        var mainWindow = new MainWindow();
+        this.MainWindow = mainWindow;
+
+        splash.Status = "Ready.";
+        await System.Threading.Tasks.Task.Delay(500);
+
+        mainWindow.Show();
+        splash.Close();
     }
 
     [System.Runtime.InteropServices.DllImport("dwmapi.dll")]

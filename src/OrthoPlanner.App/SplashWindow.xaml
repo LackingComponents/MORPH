@@ -1,0 +1,33 @@
+<Window x:Class="OrthoPlanner.App.SplashWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="OrthoPlanner Loading" Width="520" Height="360"
+        WindowStartupLocation="CenterScreen" WindowStyle="None" ResizeMode="NoResize"
+        AllowsTransparency="True" Background="Transparent" ShowInTaskbar="False">
+    <Border Background="{StaticResource BgDarkBrush}" CornerRadius="12" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+        <Grid Margin="24">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- Splash Image -->
+            <Image x:Name="SplashImage" Grid.Row="0" Margin="0,8" Stretch="Uniform" 
+                   VerticalAlignment="Center" HorizontalAlignment="Center" Source="Resources/splash.png"/>
+
+            <!-- Progress Indicator -->
+            <ProgressBar Grid.Row="1" IsIndeterminate="True" Height="4" Margin="12,16,12,12" 
+                         Background="{StaticResource BgLightBrush}" Foreground="{StaticResource AccentBrush}"/>
+
+            <!-- Loading Info -->
+            <TextBlock x:Name="StatusText" Grid.Row="2" Text="Initializing application components..." 
+                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" HorizontalAlignment="Center" Margin="0,0,0,8"/>
+
+            <!-- Copyright Info -->
+            <TextBlock x:Name="CopyrightText" Grid.Row="3" Text="© 2026 OrthoPlanner. All rights reserved." 
+                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" HorizontalAlignment="Center" Opacity="0.7"/>
+        </Grid>
+    </Border>
+</Window>
