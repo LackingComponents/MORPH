@@ -36,7 +36,9 @@ public partial class MainViewModel
 
             var meshVm = new MeshViewModel
             {
-                Name = Path.GetFileNameWithoutExtension(entry.FilePath) + (scanType != DentalScanType.Other ? $" ({scanType})" : ""),
+                Name = scanType == DentalScanType.Upper ? "Maxillary cast"
+                     : scanType == DentalScanType.Lower ? "Mandibular cast"
+                     : Path.GetFileNameWithoutExtension(entry.FilePath),
                 Vertices = vertices,
                 ColorR = (byte)(scanType == DentalScanType.Upper ? 140 : scanType == DentalScanType.Lower ? 255 : 245),
                 ColorG = (byte)(scanType == DentalScanType.Upper ? 200 : scanType == DentalScanType.Lower ? 170 : 245),
