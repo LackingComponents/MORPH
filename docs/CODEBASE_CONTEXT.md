@@ -569,3 +569,92 @@ dotnet build OrthoPlanner.sln --configuration Debug --no-incremental
 **Risks resolved:**
 - Cephalometry overlay fragility (landmarks now persist across sessions)
 - Occlusion alignment loss on project save (occlusion STLs + transforms now saved)
+
+---
+
+## 20. Visual Style & UX/UI Design System
+
+This section describes the colors, typography, layout structures, custom styling rules, and WPF/DWM windows integration details that establish and maintain MORPH's premium dark-theme visual style. When building new UI elements or editing views, AI assistants must adhere strictly to these conventions to ensure a consistent user experience.
+
+### 20.1 Global Color Palette
+
+MORPH uses a custom Slate / Blue-Grey color system defined in `Themes/DarkTheme.xaml` and merged globally. Avoid hardcoding random colors; always reference these keys or brushes:
+
+| Color Key | Brush Key | Value | Purpose / Application |
+|---|---|---|---|
+| `BgDark` | `BgDarkBrush` | `#FF0D1117` | Primary window backgrounds |
+| `BgMedium` | `BgMediumBrush` | `#FF151B23` | Sidebar panel backgrounds, toolbars, status bar, context menus |
+| `BgLight` | `BgLightBrush` | `#FF1E2730` | Control backgrounds (textboxes, slider track, progress bar base, option panels) |
+| `BgHover` | `BgHoverBrush` | `#FF283545` | Hover state background, highlighted menu items, selected row backdrops |
+| `Accent` | `AccentBrush` | `#FF6B8DAF` | Muted slate-blue accent for active borders, slider thumbs, toggle buttons, progress bar indicators |
+| `AccentHover` | `AccentHoverBrush` | `#FF7FA3C7` | Lighter slate-blue hover state for active components |
+| `Success` | - | `#FF6BA88C` | Muted sage-green for positive/accept actions (e.g., Accept buttons) |
+| `Warning` | - | `#FFD4A056` | Muted gold/orange for warning highlights |
+| `TextPrimary` | `TextPrimaryBrush` | `#FFD0D8E0` | Off-white / light slate grey for primary text, values, and titles |
+| `TextSecondary` | `TextSecondaryBrush`| `#FF6E7F90` | Muted slate blue-grey for secondary text, labels, and placeholders |
+| `Border` | `BorderBrush` | `#FF232E3A` | Separators, grid dividers, control borders |
+
+### 20.2 Typography
+
+* **Font Family**: `Segoe UI` is used exclusively for UI text. `Consolas` (monospace) is used for floating overlay HUD displays.
+* **Sizes & Weights**:
+  * **Default Window / View Text**: `13px`, Regular.
+  * **Default Control Labels (Buttons, CheckBoxes)**: `12px`, Regular.
+  * **Section Headers (`PanelHeader`)**: `10px`, SemiBold, `Opacity=0.85`, Foreground `AccentBrush`, Margin `0,0,0,4`.
+  * **Secondary Labels / Muted Info (`StatusText`)**: `11px`, Foreground `TextSecondaryBrush`.
+  * **Dynamic Tree Items**: `10px`, Foreground `#D0D8E0`.
+  * **Empty Placeholders**: `10px`, Italic, Foreground `#6E7F90`.
+  * **Step Titles** (in osteotomy wizards): `16px`, SemiBold, Foreground `#EAECF0`.
+  * **Monospace HUD Text**: `13px`, SemiBold, Foreground `#00E5FF` (Cyan).
+
+### 20.3 Global Window Dark Chrome (DWM Integration)
+
+To avoid standard white OS window title bars and borders clashing with the dark client area, `App.xaml.cs` hooks into a global `Window.Loaded` event handler and applies native Windows DWM attributes:
+* **Immersive Dark Mode** is enabled by setting DWM attributes `20` and `19` to `1`.
+* **Caption/Title Bar Color** (DWM attribute `35`) is set to match the window's WPF `Background` color (typically `BgDark` `#0D1117` or `BgMedium` `#151B23`).
+* **Window Border Color** (DWM attribute `34`) is set to match the window's WPF `Background` color.
+* **Window Title Text Color** (DWM attribute `36`) is set to light grey `#D0D8E0`.
+
+> [!NOTE]
+> Do not define default light-colored windows. Always style window backgrounds with `BgDarkBrush` or `BgMediumBrush` so the DWM interop works seamlessly.
+
+### 20.4 Control Template Conventions
+
+* **Buttons**:
+  * Default style: Rounded border (`CornerRadius="4"`), padding `14,6`, cursor `Hand`. Hover state transitions background to `BgHoverBrush` and border to `AccentBrush`. Pressed state uses `AccentBrush`. Disabled state uses `0.4` Opacity.
+  * `AccentButton`: Uses `AccentBrush` background, white text, and `SemiBold` font weight.
+  * Wizard Action Buttons: Cancel buttons use `#20FFFFFF` background with `#40FFFFFF` border. Accept / Success buttons use `#308040` (sage green) background. Primary action / Next buttons use `#3060A0` (deep blue) background.
+* **CheckBox (Toggle Switch)**:
+  * Overridden to display as a sliding switch toggle: Width `32`, Height `16`, track `CornerRadius="8"`.
+  * When Checked, the track background becomes `AccentBrush` and the thumb slides right (changing margin from `2,0,18,0` to `18,0,2,0`).
+* **Sliders**:
+  * Track height is `4` with a progress fill using `AccentBrush`.
+  * Thumb is an `Ellipse` with diameter `14`, filled with `AccentBrush` and a `2px` stroke of `BgDarkBrush`.
+* **Expander (TransparentExpander)**:
+  * Default expanders are customized to be borderless except for a bottom line separator.
+  * Uses a custom vector path arrow (`M 0,0 L 4,4 L 0,8` in White) which rotates 90 degrees when expanded.
+* **Scrollbars**:
+  * Unobtrusive track width of `6` with an `AccentBrush` rounded thumb.
+
+### 20.5 Layout & Grid Structure
+
+* **Main Workspace Grid Columns** (`MainWindow.xaml`):
+  * **Left Sidebar**: Width `230`. Contains the workflow accordion of expanders. Styled with background `BgMediumBrush` and border `BorderBrush`.
+  * **Center Viewport Area**: Width `4*`. Houses the 3D renderer and MPR slices.
+  * **Right Panel**: Width `1.5*`. Houses lists of segments, STL files, and measurements.
+* **Settings Popups**:
+  * Small gear buttons (`M19.43...` SVG path) trigger a `Popup` control.
+  * Popup boxes use Background `#FF21252B`, BorderBrush `#FF30343D`, and a CornerRadius of `4`. They feature vertical layouts with custom stepper repeat buttons (`▲`/`▼`, Width `20`, Height `12`).
+* **HUD Overlays**:
+  * Overlays (like Window/Level or Zoom details) float in the top-right of viewports using semi-transparent dark boxes (Background `#BB000C18`, CornerRadius `6`, BorderBrush `#FF3A5A7A`).
+
+### 20.6 Dynamic Code-Behind UI Generation
+
+When creating UI elements in C# (e.g. measurements tree lists), adhere to these layout styles:
+* **Tree Rows**: Horizontal StackPanel with margin `0,1,0,1`.
+* **Row Elements**:
+  1. CheckBox (visibility toggle).
+  2. Color Swatch (Ellipse, `Width=7`, `Height=7`, VerticalAlignment `Center`, Right Margin `5`).
+  3. TextBlock (Label + value, FontSize `10`, Foreground `#D0D8E0`, `TextTrimming=CharacterEllipsis`, `MaxWidth=140`).
+  4. Delete Button (✕ text, FontSize `8`, Padding `2,0`, transparent background, Foreground `#888888`, Cursor `Hand`, ToolTip `Delete measurement`).
+* **Empty States**: Show italicized placeholder TextBlocks in `#6E7F90`.
