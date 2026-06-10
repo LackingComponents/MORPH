@@ -85,8 +85,12 @@ public partial class MainViewModel : ObservableObject
 
     public ObservableCollection<SegmentViewModel> Segments { get; } = new();
 
-    // ÔöÇÔöÇÔöÇ Imported Meshes ÔöÇÔöÇÔöÇ
+    // ─── Imported Meshes ───
     public ObservableCollection<MeshViewModel> ImportedMeshes { get; } = new();
+
+    // ─── Cephalometry landmark persistence ───
+    // Populated by CephalometryOverlay whenever landmarks change; consumed by ProjectViewModel.
+    public List<CephLandmarkSave> SavedCephLandmarks { get; set; } = new();
 
     // ÔöÇÔöÇÔöÇ Partial handlers for DICOM slices/windowing/overlays ÔåÆ DicomViewModel.cs ÔöÇÔöÇÔöÇ
 
@@ -302,3 +306,11 @@ public static class MeshHelper
 }
 
 
+/// <summary>
+/// Serializable snapshot of a single cephalometric landmark.
+/// Stored on MainViewModel.SavedCephLandmarks so ProjectViewModel can persist it.
+/// </summary>
+public record CephLandmarkSave(
+    string Name,
+    double? X2D, double? Y2D,
+    double? X3D, double? Y3D, double? Z3D);

@@ -97,7 +97,12 @@ public partial class MainWindow : Window
 
                     case nameof(ViewModels.MainViewModel.IsCephalometryOpen):
                         if (VM!.IsCephalometryOpen && VM.Volume != null)
+                        {
                             CephalometryPanel.SetVolume(VM.Volume);
+                            // Subscribe once so the tree rebuilds whenever measurements change
+                            CephalometryPanel.MeasurementsChanged -= RebuildCephMeasurementTree;
+                            CephalometryPanel.MeasurementsChanged += RebuildCephMeasurementTree;
+                        }
                         break;
 
                     case nameof(ViewModels.MainViewModel.ShowCephLandmarksIn3D):
@@ -847,5 +852,176 @@ public partial class MainWindow : Window
                 }
             }
         }
+    }
+
+    // ═══ Measurements Tab: Cephalometry tree ═══
+
+    /// <summary>
+    /// Called whenever the ceph overlay adds, removes, or changes measurements.
+    /// Rebuilds the four sub-group panels in the Measurements tab.
+    /// </summary>
+    private void RebuildCephMeasurementTree()
+    {
+        // Must run on the UI thread (event may fire from any context)
+        Dispatcher.InvokeAsync(() =>
+        {
+            var measurements = CephalometryPanel.GetMeasurements();
+
+            CephPointsPanel.Children.Clear();
+            CephPlanesPanel.Children.Clear();
+            CephAnglesPanel.Children.Clear();
+            CephLinearPanel.Children.Clear();
+
+            foreach (var m in measurements)
+            {
+                // Classify into the correct group
+                var targetPanel = m.ToolType switch
+                {
+                    OrthoPlanner.Core.Imaging.CephTool.CustomPoint => CephPointsPanel,
+                    OrthoPlanner.Core.Imaging.CephTool.InfinitePlane => CephPlanesPanel,
+                    OrthoPlanner.Core.Imaging.CephTool.AnglePlanes => CephAnglesPanel,
+                    OrthoPlanner.Core.Imaging.CephTool.Angle3Points => CephAnglesPanel,
+                    OrthoPlanner.Core.Imaging.CephTool.DistancePoints => CephLinearPanel,
+                    OrthoPlanner.Core.Imaging.CephTool.DistancePointPlane => CephLinearPanel,
+                    OrthoPlanner.Core.Imaging.CephTool.Line => CephLinearPanel,
+                    _ => CephLinearPanel
+                };
+
+                var mCaptured = m; // capture for lambda
+                var itemColor = Color.FromRgb(m.ColorR, m.ColorG, m.ColorB);
+
+                // Color swatch
+                var swatch = new Ellipse
+                {
+                    Width = 7, Height = 7,
+                    Fill = new SolidColorBrush(itemColor),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 5, 0)
+                };
+
+                // Label text
+                var labelText = string.IsNullOrEmpty(m.Unit)
+                    ? m.Label
+                    : $"{m.Label}: {m.Value:F1} {m.Unit}";
+
+                var label = new System.Windows.Controls.TextBlock
+                {
+                    Text = labelText,
+                    FontSize = 10,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = new SolidColorBrush(Color.FromRgb(0xD0, 0xD8, 0xE0)),
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    MaxWidth = 140
+                };
+
+                // Visibility checkbox
+                var visCheck = new System.Windows.Controls.CheckBox
+                {
+                    IsChecked = m.IsVisible,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 4, 0)
+                };
+                visCheck.Checked   += (_, _) => CephalometryPanel.SetMeasurementVisible(mCaptured, true);
+                visCheck.Unchecked += (_, _) => CephalometryPanel.SetMeasurementVisible(mCaptured, false);
+
+                // Delete button
+                var delBtn = new System.Windows.Controls.Button
+                {
+                    Content = "✕",
+                    FontSize = 8,
+                    Padding = new Thickness(2, 0, 2, 0),
+                    Margin = new Thickness(4, 0, 0, 0),
+                    Background = Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Cursor = System.Windows.Input.Cursors.Hand,
+                    ToolTip = "Delete measurement"
+                };
+                delBtn.Click += (_, _) =>
+                {
+                    CephalometryPanel.DeleteMeasurementFromTree(mCaptured);
+                    // Tree will rebuild via MeasurementsChanged event
+                };
+
+                var row = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Margin = new Thickness(0, 1, 0, 1)
+                };
+                row.Children.Add(visCheck);
+                row.Children.Add(swatch);
+                row.Children.Add(label);
+                row.Children.Add(delBtn);
+
+                targetPanel.Children.Add(row);
+            }
+
+            // Show "(none)" placeholder in empty groups
+            SetEmptyPlaceholder(CephPointsPanel, "No points placed");
+            SetEmptyPlaceholder(CephPlanesPanel,  "No planes traced");
+            SetEmptyPlaceholder(CephAnglesPanel,  "No angles measured");
+            SetEmptyPlaceholder(CephLinearPanel,  "No linear measurements");
+        }, System.Windows.Threading.DispatcherPriority.DataBind);
+    }
+
+    private static void SetEmptyPlaceholder(StackPanel panel, string message)
+    {
+        if (panel.Children.Count == 0)
+        {
+            panel.Children.Add(new System.Windows.Controls.TextBlock
+            {
+                Text = message,
+                FontSize = 10,
+                FontStyle = FontStyles.Italic,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x6E, 0x7F, 0x90)),
+                Margin = new Thickness(0, 2, 0, 2)
+            });
+        }
+    }
+
+    /// <summary>Toggles visibility of ALL cephalometry measurements (top-level eye checkbox).</summary>
+    private void CephAllVisibility_Changed(object sender, RoutedEventArgs e)
+    {
+        bool visible = (sender as System.Windows.Controls.CheckBox)?.IsChecked == true;
+        foreach (var m in CephalometryPanel.GetMeasurements())
+            CephalometryPanel.SetMeasurementVisible(m, visible);
+        // Sync sub-group checkboxes
+        CephPtsGroupCheck.IsChecked    = visible;
+        CephPlanesGroupCheck.IsChecked = visible;
+        CephAnglesGroupCheck.IsChecked = visible;
+        CephLinearGroupCheck.IsChecked = visible;
+    }
+
+    /// <summary>Toggles visibility of one sub-group (Points / Planes / Angles / Linear).</summary>
+    private void CephGroupVisibility_Changed(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.CheckBox cb) return;
+        string group = cb.Tag?.ToString() ?? "";
+        bool visible = cb.IsChecked == true;
+
+        foreach (var m in CephalometryPanel.GetMeasurements())
+        {
+            bool inGroup = group switch
+            {
+                "Points" => m.ToolType == OrthoPlanner.Core.Imaging.CephTool.CustomPoint,
+                "Planes" => m.ToolType == OrthoPlanner.Core.Imaging.CephTool.InfinitePlane,
+                "Angles" => m.ToolType is OrthoPlanner.Core.Imaging.CephTool.Angle3Points
+                                       or OrthoPlanner.Core.Imaging.CephTool.AnglePlanes,
+                "Linear" => m.ToolType is OrthoPlanner.Core.Imaging.CephTool.Line
+                                       or OrthoPlanner.Core.Imaging.CephTool.DistancePoints
+                                       or OrthoPlanner.Core.Imaging.CephTool.DistancePointPlane,
+                _ => false
+            };
+            if (inGroup) CephalometryPanel.SetMeasurementVisible(m, visible);
+        }
+        RebuildCephMeasurementTree();
+    }
+
+    /// <summary>Placeholder: custom (non-ceph) measurement group visibility.</summary>
+    private void CxMeasGroupVisibility_Changed(object sender, RoutedEventArgs e)
+    {
+        // Custom measurements are not yet implemented in the 3D viewport;
+        // this handler is reserved for future use.
     }
 }

@@ -1205,19 +1205,140 @@
                 </Grid>
 
                 <!-- TAB 1: MEASUREMENTS -->
-                <Grid Grid.Row="1" Visibility="{Binding RightPanelTabIndex, Converter={StaticResource IntToVisibilityConverter}, ConverterParameter=1}" Margin="4,8,4,4">
-                    <Border Background="#FF1E222A" BorderBrush="#FF30343D" BorderThickness="1" CornerRadius="4" Padding="12">
-                        <StackPanel>
-                            <TextBlock Text="CUSTOM MEASUREMENTS" Foreground="White" FontSize="11" FontWeight="Bold" Margin="0,0,0,8" />
-                            <TextBlock Text="Right-click on 3D models or slice views to place distance and angle measurements." Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" FontStyle="Italic" TextWrapping="Wrap" Margin="0,0,0,16" />
-                            <TextBlock Text="CEPHALOMETRY" Foreground="White" FontSize="11" FontWeight="Bold" Margin="0,0,0,8" />
-                            <TextBlock Text="Place landmarks, trace cephalometric planes, and compute angular and linear measurements." Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" FontStyle="Italic" TextWrapping="Wrap" Margin="0,0,0,12" />
-                            
-                            <CheckBox Content="Show cephalometric landmarks in 3D views" 
-                                      IsChecked="{Binding ShowCephLandmarksIn3D}" 
-                                      Foreground="White" FontSize="11" />
-                        </StackPanel>
+                <Grid Grid.Row="1" Visibility="{Binding RightPanelTabIndex, Converter={StaticResource IntToVisibilityConverter}, ConverterParameter=1}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Header -->
+                    <Border Grid.Row="0" Background="#FF1A1F28" Padding="8,6"
+                            BorderThickness="0,0,0,1" BorderBrush="#FF30343D">
+                        <TextBlock Text="MEASUREMENTS" Foreground="#FF6E7F90"
+                                   FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center"/>
                     </Border>
+
+                    <!-- Scrollable tree body -->
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,4,0,4">
+                        <StackPanel x:Name="MeasurementsTabPanel">
+
+                            <!-- ── CUSTOM MEASUREMENTS ── -->
+                            <Expander x:Name="CxMeasExpander" IsExpanded="False" Margin="0,2,0,0"
+                                      Foreground="#FFD0D8E0" FontSize="11">
+                                <Expander.Header>
+                                    <DockPanel>
+                                        <CheckBox x:Name="CxMeasGroupCheck"
+                                                  DockPanel.Dock="Right" VerticalAlignment="Center"
+                                                  Margin="0,0,4,0" ToolTip="Show/hide all custom measurements"
+                                                  IsChecked="True" Checked="CxMeasGroupVisibility_Changed"
+                                                  Unchecked="CxMeasGroupVisibility_Changed"/>
+                                        <TextBlock Text="Custom Measurements" FontSize="11"
+                                                   FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    </DockPanel>
+                                </Expander.Header>
+                                <Border Background="#08FFFFFF" CornerRadius="0,0,3,3" Padding="8,4,8,8">
+                                    <StackPanel>
+                                        <TextBlock Text="Right-click on 3D models or slice views to place distance and angle measurements."
+                                                   Foreground="#FF6E7F90" FontSize="10" FontStyle="Italic"
+                                                   TextWrapping="Wrap" Margin="0,0,0,6"/>
+                                        <StackPanel x:Name="CxMeasListPanel"/>
+                                    </StackPanel>
+                                </Border>
+                            </Expander>
+
+                            <Rectangle Height="1" Fill="#FF282E3A" Margin="0,4"/>
+
+                            <!-- ── CEPHALOMETRY ── -->
+                            <Expander x:Name="CephMeasExpander" IsExpanded="True" Margin="0,2,0,0"
+                                      Foreground="#FFD0D8E0" FontSize="11">
+                                <Expander.Header>
+                                    <DockPanel>
+                                        <CheckBox x:Name="CephAllGroupCheck"
+                                                  DockPanel.Dock="Right" VerticalAlignment="Center"
+                                                  Margin="0,0,4,0" ToolTip="Show/hide all cephalometry measurements"
+                                                  IsChecked="True" Checked="CephAllVisibility_Changed"
+                                                  Unchecked="CephAllVisibility_Changed"/>
+                                        <TextBlock Text="📐  Cephalometry" FontSize="11"
+                                                   FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    </DockPanel>
+                                </Expander.Header>
+                                <Border Background="#08FFFFFF" CornerRadius="0,0,3,3" Padding="4,4,4,8">
+                                    <StackPanel>
+
+                                        <!-- Points sub-group -->
+                                        <Expander x:Name="CephPtsExpander" IsExpanded="True" Margin="0,2,0,0"
+                                                  Foreground="#FFAAB4C0" FontSize="11">
+                                            <Expander.Header>
+                                                <DockPanel>
+                                                    <CheckBox x:Name="CephPtsGroupCheck"
+                                                              DockPanel.Dock="Right" VerticalAlignment="Center"
+                                                              Margin="0,0,4,0" IsChecked="True"
+                                                              Checked="CephGroupVisibility_Changed"
+                                                              Unchecked="CephGroupVisibility_Changed"
+                                                              Tag="Points"/>
+                                                    <TextBlock Text="Points" FontSize="11" VerticalAlignment="Center"/>
+                                                </DockPanel>
+                                            </Expander.Header>
+                                            <StackPanel x:Name="CephPointsPanel" Margin="12,2,4,2"/>
+                                        </Expander>
+
+                                        <!-- Planes sub-group -->
+                                        <Expander x:Name="CephPlanesExpander" IsExpanded="True" Margin="0,2,0,0"
+                                                  Foreground="#FFAAB4C0" FontSize="11">
+                                            <Expander.Header>
+                                                <DockPanel>
+                                                    <CheckBox x:Name="CephPlanesGroupCheck"
+                                                              DockPanel.Dock="Right" VerticalAlignment="Center"
+                                                              Margin="0,0,4,0" IsChecked="True"
+                                                              Checked="CephGroupVisibility_Changed"
+                                                              Unchecked="CephGroupVisibility_Changed"
+                                                              Tag="Planes"/>
+                                                    <TextBlock Text="Planes" FontSize="11" VerticalAlignment="Center"/>
+                                                </DockPanel>
+                                            </Expander.Header>
+                                            <StackPanel x:Name="CephPlanesPanel" Margin="12,2,4,2"/>
+                                        </Expander>
+
+                                        <!-- Angles sub-group -->
+                                        <Expander x:Name="CephAnglesExpander" IsExpanded="True" Margin="0,2,0,0"
+                                                  Foreground="#FFAAB4C0" FontSize="11">
+                                            <Expander.Header>
+                                                <DockPanel>
+                                                    <CheckBox x:Name="CephAnglesGroupCheck"
+                                                              DockPanel.Dock="Right" VerticalAlignment="Center"
+                                                              Margin="0,0,4,0" IsChecked="True"
+                                                              Checked="CephGroupVisibility_Changed"
+                                                              Unchecked="CephGroupVisibility_Changed"
+                                                              Tag="Angles"/>
+                                                    <TextBlock Text="Angles" FontSize="11" VerticalAlignment="Center"/>
+                                                </DockPanel>
+                                            </Expander.Header>
+                                            <StackPanel x:Name="CephAnglesPanel" Margin="12,2,4,2"/>
+                                        </Expander>
+
+                                        <!-- Linear measurements sub-group -->
+                                        <Expander x:Name="CephLinearExpander" IsExpanded="True" Margin="0,2,0,0"
+                                                  Foreground="#FFAAB4C0" FontSize="11">
+                                            <Expander.Header>
+                                                <DockPanel>
+                                                    <CheckBox x:Name="CephLinearGroupCheck"
+                                                              DockPanel.Dock="Right" VerticalAlignment="Center"
+                                                              Margin="0,0,4,0" IsChecked="True"
+                                                              Checked="CephGroupVisibility_Changed"
+                                                              Unchecked="CephGroupVisibility_Changed"
+                                                              Tag="Linear"/>
+                                                    <TextBlock Text="Linear" FontSize="11" VerticalAlignment="Center"/>
+                                                </DockPanel>
+                                            </Expander.Header>
+                                            <StackPanel x:Name="CephLinearPanel" Margin="12,2,4,2"/>
+                                        </Expander>
+
+                                    </StackPanel>
+                                </Border>
+                            </Expander>
+
+                        </StackPanel>
+                    </ScrollViewer>
                 </Grid>
 
                 <!-- TAB 2: SURGERY -->

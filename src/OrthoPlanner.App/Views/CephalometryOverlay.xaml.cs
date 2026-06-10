@@ -160,6 +160,44 @@ public partial class CephalometryOverlay : UserControl
     // Public API
     // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
 
+    // ════════════════════════════════════════════════════════════════════
+    // Public API used by the Measurements tab tree (right panel)
+    // ════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Fired whenever measurements are added, removed, or their visibility changes.
+    /// The Measurements tab in MainWindow subscribes to this to rebuild its tree.
+    /// </summary>
+    public event Action? MeasurementsChanged;
+
+    /// <summary>Returns the live measurement list (never null after initialization).</summary>
+    public IReadOnlyList<CephMeasurement> GetMeasurements() =>
+        _toolState.Measurements.AsReadOnly();
+
+    /// <summary>
+    /// Called by the Measurements tab tree when a visibility checkbox changes.
+    /// Immediately repaints the DRR canvas.
+    /// </summary>
+    public void SetMeasurementVisible(CephMeasurement m, bool visible)
+    {
+        m.IsVisible = visible;
+        RefreshMeasurementOverlay();
+        RefreshMeasurementPanel();
+    }
+
+    /// <summary>
+    /// Called by the Measurements tab tree to delete a measurement.
+    /// </summary>
+    public void DeleteMeasurementFromTree(CephMeasurement m)
+    {
+        _toolState.Measurements.Remove(m);
+        if (_toolState.SelectedMeasurement == m)
+            _toolState.SelectedMeasurement = null;
+        RefreshMeasurementOverlay();
+        RefreshMeasurementPanel();
+        MeasurementsChanged?.Invoke();
+    }
+
     public void SetVolume(VolumeData volume)
     {
         if (volume == _volume && _initialized) return;
@@ -169,6 +207,9 @@ public partial class CephalometryOverlay : UserControl
         _activeDrr = null;
         _landmarks = CephalometricLandmarkDefinitions.GetAll();
         _initialized = true;
+
+        // Restore any previously saved landmark positions from the project
+        RestoreLandmarkData();
 
         BuildLandmarkSidebar();
         _ = GenerateDrrAsync(lateral: true);
@@ -362,6 +403,7 @@ public partial class CephalometryOverlay : UserControl
                     if (_is3DMode) Refresh3DLandmarks();
                     UpdateLandmarkSidebarItem(_activeLandmark);
                     AdvanceToNextLandmark();
+                    SyncLandmarksToVm();
                     e.Handled = true;
                 }
             }
@@ -387,6 +429,8 @@ public partial class CephalometryOverlay : UserControl
             _isDraggingLandmark = false;
             _draggingDot = null;
             _draggingLandmark = null;
+            // Drag ended: persist the final position to the ViewModel
+            SyncLandmarksToVm();
             ImageCanvas.ReleaseMouseCapture();
             e.Handled = true;
         }
@@ -432,6 +476,7 @@ public partial class CephalometryOverlay : UserControl
             RefreshLandmarkOverlay();
             if (_is3DMode) Refresh3DLandmarks();
             UpdateLandmarkSidebarItem(lm);
+            SyncLandmarksToVm();
             e.Handled = true;
             return;
         }
@@ -826,6 +871,7 @@ public partial class CephalometryOverlay : UserControl
         RefreshLandmarkOverlay();
         UpdateLandmarkSidebarItem(_activeLandmark);
         AdvanceToNextLandmark();
+        SyncLandmarksToVm();
     }
 
     // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
@@ -1297,6 +1343,7 @@ public partial class CephalometryOverlay : UserControl
         _rubberBandEnd = null;
         RefreshMeasurementOverlay();
         RefreshMeasurementPanel();
+        MeasurementsChanged?.Invoke();
         UpdateToolStatus();
     }
 
@@ -1446,7 +1493,9 @@ public partial class CephalometryOverlay : UserControl
 
         // Draw completed measurements
         foreach (var m in _toolState.Measurements)
-            DrawMeasurement(m);
+        {
+            if (m.IsVisible) DrawMeasurement(m);
+        }
 
         // Draw pending points
         foreach (var pt in _toolState.PendingPoints)
@@ -1990,5 +2039,47 @@ public partial class CephalometryOverlay : UserControl
         foreach (var s in _pending3DSpheres) SharedViewport3D?.Items.Remove(s);
         _pending3DSpheres.Clear();
         _pending3DPts.Clear();
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // Landmark persistence helpers (Issue 10 fix)
+    // ════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Writes the current in-memory landmark list into MainViewModel.SavedCephLandmarks
+    /// so that ProjectViewModel can include it in the .orthoplan ZIP.
+    /// Call this after every landmark place / move / delete.
+    /// </summary>
+    private void SyncLandmarksToVm()
+    {
+        var vm = (Application.Current.MainWindow as MainWindow)?.DataContext as ViewModels.MainViewModel;
+        if (vm == null || _landmarks == null) return;
+
+        vm.SavedCephLandmarks = _landmarks
+            .Select(lm => new ViewModels.CephLandmarkSave(
+                lm.Name,
+                lm.Position?.X,   lm.Position?.Y,
+                lm.Position3D?.X, lm.Position3D?.Y, lm.Position3D?.Z))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Reads MainViewModel.SavedCephLandmarks and restores positions onto the freshly
+    /// created _landmarks list.  Call this at the end of SetVolume(), before BuildLandmarkSidebar().
+    /// </summary>
+    private void RestoreLandmarkData()
+    {
+        var vm = (Application.Current.MainWindow as MainWindow)?.DataContext as ViewModels.MainViewModel;
+        if (vm == null || _landmarks == null || vm.SavedCephLandmarks.Count == 0) return;
+
+        var byName = vm.SavedCephLandmarks.ToDictionary(s => s.Name);
+        foreach (var lm in _landmarks)
+        {
+            if (!byName.TryGetValue(lm.Name, out var saved)) continue;
+            if (saved.X2D.HasValue && saved.Y2D.HasValue)
+                lm.Position = (saved.X2D.Value, saved.Y2D.Value);
+            if (saved.X3D.HasValue && saved.Y3D.HasValue && saved.Z3D.HasValue)
+                lm.Position3D = (saved.X3D.Value, saved.Y3D.Value, saved.Z3D.Value);
+        }
     }
 }

@@ -1,4 +1,4 @@
-﻿namespace OrthoPlanner.Core.Imaging;
+namespace OrthoPlanner.Core.Imaging;
 
 /// <summary>
 /// A 2D point in DRR image-pixel coordinates.
@@ -19,6 +19,9 @@ public class CephMeasurement
     public byte ColorR { get; set; } = 255;
     public byte ColorG { get; set; } = 255;
     public byte ColorB { get; set; } = 255;
+
+    /// <summary>Visibility toggle: when false the measurement is hidden from the DRR canvas.</summary>
+    public bool IsVisible { get; set; } = true;
 
     /// <summary>Reference to another measurement (for AnglePlanes, DistancePointPlane).</summary>
     public string? RefMeasurementId1 { get; set; }

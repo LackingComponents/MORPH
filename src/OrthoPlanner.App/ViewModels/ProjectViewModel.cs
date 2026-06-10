@@ -27,10 +27,17 @@ public partial class MainViewModel
             using var fs = new FileStream(dialog.FileName, FileMode.Create);
             using var zip = new System.IO.Compression.ZipArchive(fs, System.IO.Compression.ZipArchiveMode.Create);
 
-            // 1. project.json ÔÇö metadata
+            // Helper: Matrix3D → 16-element double array (row-major)
+            static double[] MatrixToArray(System.Windows.Media.Media3D.Matrix3D m) =>
+                new[] { m.M11, m.M12, m.M13, m.M14,
+                        m.M21, m.M22, m.M23, m.M24,
+                        m.M31, m.M32, m.M33, m.M34,
+                        m.OffsetX, m.OffsetY, m.OffsetZ, m.M44 };
+
+            // 1. project.json — metadata
             var meta = new
             {
-                Version = "2.0",
+                Version = "2.1",
                 PatientName,
                 StudyDate,
                 Segmentation = new
@@ -42,9 +49,21 @@ public partial class MainViewModel
                     Segments = Segments.Select(s => new { s.Name, s.IsVisible, s.ColorR, s.ColorG, s.ColorB }).ToArray()
                 },
                 ImportedMeshes = ImportedMeshes.Select(m => new { m.Name, m.IsVisible, m.ColorR, m.ColorG, m.ColorB }).ToArray(),
+                // Issue 11: occlusion meshes with their alignment transforms
+                OcclusionMeshes = LoadedOcclusions.Select(o => new
+                {
+                    o.Name, o.IsVisible, o.ColorR, o.ColorG, o.ColorB,
+                    MaxillaOcclusionTransform = MatrixToArray(o.MaxillaOcclusionTransform),
+                    MandibleOcclusionTransform = MatrixToArray(o.MandibleOcclusionTransform)
+                }).ToArray(),
                 Volume = Volume != null ? new { Volume.Width, Volume.Height, Volume.Depth, Volume.Spacing } : null,
                 WindowCenter,
-                WindowWidth
+                WindowWidth,
+                // Issue 10: cephalometry landmarks
+                CephLandmarks = SavedCephLandmarks.Select(c => new
+                {
+                    c.Name, c.X2D, c.Y2D, c.X3D, c.Y3D, c.Z3D
+                }).ToArray()
             };
             var jsonEntry = zip.CreateEntry("project.json");
             using (var sw = new StreamWriter(jsonEntry.Open()))
@@ -53,7 +72,7 @@ public partial class MainViewModel
                     new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
             }
 
-            // 2. volume.bin ÔÇö raw voxel data
+            // 2. volume.bin — raw voxel data
             if (Volume != null)
             {
                 var volEntry = zip.CreateEntry("volume.bin", System.IO.Compression.CompressionLevel.Fastest);
@@ -63,7 +82,7 @@ public partial class MainViewModel
                 volStream.Write(bytes, 0, bytes.Length);
             }
 
-            // 3. meshes/*.bin ÔÇö imported STL vertex data
+            // 3. meshes/*.bin — imported STL vertex data
             for (int i = 0; i < ImportedMeshes.Count; i++)
             {
                 var mesh = ImportedMeshes[i];
@@ -76,7 +95,7 @@ public partial class MainViewModel
                     { bw.Write(mesh.Vertices[vi]); bw.Write(mesh.Vertices[vi + 1]); bw.Write(mesh.Vertices[vi + 2]); }
             }
 
-            // 4. segments/*.bin ÔÇö segmented 3D model vertex data
+            // 4. segments/*.bin — segmented 3D model vertex data
             for (int i = 0; i < Segments.Count; i++)
             {
                 var seg = Segments[i];
@@ -87,6 +106,19 @@ public partial class MainViewModel
                 bw2.Write(seg.Vertices.Length / 3);
                 for (int vi = 0; vi < seg.Vertices.Length; vi += 3)
                     { bw2.Write(seg.Vertices[vi]); bw2.Write(seg.Vertices[vi + 1]); bw2.Write(seg.Vertices[vi + 2]); }
+            }
+
+            // 5. (Issue 11) occlusions/*.bin — occlusion STL vertex data
+            for (int i = 0; i < LoadedOcclusions.Count; i++)
+            {
+                var occ = LoadedOcclusions[i];
+                if (occ.Vertices == null) continue;
+                var occEntry = zip.CreateEntry($"occlusions/{i}_{occ.Name}.bin", System.IO.Compression.CompressionLevel.Fastest);
+                using var os = occEntry.Open();
+                using var bw3 = new BinaryWriter(os);
+                bw3.Write(occ.Vertices.Length / 3);
+                for (int vi = 0; vi < occ.Vertices.Length; vi += 3)
+                    { bw3.Write(occ.Vertices[vi]); bw3.Write(occ.Vertices[vi + 1]); bw3.Write(occ.Vertices[vi + 2]); }
             }
 
             StatusText = $"Project saved: {Path.GetFileName(dialog.FileName)}";
@@ -284,6 +316,74 @@ public partial class MainViewModel
                         else if (sName == "Dental Scan" || sName.StartsWith("Dental")) DentalModel = segVm;
                     }
                     segIdx++;
+                }
+            }
+
+            // 5. (Issue 11) Read occlusion meshes + their alignment transforms
+            LoadedOcclusions.Clear();
+            OcclusionNodes.Clear();
+            if (root.TryGetProperty("OcclusionMeshes", out var occArr))
+            {
+                // Helper: 16-element double array -> Matrix3D (row-major)
+                static System.Windows.Media.Media3D.Matrix3D ArrayToMatrix(System.Text.Json.JsonElement el)
+                {
+                    var d = new double[16];
+                    int idx = 0;
+                    foreach (var v in el.EnumerateArray()) d[idx++] = v.GetDouble();
+                    return new System.Windows.Media.Media3D.Matrix3D(
+                        d[0],  d[1],  d[2],  d[3],
+                        d[4],  d[5],  d[6],  d[7],
+                        d[8],  d[9],  d[10], d[11],
+                        d[12], d[13], d[14], d[15]);
+                }
+
+                int occIdx = 0;
+                foreach (var occMeta in occArr.EnumerateArray())
+                {
+                    string oName = occMeta.TryGetProperty("Name", out var np) ? np.GetString() ?? $"Occlusion_{occIdx}" : $"Occlusion_{occIdx}";
+                    var occEntry = zip.Entries.FirstOrDefault(e => e.FullName.StartsWith($"occlusions/{occIdx}_"));
+                    if (occEntry != null)
+                    {
+                        using var os = occEntry.Open();
+                        using var br3 = new BinaryReader(os);
+                        int cnt = br3.ReadInt32();
+                        var verts = new float[cnt * 3];
+                        for (int i = 0; i < cnt; i++)
+                        { verts[i * 3] = br3.ReadSingle(); verts[i * 3 + 1] = br3.ReadSingle(); verts[i * 3 + 2] = br3.ReadSingle(); }
+
+                        var occVm = new MeshViewModel
+                        {
+                            Name = oName,
+                            Vertices = verts,
+                            ColorR = occMeta.TryGetProperty("ColorR", out var ocr) ? ocr.GetByte() : (byte)220,
+                            ColorG = occMeta.TryGetProperty("ColorG", out var ocg) ? ocg.GetByte() : (byte)220,
+                            ColorB = occMeta.TryGetProperty("ColorB", out var ocb) ? ocb.GetByte() : (byte)200,
+                            IsVisible = occMeta.TryGetProperty("IsVisible", out var iv) && iv.GetBoolean(),
+                            MaxillaOcclusionTransform  = occMeta.TryGetProperty("MaxillaOcclusionTransform",  out var mt) ? ArrayToMatrix(mt) : System.Windows.Media.Media3D.Matrix3D.Identity,
+                            MandibleOcclusionTransform = occMeta.TryGetProperty("MandibleOcclusionTransform", out var nd) ? ArrayToMatrix(nd) : System.Windows.Media.Media3D.Matrix3D.Identity,
+                        };
+                        occVm.OnVisibilityChanged = RefreshCombinedModel;
+                        occVm.BuildModel();
+                        LoadedOcclusions.Add(occVm);
+                    }
+                    occIdx++;
+                }
+            }
+
+            // 6. (Issue 10) Read cephalometry landmarks into SavedCephLandmarks
+            SavedCephLandmarks = new List<CephLandmarkSave>();
+            if (root.TryGetProperty("CephLandmarks", out var cephArr))
+            {
+                foreach (var cl in cephArr.EnumerateArray())
+                {
+                    string cName = cl.TryGetProperty("Name", out var cn) ? cn.GetString() ?? "" : "";
+                    double? x2d = cl.TryGetProperty("X2D", out var x2e) && x2e.ValueKind != System.Text.Json.JsonValueKind.Null ? x2e.GetDouble() : (double?)null;
+                    double? y2d = cl.TryGetProperty("Y2D", out var y2e) && y2e.ValueKind != System.Text.Json.JsonValueKind.Null ? y2e.GetDouble() : (double?)null;
+                    double? x3d = cl.TryGetProperty("X3D", out var x3e) && x3e.ValueKind != System.Text.Json.JsonValueKind.Null ? x3e.GetDouble() : (double?)null;
+                    double? y3d = cl.TryGetProperty("Y3D", out var y3e) && y3e.ValueKind != System.Text.Json.JsonValueKind.Null ? y3e.GetDouble() : (double?)null;
+                    double? z3d = cl.TryGetProperty("Z3D", out var z3e) && z3e.ValueKind != System.Text.Json.JsonValueKind.Null ? z3e.GetDouble() : (double?)null;
+                    if (cName.Length > 0)
+                        SavedCephLandmarks.Add(new CephLandmarkSave(cName, x2d, y2d, x3d, y3d, z3d));
                 }
             }
 
