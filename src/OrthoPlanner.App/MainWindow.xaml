@@ -1094,7 +1094,7 @@
                     </Border>
                     
                     <!-- Overlay: placeholder text when no data -->
-                    <TextBlock Grid.Row="1" Text="Load a DICOM / CBCT folder to visualize"
+                    <TextBlock Grid.Row="1" Text="Load CT Scan"
                                HorizontalAlignment="Center" VerticalAlignment="Center"
                                FontSize="16" Foreground="{StaticResource TextSecondaryBrush}"
                                Visibility="{Binding IsVolumeLoaded, Converter={StaticResource InverseBoolToVisibility}}" />
