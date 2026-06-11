@@ -9,6 +9,14 @@ namespace OrthoPlanner.App.ViewModels;
 
 public partial class MainViewModel
 {
+    /// <summary>
+    /// Next free segment label. Must be max+1 rather than Count+1: after a
+    /// delete-then-add sequence Count+1 can collide with an existing label, making
+    /// two segments fight over the same voxels (ClearLabel, CountVoxels, meshing).
+    /// </summary>
+    private byte NextSegmentLabel()
+        => Segments.Count == 0 ? (byte)1 : (byte)(Segments.Max(s => s.Label) + 1);
+
     // ÔöÇÔöÇÔöÇ Segmentation Internal Volumes ÔöÇÔöÇÔöÇ
     private SegmentationVolume? _segVolume;
     private SegmentationVolume? _boneOnlySegVolume; // A pristine backup purely for the Cranium/Mandible split
@@ -80,6 +88,13 @@ public partial class MainViewModel
             });
         }
         catch (TaskCanceledException) { }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            // async void: an escaping exception would tear down the process.
+            // The live preview is non-critical, so report and carry on.
+            StatusText = $"Live preview failed: {ex.Message}";
+        }
     }
 
     // ÔöÇÔöÇÔöÇ Region Growing ÔöÇÔöÇÔöÇ
@@ -152,6 +167,81 @@ public partial class MainViewModel
         StatusText = "Seeds cleared.";
     }
 
+    [RelayCommand]
+    private void OpenSeedSplitWizard()
+    {
+        if (Volume == null || IsLoading) return;
+
+        var previousRegionGrowMode = IsRegionGrowMode;
+        IsRegionGrowMode = false;
+
+        var wizard = new global::OrthoPlanner.App.SeedSplitWindow(
+            Volume,
+            CoronalIndex,
+            WindowCenter,
+            WindowWidth,
+            RegionGrowTolerance,
+            BoneMinHU,
+            BoneMaxHU,
+            BoneSmoothingAmount,
+            BoneSmoothingPasses,
+            BoneKeepAllParts,
+            BonePartsKept,
+            EnhanceSegmentation)
+        {
+            Owner = Application.Current.MainWindow
+        };
+
+        if (wizard.ShowDialog() == true && wizard.Accepted)
+        {
+            SaveStateForUndo();
+
+            if (wizard.CraniumResult is { Count: > 0 })
+            {
+                var craniumVm = new SegmentViewModel
+                {
+                    Label = NextSegmentLabel(),
+                    Name = "Cranium (Seed Split)",
+                    Vertices = MeshHelper.ToFlatArray(wizard.CraniumResult),
+                    ColorR = 70,
+                    ColorG = 120,
+                    ColorB = 255,
+                    IsVisible = true
+                };
+                craniumVm.OnVisibilityChanged = RefreshCombinedModel;
+                craniumVm.BuildModel();
+                Segments.Add(craniumVm);
+            }
+
+            if (wizard.MandibleResult is { Count: > 0 })
+            {
+                var mandibleVm = new SegmentViewModel
+                {
+                    Label = NextSegmentLabel(),
+                    Name = "Mandible (Seed Split)",
+                    Vertices = MeshHelper.ToFlatArray(wizard.MandibleResult),
+                    ColorR = 255,
+                    ColorG = 150,
+                    ColorB = 0,
+                    IsVisible = true
+                };
+                mandibleVm.OnVisibilityChanged = RefreshCombinedModel;
+                mandibleVm.BuildModel();
+                Segments.Add(mandibleVm);
+            }
+
+            MultiSeeds.Clear();
+            _segVolume?.ClearAll();
+            RefreshCombinedModel();
+            UpdateAllSlices();
+            StatusText = "Seed split accepted.";
+            return;
+        }
+
+        IsRegionGrowMode = previousRegionGrowMode;
+        UpdateAllSlices();
+    }
+
     // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     // PHASE 2: SEGMENTATION COMMANDS
     // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
@@ -217,7 +307,7 @@ public partial class MainViewModel
         if (_segVolume == null)
             _segVolume = new SegmentationVolume(Volume);
 
-        byte label = (byte)(Segments.Count + 1);
+        byte label = NextSegmentLabel();
         _segVolume.AddSegment(new SegmentInfo
             { Id = label, Name = $"{name} ({minHU:F0} to {maxHU:F0})", ColorR = r, ColorG = g, ColorB = b });
 

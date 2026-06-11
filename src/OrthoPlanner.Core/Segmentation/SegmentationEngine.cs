@@ -1177,4 +1177,162 @@ public static class SegmentationEngine
 
         return (short)(v0 * (1 - dz) + v1 * dz);
     }
+
+    /// <summary>
+    /// Competitive multi-label region grow CONSTRAINED to a binary mask.
+    /// <paramref name="outVol"/> must already contain the accepted seed labels (any non-zero
+    /// label) before this call. Seeds that do NOT sit on a <paramref name="maskLabel"/> voxel of
+    /// <paramref name="maskVol"/> are discarded (treated as preview noise and cleared).
+    ///
+    /// All seed fronts advance simultaneously at equal velocity (FIFO BFS) through 6-connected
+    /// voxels where <paramref name="maskVol"/> == <paramref name="maskLabel"/>, claiming each
+    /// unvisited mask voxel for the first front to reach it. Where two fronts collide they block
+    /// each other, so the resulting cut follows bone connectivity (Voronoi-like geodesic split).
+    ///
+    /// Voxels outside the mask are never claimed; mask voxels in islands unreachable from any seed
+    /// are left unlabeled — feed those to <see cref="FillNearestLabelWithinMask"/> as a fallback.
+    /// Existing Core methods are untouched; this is an additive helper.
+    /// </summary>
+    public static void CompetitiveGrowLabelsWithinMask(
+        SegmentationVolume maskVol, byte maskLabel,
+        SegmentationVolume outVol,
+        Action<double>? progress = null)
+    {
+        int w = maskVol.Width, h = maskVol.Height, d = maskVol.Depth;
+        int total = w * h * d;
+        var visited = new bool[total];
+        var queue = new Queue<int>();
+
+        // Initial frontier: every accepted seed voxel that lands on the mask.
+        for (int i = 0; i < total; i++)
+        {
+            byte lbl = outVol.Labels[i];
+            if (lbl == 0) continue;
+
+            if (maskVol.Labels[i] == maskLabel)
+            {
+                visited[i] = true;
+                queue.Enqueue(i);
+            }
+            else
+            {
+                outVol.Labels[i] = 0; // off-mask preview noise — discard
+            }
+        }
+
+        int plane = w * h;
+        int processed = 0;
+        int maxEstimate = Math.Max(1, total / 8);
+
+        while (queue.Count > 0)
+        {
+            int curr = queue.Dequeue();
+            byte label = outVol.Labels[curr];
+            processed++;
+            if (progress != null && (processed & 0xFFFF) == 0)
+                progress(Math.Min(1.0, (double)processed / maxEstimate));
+
+            int cz = curr / plane;
+            int rem = curr - cz * plane;
+            int cy = rem / w;
+            int cx = rem - cy * w;
+
+            // 6-connectivity with explicit per-axis bounds (prevents row/plane wraparound).
+            if (cx + 1 < w) TryClaim(curr + 1);
+            if (cx - 1 >= 0) TryClaim(curr - 1);
+            if (cy + 1 < h) TryClaim(curr + w);
+            if (cy - 1 >= 0) TryClaim(curr - w);
+            if (cz + 1 < d) TryClaim(curr + plane);
+            if (cz - 1 >= 0) TryClaim(curr - plane);
+
+            void TryClaim(int nIdx)
+            {
+                if (visited[nIdx]) return;
+                if (maskVol.Labels[nIdx] != maskLabel) return;
+                visited[nIdx] = true;
+                outVol.Labels[nIdx] = label;
+                queue.Enqueue(nIdx);
+            }
+        }
+
+        progress?.Invoke(1.0);
+    }
+
+    /// <summary>
+    /// Fallback for <see cref="CompetitiveGrowLabelsWithinMask"/>: assigns every still-unlabeled
+    /// <paramref name="maskLabel"/> voxel of <paramref name="maskVol"/> the label of its nearest
+    /// already-labeled voxel in <paramref name="outVol"/>. Distance is the 6-connected grid
+    /// (geodesic) distance computed by a single multi-source BFS that is allowed to bridge across
+    /// non-mask space, so disconnected bone islands — unreachable by the constrained grow — are
+    /// still covered. Guarantees every mask voxel ends labeled (no holes, no unclassified bone).
+    /// Additive helper; existing Core methods are untouched.
+    /// </summary>
+    public static void FillNearestLabelWithinMask(
+        SegmentationVolume maskVol, byte maskLabel,
+        SegmentationVolume outVol,
+        Action<double>? progress = null)
+    {
+        int w = maskVol.Width, h = maskVol.Height, d = maskVol.Depth;
+        int total = w * h * d;
+
+        var prop = new byte[total]; // propagated nearest label (0 = not yet reached)
+        var queue = new Queue<int>();
+
+        int remaining = 0; // count of unlabeled mask voxels still needing a label
+        for (int i = 0; i < total; i++)
+        {
+            if (outVol.Labels[i] != 0)
+            {
+                prop[i] = outVol.Labels[i];
+                queue.Enqueue(i);
+            }
+            else if (maskVol.Labels[i] == maskLabel)
+            {
+                remaining++;
+            }
+        }
+
+        if (remaining == 0 || queue.Count == 0) { progress?.Invoke(1.0); return; }
+
+        int plane = w * h;
+        int processed = 0;
+        int maxEstimate = Math.Max(1, remaining);
+
+        while (queue.Count > 0 && remaining > 0)
+        {
+            int curr = queue.Dequeue();
+            byte lbl = prop[curr];
+
+            int cz = curr / plane;
+            int rem = curr - cz * plane;
+            int cy = rem / w;
+            int cx = rem - cy * w;
+
+            if (cx + 1 < w) Visit(curr + 1);
+            if (cx - 1 >= 0) Visit(curr - 1);
+            if (cy + 1 < h) Visit(curr + w);
+            if (cy - 1 >= 0) Visit(curr - w);
+            if (cz + 1 < d) Visit(curr + plane);
+            if (cz - 1 >= 0) Visit(curr - plane);
+
+            void Visit(int nIdx)
+            {
+                if (prop[nIdx] != 0) return; // already reached by a nearer source
+                prop[nIdx] = lbl;
+                queue.Enqueue(nIdx);
+
+                // Commit the label only into unlabeled mask voxels.
+                if (outVol.Labels[nIdx] == 0 && maskVol.Labels[nIdx] == maskLabel)
+                {
+                    outVol.Labels[nIdx] = lbl;
+                    remaining--;
+                    processed++;
+                    if (progress != null && (processed & 0xFFFF) == 0)
+                        progress(Math.Min(1.0, (double)processed / maxEstimate));
+                }
+            }
+        }
+
+        progress?.Invoke(1.0);
+    }
 }
