@@ -983,6 +983,8 @@ public partial class MainWindow : Window
     /// <summary>Toggles visibility of ALL cephalometry measurements (top-level eye checkbox).</summary>
     private void CephAllVisibility_Changed(object sender, RoutedEventArgs e)
     {
+        // Guard: CephalometryPanel may not be initialized yet during InitializeComponent (XAML default IsChecked fires early)
+        if (CephalometryPanel == null) return;
         bool visible = (sender as System.Windows.Controls.CheckBox)?.IsChecked == true;
         foreach (var m in CephalometryPanel.GetMeasurements())
             CephalometryPanel.SetMeasurementVisible(m, visible);
@@ -996,6 +998,8 @@ public partial class MainWindow : Window
     /// <summary>Toggles visibility of one sub-group (Points / Planes / Angles / Linear).</summary>
     private void CephGroupVisibility_Changed(object sender, RoutedEventArgs e)
     {
+        // Guard: may fire during InitializeComponent before CephalometryPanel is ready
+        if (CephalometryPanel == null) return;
         if (sender is not System.Windows.Controls.CheckBox cb) return;
         string group = cb.Tag?.ToString() ?? "";
         bool visible = cb.IsChecked == true;

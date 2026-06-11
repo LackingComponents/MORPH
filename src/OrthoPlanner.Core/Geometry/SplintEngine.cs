@@ -240,11 +240,11 @@ public static class SplintEngine
             int j=i+1;
             AddQuad(horseshoeTris, TO[i], TO[j], BO[j], BO[i]);   // outer wall
             AddQuad(horseshoeTris, TI[j], TI[i], BI[i], BI[j]);   // inner wall
-            AddQuad(horseshoeTris, TI[i], TO[i], TO[j], TI[j]);   // top face
+            AddQuad(horseshoeTris, TO[i], TI[i], TI[j], TO[j]);   // top face (normal +Z)
             AddQuad(horseshoeTris, BO[i], BO[j], BI[j], BI[i]);   // bottom face
         }
-        AddQuad(horseshoeTris, TO[0],   TI[0],   BI[0],   BO[0]);
-        AddQuad(horseshoeTris, TI[n-1], TO[n-1], BO[n-1], BI[n-1]);
+        AddQuad(horseshoeTris, TI[0],   TO[0],   BO[0],   BI[0]);   // start cap (normal away)
+        AddQuad(horseshoeTris, TO[n-1], TI[n-1], BI[n-1], BO[n-1]); // end cap (normal away)
         float[] horseshoeFlat = horseshoeTris.ToArray();
 
         if (upperMesh == null || upperMesh.Length < 9 ||
@@ -298,15 +298,16 @@ public static class SplintEngine
 
             // Compute SDF ONCE per mesh (at 0.2mm) — reuse via OffsetImpl for both offsets.
             // UseParallel=true requires Spatial (AABB tree) + NarrowBandMaxDistance to be set.
-            BoundedImplicitFunction3d? BaseSdf(float[] soup){
+            BoundedImplicitFunction3d? BaseSdf(float[] soup, double band = -1){
                 if(soup.Length<9) return null;
                 var m=ToMesh(soup); if(m.TriangleCount==0) return null;
-                System.Diagnostics.Debug.WriteLine($"[Splint] SDF {m.TriangleCount} tris @ {VS_SDF}mm");
+                double b = band > 0 ? band : Dil1 + VS_SDF*5;
+                System.Diagnostics.Debug.WriteLine($"[Splint] SDF {m.TriangleCount} tris @ {VS_SDF}mm band={b:F1}");
                 var spatial = new DMeshAABBTree3(m, autoBuild:true);
                 var sdf=new MeshSignedDistanceGrid(m,(float)VS_SDF){
                     Spatial              = spatial,
-                    NarrowBandMaxDistance= Dil1 + VS_SDF*5,
-                    ExactBandWidth       = (int)Math.Ceiling(Dil1/VS_SDF)+4,
+                    NarrowBandMaxDistance= b,
+                    ExactBandWidth       = (int)Math.Ceiling(b/VS_SDF)+4,
                     ComputeSigns         = true,
                     ComputeMode          = MeshSignedDistanceGrid.ComputeModes.NarrowBand_SpatialFloodFill,
                     InsideMode           = MeshSignedDistanceGrid.InsideModes.ParityCount,
@@ -322,7 +323,8 @@ public static class SplintEngine
             System.Diagnostics.Debug.WriteLine($"[Splint] Cropped tris: up={upCrop.Length/9} lo={loCrop.Length/9} horse={hoCrop.Length/9}");
             if(upCrop.Length<9||loCrop.Length<9||hoCrop.Length<9) return horseshoeFlat;
 
-            var horseBase = BaseSdf(hoCrop);
+            const double ExpandMm = 2.0;  // how far beyond horseshoe the dilated teeth extend
+            var horseBase = BaseSdf(hoCrop, ExpandMm + 2.0);  // wider band for horseshoe
             var upBase    = BaseSdf(upCrop);
             var loBase    = BaseSdf(loCrop);
             if(horseBase==null||upBase==null||loBase==null) return horseshoeFlat;
@@ -334,30 +336,24 @@ public static class SplintEngine
             var upImpl01  = Offset(upBase,  -Dil01);
             var loImpl01  = Offset(loBase,  -Dil01);
 
+            // Clip volume: dilated horseshoe replaces the flat axis-aligned box.
+            // This ensures boundaries follow the user's arch curves instead of
+            // being cut at arbitrary Z levels, and eliminates horizontal
+            // staircase artifacts caused by flat clip planes.
+            var horseClip = Offset(horseBase, -ExpandMm);
 
-            // Clip box: caps the blank at the arch planes (user requirement):
-            //   Z top    = upperZ + 1.5mm  (1.5mm above upper arch curve)
-            //   Z bottom = lowerZ - 1.5mm  (1.5mm below lower arch curve)
-            //   XY       = arch footprint ± labiolingual pad (caps the back too)
-            const double CapAbove = 1.5;
-            const double CapBelow = 1.5;
-            float pad=(float)(labiolingualMm*0.5+Dil1+3);
-            var clipAAB = new AxisAlignedBox3d(
-                new Vector3d(mnX-pad, mnY-pad, lowerZ-CapBelow),
-                new Vector3d(mxX+pad, mxY+pad, upperZ+CapAbove));
-            BoundedImplicitFunction3d clipBox = new ImplicitAxisAlignedBox3d { AABox = clipAAB };
-
-            // blank = (horse ∪ up1mm ∪ lo1mm) ∩ clipBox  → capped solid
+            // blank = (horse ∪ up1mm ∪ lo1mm) ∩ horse_expanded
             BoundedImplicitFunction3d rawBlank = new ImplicitUnion3d{A=horseImpl,B=new ImplicitUnion3d{A=upImpl1,B=loImpl1}};
-            BoundedImplicitFunction3d blank    = new ImplicitIntersection3d{A=rawBlank, B=clipBox};
+            BoundedImplicitFunction3d blank    = new ImplicitIntersection3d{A=rawBlank, B=horseClip};
 
             // final = blank − up0.1mm − lo0.1mm  → tooth pockets carved
             BoundedImplicitFunction3d final2   = new ImplicitDifference3d{A=new ImplicitDifference3d{A=blank,B=upImpl01},B=loImpl01};
 
             // ── Pre-bake the combined SDF to a flat float[] in parallel ─────────
-            // This replaces 240M lazy implicit-chain evaluations during MC with
-            // simple array reads, giving 5-10x speedup on the MC phase.
-            var mcBounds = new AxisAlignedBox3d(clipAAB.Min - new Vector3d(1,1,1), clipAAB.Max + new Vector3d(1,1,1));
+            float mcPad = (float)(labiolingualMm*0.5 + ExpandMm + 3.0);
+            var mcBounds = new AxisAlignedBox3d(
+                new Vector3d(mnX-mcPad, mnY-mcPad, lowerZ-ExpandMm-1.0),
+                new Vector3d(mxX+mcPad, mxY+mcPad, upperZ+ExpandMm+1.0));
             int gnx=(int)Math.Ceiling(mcBounds.Width /VS_MC)+1;
             int gny=(int)Math.Ceiling(mcBounds.Height/VS_MC)+1;
             int gnz=(int)Math.Ceiling(mcBounds.Depth /VS_MC)+1;
