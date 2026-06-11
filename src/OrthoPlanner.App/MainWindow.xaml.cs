@@ -34,6 +34,19 @@ public partial class MainWindow : Window
 
         SourceInitialized += MainWindow_SourceInitialized;
         Loaded += OnLoaded;
+        PreviewKeyDown += MainWindow_PreviewKeyDown;
+    }
+
+    private void MainWindow_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Escape)
+        {
+            if (_activeMeasurementTool != CustomMeasurementTool.None && _pendingMeasPts.Count > 0)
+            {
+                ClearPendingMeasurements();
+                e.Handled = true;
+            }
+        }
     }
 
     private void MainWindow_SourceInitialized(object? sender, EventArgs e)
@@ -1022,10 +1035,257 @@ public partial class MainWindow : Window
         RebuildCephMeasurementTree();
     }
 
-    /// <summary>Placeholder: custom (non-ceph) measurement group visibility.</summary>
+    // ════════════════════════════════════════════════════════════════════
+    // 3D Custom Measurements
+    // ════════════════════════════════════════════════════════════════════
+
+    public enum CustomMeasurementTool { None, Distance, Angle }
+    private CustomMeasurementTool _activeMeasurementTool = CustomMeasurementTool.None;
+    private readonly List<System.Numerics.Vector3> _pendingMeasPts = new();
+    private readonly List<HelixToolkit.Wpf.SharpDX.Element3D> _pendingMeasVisuals = new();
+    private readonly List<CustomMeas3D> _customMeasurements = new();
+    private int _measCounter = 1;
+
+    private class CustomMeas3D
+    {
+        public string Label { get; set; } = "";
+        public string Value { get; set; } = "";
+        public System.Windows.Media.Color Color { get; set; }
+        public List<HelixToolkit.Wpf.SharpDX.Element3D> Visuals { get; } = new();
+        public bool IsVisible { get; set; } = true;
+    }
+
+    private void OnMeasurementToolChecked(object sender, RoutedEventArgs e)
+    {
+        if (sender is CheckBox chk && chk.IsChecked == true)
+        {
+            if (chk == DistanceMeasButton)
+            {
+                _activeMeasurementTool = CustomMeasurementTool.Distance;
+                AngleMeasButton.IsChecked = false;
+            }
+            else if (chk == AngleMeasButton)
+            {
+                _activeMeasurementTool = CustomMeasurementTool.Angle;
+                DistanceMeasButton.IsChecked = false;
+            }
+            ClearPendingMeasurements();
+            Viewport3D.PreviewMouseLeftButtonDown -= Viewport3D_PreviewMouseLeftButtonDown;
+            Viewport3D.PreviewMouseLeftButtonDown += Viewport3D_PreviewMouseLeftButtonDown;
+        }
+        else
+        {
+            if (DistanceMeasButton.IsChecked == false && AngleMeasButton.IsChecked == false)
+            {
+                _activeMeasurementTool = CustomMeasurementTool.None;
+                ClearPendingMeasurements();
+                Viewport3D.PreviewMouseLeftButtonDown -= Viewport3D_PreviewMouseLeftButtonDown;
+            }
+        }
+    }
+
+    private void Viewport3D_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (_activeMeasurementTool == CustomMeasurementTool.None) return;
+        var hit = Viewport3D.FindHits(e.GetPosition(Viewport3D)).FirstOrDefault();
+        if (hit != null && hit.IsValid)
+        {
+            var pt = (System.Numerics.Vector3)hit.PointHit;
+            _pendingMeasPts.Add(pt);
+            
+            var sphere = Make3DSphere(pt, 1.2f, System.Windows.Media.Colors.Yellow);
+            _pendingMeasVisuals.Add(sphere);
+            Viewport3D.Items.Add(sphere);
+
+            if (_activeMeasurementTool == CustomMeasurementTool.Distance && _pendingMeasPts.Count == 2)
+            {
+                FinishDistanceMeasurement();
+            }
+            else if (_activeMeasurementTool == CustomMeasurementTool.Angle && _pendingMeasPts.Count == 3)
+            {
+                FinishAngleMeasurement();
+            }
+            e.Handled = true;
+        }
+    }
+
+    private void FinishDistanceMeasurement()
+    {
+        var p1 = _pendingMeasPts[0];
+        var p2 = _pendingMeasPts[1];
+        double dist = (p2 - p1).Length();
+        var col = System.Windows.Media.Color.FromRgb(0, 229, 255);
+        
+        var meas = new CustomMeas3D { Label = $"D{_measCounter++}", Value = $"{dist:F1} mm", Color = col };
+        meas.Visuals.Add(Make3DSphere(p1, 1.2f, col));
+        meas.Visuals.Add(Make3DSphere(p2, 1.2f, col));
+        meas.Visuals.Add(Make3DLine(p1, p2, col));
+        
+        foreach (var v in meas.Visuals) Viewport3D.Items.Add(v);
+        _customMeasurements.Add(meas);
+        
+        ClearPendingMeasurements();
+        DistanceMeasButton.IsChecked = false;
+        RebuildCxMeasurementTree();
+    }
+
+    private void FinishAngleMeasurement()
+    {
+        var a = _pendingMeasPts[0];
+        var vtx = _pendingMeasPts[1];
+        var b = _pendingMeasPts[2];
+        var v1 = System.Numerics.Vector3.Normalize(a - vtx);
+        var v2 = System.Numerics.Vector3.Normalize(b - vtx);
+        double dot = Math.Clamp(System.Numerics.Vector3.Dot(v1, v2), -1.0, 1.0);
+        double angle = Math.Acos(dot) * 180.0 / Math.PI;
+        var col = System.Windows.Media.Color.FromRgb(255, 180, 0);
+
+        var meas = new CustomMeas3D { Label = $"A{_measCounter++}", Value = $"{angle:F1}°", Color = col };
+        meas.Visuals.Add(Make3DSphere(a, 1f, col));
+        meas.Visuals.Add(Make3DSphere(vtx, 1.5f, col));
+        meas.Visuals.Add(Make3DSphere(b, 1f, col));
+        meas.Visuals.Add(Make3DLine(a, vtx, col));
+        meas.Visuals.Add(Make3DLine(b, vtx, col));
+        
+        foreach (var v in meas.Visuals) Viewport3D.Items.Add(v);
+        _customMeasurements.Add(meas);
+
+        ClearPendingMeasurements();
+        AngleMeasButton.IsChecked = false;
+        RebuildCxMeasurementTree();
+    }
+
+    private void ClearPendingMeasurements()
+    {
+        foreach (var s in _pendingMeasVisuals) Viewport3D.Items.Remove(s);
+        _pendingMeasVisuals.Clear();
+        _pendingMeasPts.Clear();
+    }
+
+    private HelixToolkit.Wpf.SharpDX.MeshGeometryModel3D Make3DSphere(System.Numerics.Vector3 center, float radius, System.Windows.Media.Color col)
+    {
+        var builder = new HelixToolkit.Geometry.MeshBuilder();
+        builder.AddSphere(center, radius);
+        return new HelixToolkit.Wpf.SharpDX.MeshGeometryModel3D
+        {
+            Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh()),
+            Material = new HelixToolkit.Wpf.SharpDX.PhongMaterial
+            {
+                DiffuseColor = new HelixToolkit.Maths.Color4(col.R / 255f, col.G / 255f, col.B / 255f, 1f)
+            },
+            IsHitTestVisible = false
+        };
+    }
+
+    private HelixToolkit.Wpf.SharpDX.LineGeometryModel3D Make3DLine(System.Numerics.Vector3 p1, System.Numerics.Vector3 p2, System.Windows.Media.Color col)
+    {
+        var lb = new HelixToolkit.SharpDX.LineBuilder();
+        lb.AddLine(p1, p2);
+        return new HelixToolkit.Wpf.SharpDX.LineGeometryModel3D
+        {
+            Geometry = lb.ToLineGeometry3D(),
+            Color = col,
+            Thickness = 1.5,
+            IsHitTestVisible = false
+        };
+    }
+
+    private void RebuildCxMeasurementTree()
+    {
+        CxMeasListPanel.Children.Clear();
+        bool globalVisible = CxMeasGroupCheck.IsChecked == true;
+
+        foreach (var m in _customMeasurements)
+        {
+            var row = CreateCxMeasurementRow(m);
+            CxMeasListPanel.Children.Add(row);
+
+            foreach (var v in m.Visuals)
+            {
+                v.IsRendering = globalVisible && m.IsVisible;
+            }
+        }
+    }
+
+    private Border CreateCxMeasurementRow(CustomMeas3D m)
+    {
+        var indicator = new Ellipse
+        {
+            Width = 8, Height = 8,
+            Fill = new SolidColorBrush(m.Color),
+            Margin = new Thickness(4, 0, 6, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        var labelText = new TextBlock
+        {
+            Text = m.Label,
+            Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(208, 216, 224)),
+            FontSize = 11,
+            FontWeight = FontWeights.SemiBold,
+            Width = 30,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        var valText = new TextBlock
+        {
+            Text = m.Value,
+            Foreground = Brushes.White,
+            FontSize = 11,
+            Margin = new Thickness(4, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        var rightStack = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+
+        var visCheck = new CheckBox
+        {
+            IsChecked = m.IsVisible,
+            ToolTip = "Show/hide measurement",
+            Margin = new Thickness(0, 0, 8, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        visCheck.Checked += (_, _) => { m.IsVisible = true; RebuildCxMeasurementTree(); };
+        visCheck.Unchecked += (_, _) => { m.IsVisible = false; RebuildCxMeasurementTree(); };
+        rightStack.Children.Add(visCheck);
+
+        var delBtn = new Button
+        {
+            Content = "├×",
+            Background = Brushes.Transparent,
+            Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(170, 180, 192)),
+            BorderThickness = new Thickness(0),
+            FontSize = 10,
+            Cursor = Cursors.Hand,
+            ToolTip = "Delete measurement",
+            Padding = new Thickness(2,0,2,0)
+        };
+        delBtn.Click += (_, _) =>
+        {
+            foreach (var v in m.Visuals) Viewport3D.Items.Remove(v);
+            _customMeasurements.Remove(m);
+            RebuildCxMeasurementTree();
+        };
+        rightStack.Children.Add(delBtn);
+
+        var dock = new DockPanel { LastChildFill = false };
+        dock.Children.Add(indicator);
+        dock.Children.Add(labelText);
+        dock.Children.Add(valText);
+        DockPanel.SetDock(rightStack, Dock.Right);
+        dock.Children.Add(rightStack);
+
+        return new Border
+        {
+            Background = Brushes.Transparent,
+            Padding = new Thickness(4, 3, 4, 3),
+            Margin = new Thickness(0, 1, 0, 0),
+            Child = dock
+        };
+    }
+
     private void CxMeasGroupVisibility_Changed(object sender, RoutedEventArgs e)
     {
-        // Custom measurements are not yet implemented in the 3D viewport;
-        // this handler is reserved for future use.
+        RebuildCxMeasurementTree();
     }
 }
