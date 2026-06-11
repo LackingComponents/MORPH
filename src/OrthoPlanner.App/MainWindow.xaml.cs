@@ -1194,6 +1194,8 @@ public partial class MainWindow : Window
 
     private void RebuildCxMeasurementTree()
     {
+        if (CxMeasListPanel == null || CxMeasGroupCheck == null) return;
+
         CxMeasListPanel.Children.Clear();
         bool globalVisible = CxMeasGroupCheck.IsChecked == true;
 
@@ -1288,6 +1290,16 @@ public partial class MainWindow : Window
 
     private void CxMeasGroupVisibility_Changed(object sender, RoutedEventArgs e)
     {
-        RebuildCxMeasurementTree();
+        try
+        {
+            if (this.IsLoaded && _customMeasurements != null && CxMeasListPanel != null)
+            {
+                RebuildCxMeasurementTree();
+            }
+        }
+        catch (Exception)
+        {
+            // Ignore during initialization
+        }
     }
 }
