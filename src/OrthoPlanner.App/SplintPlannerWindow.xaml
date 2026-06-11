@@ -120,6 +120,14 @@
                 <TextBlock x:Name="ThicknessLabel" Text="8.0 mm" FontSize="11" Foreground="#8CF"
                            VerticalAlignment="Center" Width="48"/>
 
+                <TextBlock Text="   L-B bias:" FontSize="11" Foreground="#AABBCC" VerticalAlignment="Center"
+                           ToolTip="Lingual-Buccal bias: shifts the splint center buccally (+) or lingually (−) while keeping total width constant"/>
+                <Slider x:Name="LingualBuccalBiasSlider" Minimum="-5" Maximum="5" Value="0"
+                        Width="80" Margin="6,0" VerticalAlignment="Center"
+                        SmallChange="0.25" ValueChanged="LingualBuccalBiasSlider_ValueChanged"/>
+                <TextBlock x:Name="LingualBuccalBiasLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF"
+                           VerticalAlignment="Center" Width="48"/>
+
                 <TextBlock Text="   Upper penetration:" FontSize="11" Foreground="#AABBCC" VerticalAlignment="Center"/>
                 <Slider x:Name="UpperPenetrationSlider" Minimum="-5" Maximum="10" Value="0"
                         Width="80" Margin="6,0" VerticalAlignment="Center"

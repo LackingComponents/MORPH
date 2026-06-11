@@ -115,7 +115,8 @@ public static class SplintEngine
     /// <summary>Returns a thin flat ribbon along the arch showing the LL width.
     /// Used for live preview before Generate is clicked.</summary>
     public static float[] GenerateRibbonMesh(
-        List<(float x,float y,float z)> archCurve, float labiolingualMm)
+        List<(float x,float y,float z)> archCurve, float labiolingualMm,
+        float lingualBuccalBiasMm = 0f)
     {
         int n = archCurve.Count;
         if (n < 2) return Array.Empty<float>();
@@ -127,8 +128,11 @@ public static class SplintEngine
         for (int i=0; i<n; i++)
         {
             var p = archCurve[i]; var N = nor[i];
-            outer[i] = (p.x+N.x*half, p.y+N.y*half, p.z+0.3f);
-            inner[i] = (p.x-N.x*half, p.y-N.y*half, p.z+0.3f);
+            // Bias shifts the center outward (+) or inward (-) while keeping total width constant
+            float biasedCx = p.x + N.x * lingualBuccalBiasMm;
+            float biasedCy = p.y + N.y * lingualBuccalBiasMm;
+            outer[i] = (biasedCx+N.x*half, biasedCy+N.y*half, p.z+0.3f);
+            inner[i] = (biasedCx-N.x*half, biasedCy-N.y*half, p.z+0.3f);
         }
 
         var tris = new List<float>(n*12);
@@ -142,7 +146,7 @@ public static class SplintEngine
         return tris.ToArray();
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Horseshoe solid Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // ── Horseshoe solid ─────────────────────────────────────────────────────────────────────────────────────────────
     /// <summary>
     /// Generates a clean horseshoe-shaped splint solid.
     /// The top surface follows the upper arch curve (tooth contact).
@@ -187,24 +191,28 @@ public static class SplintEngine
         return result;
     }
 
-    // Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
-    //  GENERATE SPLINT Ã¢â‚¬â€ correct closed-solid boolean pipeline
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    //  GENERATE SPLINT — refined pipeline
     //
-    //  Step A  Dilate upper mesh 1mm, clip below upperZ, cap at upperZ Ã¢â€ â€™ closed solid
-    //  Step B  Same for lower (clip above lowerZ, cap at lowerZ)          Ã¢â€ â€™ closed solid
-    //  Step C  horseshoe Ã¢Ë†Âª solidUpper1mm Ã¢Ë†Âª solidLower1mm (all closed)    Ã¢â€ â€™ splint blank
-    //  Step D  Dilate 0.1mm versions, clip+cap Ã¢â€ â€™ closed subtraction tools
-    //  Step E  blank Ã¢Ë†â€™ upper0.1mm Ã¢Ë†â€™ lower0.1mm                           Ã¢â€ â€™ final splint
-    // Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+    //  Step A  Dilate upper mesh 1mm  → closed solid
+    //  Step B  Dilate lower mesh 1mm  → closed solid
+    //  Step C  horseshoe ∪ upper1mm ∪ lower1mm  → raw blank
+    //  Step D  Per-voxel Z-clip at exact user-defined horseshoe surfaces:
+    //          Upper cut: archCurveZ(x,y) - upperPenetrationMm  (+ = deeper into teeth)
+    //          Lower cut: archCurveZ(x,y) + lowerPenetrationMm  (+ = deeper into teeth)
+    //  Step E  Posterior limit: curved boundary matching horseshoe end-caps
+    //  Step F  Subtract 0.1mm-dilated tooth surfaces → tooth pockets
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     public static float[] GenerateSplint(
         List<(float x,float y,float z)> upperCurve,
         List<(float x,float y,float z)> lowerCurve,
-        float labiolingualMm     = 8f,
-        float upperPenetrationMm = 0f,   // UI only Ã¢â‚¬â€ not used here
-        float lowerPenetrationMm = 0f,   // UI only Ã¢â‚¬â€ not used here
-        float[]? upperMesh       = null,
-        float[]? lowerMesh       = null,
-        int sampleCount          = 160)
+        float labiolingualMm        = 8f,
+        float upperPenetrationMm    = 0f,   // + = deeper into teeth (cut moves caudally)
+        float lowerPenetrationMm    = 0f,   // + = deeper into teeth (cut moves cranially)
+        float lingualBuccalBiasMm   = 0f,   // + = shift center buccally, − = lingually
+        float[]? upperMesh          = null,
+        float[]? lowerMesh          = null,
+        int sampleCount             = 160)
     {
         if (upperCurve.Count < 2 || lowerCurve.Count < 2) return Array.Empty<float>();
 
@@ -224,16 +232,21 @@ public static class SplintEngine
         var norU = ComputeNormals(upper, n);
         var norL = ComputeNormals(lower, n);
 
+        // Apply lingual-buccal bias: shift center along normal, keep total width
         var TO = new (float x,float y,float z)[n]; var TI = new (float x,float y,float z)[n];
         var BO = new (float x,float y,float z)[n]; var BI = new (float x,float y,float z)[n];
         for (int i = 0; i < n; i++)
         {
             var u=upper[i]; var nu=norU[i]; var l=lower[i]; var nl=norL[i];
-            TO[i]=(u.x+nu.x*half, u.y+nu.y*half, u.z); TI[i]=(u.x-nu.x*half, u.y-nu.y*half, u.z);
-            BO[i]=(l.x+nl.x*half, l.y+nl.y*half, l.z); BI[i]=(l.x-nl.x*half, l.y-nl.y*half, l.z);
+            float uCx = u.x + nu.x * lingualBuccalBiasMm;
+            float uCy = u.y + nu.y * lingualBuccalBiasMm;
+            float lCx = l.x + nl.x * lingualBuccalBiasMm;
+            float lCy = l.y + nl.y * lingualBuccalBiasMm;
+            TO[i]=(uCx+nu.x*half, uCy+nu.y*half, u.z); TI[i]=(uCx-nu.x*half, uCy-nu.y*half, u.z);
+            BO[i]=(lCx+nl.x*half, lCy+nl.y*half, l.z); BI[i]=(lCx-nl.x*half, lCy-nl.y*half, l.z);
         }
 
-        // Ã¢â€â‚¬Ã¢â€â‚¬ Build horseshoe (closed by construction) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+        // ── Build horseshoe (closed by construction) ─────────────────────────
         var horseshoeTris = new List<float>(n * 6 * 2 * 9);
         for (int i = 0; i < n-1; i++)
         {
@@ -253,18 +266,15 @@ public static class SplintEngine
 
         try
         {
-            const double VS_SDF  = 0.2;   // SDF grid resolution: 8x less RAM than 0.1mm (feasible on desktop)
-            const double VS_MC   = 0.1;   // MC sampling resolution: queries SDF via trilinear interp
+            const double VS_SDF  = 0.2;   // SDF grid resolution
+            const double VS_MC   = 0.1;   // MC sampling resolution
             const double CrownMm = 10.0;
             const double Dil1    = 1.0;
             const double Dil01   = 0.1;
 
-            float upperZ = upper.Max(p => p.z);
-            float lowerZ = lower.Min(p => p.z);
-            System.Diagnostics.Debug.WriteLine($"[Splint] upperZ={upperZ:F1} lowerZ={lowerZ:F1}");
+            System.Diagnostics.Debug.WriteLine($"[Splint] upperPen={upperPenetrationMm:F1} lowerPen={lowerPenetrationMm:F1} bias={lingualBuccalBiasMm:F1}");
 
             // BoundedImplicitFunction3d wrapper that shifts the iso by 'Offset'
-            // (positive Offset = shrink, negative = expand/dilate)
             BoundedImplicitFunction3d Offset(BoundedImplicitFunction3d a, double off)
                 => new OffsetImpl(a, off);
 
@@ -277,14 +287,13 @@ public static class SplintEngine
                 return dm;
             }
 
-            // Z-clip triangle soup by triangle centroid
-            float[] ClipZ(float[] s, float zMin, float zMax){var r=new List<float>();for(int i=0;i+8<s.Length;i+=9){float cz=(s[i+2]+s[i+5]+s[i+8])/3f;if(cz>=zMin&&cz<=zMax)for(int k=0;k<9;k++)r.Add(s[i+k]);}return r.ToArray();}
-
             // Pre-clip meshes to crown+horseshoe region before SDF (avoids full-skull BVH)
             float mnX=float.MaxValue,mnY=float.MaxValue,mxX=float.MinValue,mxY=float.MinValue;
             foreach(var p in upper){if(p.x<mnX)mnX=p.x;if(p.x>mxX)mxX=p.x;if(p.y<mnY)mnY=p.y;if(p.y>mxY)mxY=p.y;}
             foreach(var p in lower){if(p.x<mnX)mnX=p.x;if(p.x>mxX)mxX=p.x;if(p.y<mnY)mnY=p.y;if(p.y>mxY)mxY=p.y;}
-            float clipPad=(float)(labiolingualMm*0.5+Dil1+6);
+            float upperZ = upper.Max(p => p.z);
+            float lowerZ = lower.Min(p => p.z);
+            float clipPad=(float)(labiolingualMm*0.5+Math.Abs(lingualBuccalBiasMm)+Dil1+6);
             float[] Crop(float[] s){
                 var r=new List<float>();
                 for(int i=0;i+8<s.Length;i+=9){
@@ -296,8 +305,7 @@ public static class SplintEngine
                 return r.ToArray();
             }
 
-            // Compute SDF ONCE per mesh (at 0.2mm) — reuse via OffsetImpl for both offsets.
-            // UseParallel=true requires Spatial (AABB tree) + NarrowBandMaxDistance to be set.
+            // Compute SDF ONCE per mesh (at 0.2mm)
             BoundedImplicitFunction3d? BaseSdf(float[] soup, double band = -1){
                 if(soup.Length<9) return null;
                 var m=ToMesh(soup); if(m.TriangleCount==0) return null;
@@ -318,42 +326,70 @@ public static class SplintEngine
                 return new DenseGridTrilinearImplicit(sdf.Grid,sdf.GridOrigin,(float)VS_SDF);
             }
 
+            // ── Build a KD-like fast nearest-arch-Z lookup from both curves ──
+            // For each (x,y) query, find nearest point on the arch curve and return its Z
+            float NearestUpperZ(double px, double py){
+                float bestD=float.MaxValue, bestZ=0f;
+                foreach(var pt in upper){float dx=(float)px-pt.x,dy=(float)py-pt.y,d=dx*dx+dy*dy;if(d<bestD){bestD=d;bestZ=pt.z;}}
+                return bestZ;
+            }
+            float NearestLowerZ(double px, double py){
+                float bestD=float.MaxValue, bestZ=0f;
+                foreach(var pt in lower){float dx=(float)px-pt.x,dy=(float)py-pt.y,d=dx*dx+dy*dy;if(d<bestD){bestD=d;bestZ=pt.z;}}
+                return bestZ;
+            }
+
+            // ── Posterior limit: compute the curved boundary from horseshoe end-caps ──
+            float archMidX = (upper[n/2].x + lower[n/2].x) * 0.5f;
+            float archMidY = (upper[n/2].y + lower[n/2].y) * 0.5f;
+            float Cap0Cx = (TO[0].x + TI[0].x + BO[0].x + BI[0].x) * 0.25f;
+            float Cap0Cy = (TO[0].y + TI[0].y + BO[0].y + BI[0].y) * 0.25f;
+            float CapNCx = (TO[n-1].x + TI[n-1].x + BO[n-1].x + BI[n-1].x) * 0.25f;
+            float CapNCy = (TO[n-1].y + TI[n-1].y + BO[n-1].y + BI[n-1].y) * 0.25f;
+
+            float cap0DirX = TI[0].x - TO[0].x, cap0DirY = TI[0].y - TO[0].y;
+            float cap0NX = -cap0DirY, cap0NY = cap0DirX;
+            if (cap0NX*(archMidX-Cap0Cx) + cap0NY*(archMidY-Cap0Cy) < 0) { cap0NX=-cap0NX; cap0NY=-cap0NY; }
+
+            float capNDirX = TI[n-1].x - TO[n-1].x, capNDirY = TI[n-1].y - TO[n-1].y;
+            float capNNX = -capNDirY, capNNY = capNDirX;
+            if (capNNX*(archMidX-CapNCx) + capNNY*(archMidY-CapNCy) < 0) { capNNX=-capNNX; capNNY=-capNNY; }
+
+            bool IsAnteriorToPosteriorLimit(double px, double py)
+            {
+                float d0 = cap0NX*((float)px-Cap0Cx) + cap0NY*((float)py-Cap0Cy);
+                float dN = capNNX*((float)px-CapNCx) + capNNY*((float)py-CapNCy);
+                return d0 >= -0.5f && dN >= -0.5f;
+            }
 
             float[] upCrop=Crop(upperMesh), loCrop=Crop(lowerMesh), hoCrop=Crop(horseshoeFlat);
             System.Diagnostics.Debug.WriteLine($"[Splint] Cropped tris: up={upCrop.Length/9} lo={loCrop.Length/9} horse={hoCrop.Length/9}");
             if(upCrop.Length<9||loCrop.Length<9||hoCrop.Length<9) return horseshoeFlat;
 
-            const double ExpandMm = 2.0;  // how far beyond horseshoe the dilated teeth extend
-            var horseBase = BaseSdf(hoCrop, ExpandMm + 2.0);  // wider band for horseshoe
+            var horseBase = BaseSdf(hoCrop, 4.0);
             var upBase    = BaseSdf(upCrop);
             var loBase    = BaseSdf(loCrop);
             if(horseBase==null||upBase==null||loBase==null) return horseshoeFlat;
 
-            // Apply offsets lazily — zero extra cost, same underlying grid
             var horseImpl = horseBase;
             var upImpl1   = Offset(upBase,  -Dil1);
             var loImpl1   = Offset(loBase,  -Dil1);
             var upImpl01  = Offset(upBase,  -Dil01);
             var loImpl01  = Offset(loBase,  -Dil01);
 
-            // Clip volume: dilated horseshoe replaces the flat axis-aligned box.
-            // This ensures boundaries follow the user's arch curves instead of
-            // being cut at arbitrary Z levels, and eliminates horizontal
-            // staircase artifacts caused by flat clip planes.
-            var horseClip = Offset(horseBase, -ExpandMm);
-
-            // blank = (horse ∪ up1mm ∪ lo1mm) ∩ horse_expanded
+            // Raw blank = horseshoe ∪ upper1mm ∪ lower1mm (NO envelope intersection)
             BoundedImplicitFunction3d rawBlank = new ImplicitUnion3d{A=horseImpl,B=new ImplicitUnion3d{A=upImpl1,B=loImpl1}};
-            BoundedImplicitFunction3d blank    = new ImplicitIntersection3d{A=rawBlank, B=horseClip};
 
-            // final = blank − up0.1mm − lo0.1mm  → tooth pockets carved
-            BoundedImplicitFunction3d final2   = new ImplicitDifference3d{A=new ImplicitDifference3d{A=blank,B=upImpl01},B=loImpl01};
+            // Subtract tooth pockets
+            BoundedImplicitFunction3d pocketed = new ImplicitDifference3d{A=new ImplicitDifference3d{A=rawBlank,B=upImpl01},B=loImpl01};
 
-            // ── Pre-bake the combined SDF to a flat float[] in parallel ─────────
-            float mcPad = (float)(labiolingualMm*0.5 + ExpandMm + 3.0);
+            // ── Pre-bake the combined SDF with per-voxel Z-clipping ─────────
+            float mcPad = (float)(labiolingualMm*0.5 + Math.Abs(lingualBuccalBiasMm) + 4.0);
+            float zPadTop = Math.Max(upperPenetrationMm, 0f) + 2.0f;
+            float zPadBot = Math.Max(lowerPenetrationMm, 0f) + 2.0f;
             var mcBounds = new AxisAlignedBox3d(
-                new Vector3d(mnX-mcPad, mnY-mcPad, lowerZ-ExpandMm-1.0),
-                new Vector3d(mxX+mcPad, mxY+mcPad, upperZ+ExpandMm+1.0));
+                new Vector3d(mnX-mcPad, mnY-mcPad, lowerZ-zPadBot-1.0),
+                new Vector3d(mxX+mcPad, mxY+mcPad, upperZ+zPadTop+1.0));
             int gnx=(int)Math.Ceiling(mcBounds.Width /VS_MC)+1;
             int gny=(int)Math.Ceiling(mcBounds.Height/VS_MC)+1;
             int gnz=(int)Math.Ceiling(mcBounds.Depth /VS_MC)+1;
@@ -362,8 +398,31 @@ public static class SplintEngine
             System.Diagnostics.Debug.WriteLine($"[Splint] Baking SDF {gnx}x{gny}x{gnz}={gnx*gny*gnz/1_000_000}M voxels...");
             System.Threading.Tasks.Parallel.For(0, gnz, iz => {
                 for(int iy=0;iy<gny;iy++) for(int ix=0;ix<gnx;ix++) {
-                    var pt=new Vector3d(gox+ix*VS_MC, goy+iy*VS_MC, goz+iz*VS_MC);
-                    bakedGrid[iz*gnx*gny+iy*gnx+ix]=(float)final2.Value(ref pt);
+                    double px = gox+ix*VS_MC, py = goy+iy*VS_MC, pz = goz+iz*VS_MC;
+
+                    // ── Per-voxel Z-clip at exact user-defined horseshoe surfaces ──
+                    // Upper cut: material must be BELOW the upper arch surface
+                    //   upperPenetration > 0 → cut moves down (caudally) → allows more tooth engagement
+                    float upperCutZ = NearestUpperZ(px, py) - upperPenetrationMm;
+                    // Lower cut: material must be ABOVE the lower arch surface
+                    //   lowerPenetration > 0 → cut moves up (cranially) → allows more tooth engagement
+                    float lowerCutZ = NearestLowerZ(px, py) + lowerPenetrationMm;
+
+                    if ((float)pz > upperCutZ || (float)pz < lowerCutZ)
+                    {
+                        bakedGrid[iz*gnx*gny+iy*gnx+ix] = 1.0f; // outside
+                        continue;
+                    }
+
+                    // ── Posterior limit: curved boundary ──
+                    if (!IsAnteriorToPosteriorLimit(px, py))
+                    {
+                        bakedGrid[iz*gnx*gny+iy*gnx+ix] = 1.0f; // outside
+                        continue;
+                    }
+
+                    var pt=new Vector3d(px, py, pz);
+                    bakedGrid[iz*gnx*gny+iy*gnx+ix]=(float)pocketed.Value(ref pt);
                 }
             });
             // Wrap in DenseGrid3f → DenseGridTrilinearImplicit for MC (O(1) lookup per corner)
