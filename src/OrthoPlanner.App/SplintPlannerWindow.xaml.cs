@@ -151,7 +151,8 @@ public partial class SplintPlannerWindow : Window
         double cz = (minZ + maxZ) / 2.0;
         // Use XY diagonal for distance since we're looking along Z
         double diag = Math.Sqrt(Math.Pow(maxX - minX, 2) + Math.Pow(maxY - minY, 2));
-        double dist = Math.Max(diag * 0.85, 30);
+        double zoomFactor = lookFromBelow ? 1.55 : 1.15; // Upper further, Lower closer
+        double dist = Math.Max(diag * zoomFactor, 30);
 
         // Upper: camera below model looking up (+Z). Lower: camera above looking down (-Z).
         double zOffset = lookFromBelow ? (cz - dist) : (cz + dist);
@@ -325,9 +326,7 @@ public partial class SplintPlannerWindow : Window
     private static void AddMarker(GroupModel3D group, List<MeshGeometryModel3D> list,
         System.Numerics.Vector3 pt, bool isUpper)
     {
-        var color = isUpper
-            ? System.Windows.Media.Color.FromRgb(100, 220, 255)  // cyan-blue for upper
-            : System.Windows.Media.Color.FromRgb(255, 160, 60);  // amber for lower
+        var color = System.Windows.Media.Color.FromRgb(100, 220, 255);  // cyan-blue for both
         var sphere = CreateSphere(pt, color);
         list.Add(sphere);
         group.Children.Add(sphere);
@@ -362,7 +361,8 @@ public partial class SplintPlannerWindow : Window
         if (_upperArch.ControlPointCount < 2) return;
         var pts = sampled ?? _upperArch.Sample(120);
         float w = (float)ThicknessSlider.Value;
-        var ribbonMesh = SplintEngine.GenerateRibbonMesh(pts, w);
+        float bias = (float)LingualBuccalBiasSlider.Value;
+        var ribbonMesh = SplintEngine.GenerateRibbonMesh(pts, w, bias);
         if (ribbonMesh.Length < 9) return;
         _upperRibbon = MeshHelper.BuildModel3D(ribbonMesh, 0, 188, 212, 100);
         UpperGroup.Children.Add(_upperRibbon);
@@ -374,7 +374,8 @@ public partial class SplintPlannerWindow : Window
         if (_lowerArch.ControlPointCount < 2) return;
         var pts = sampled ?? _lowerArch.Sample(120);
         float w = (float)ThicknessSlider.Value;
-        var ribbonMesh = SplintEngine.GenerateRibbonMesh(pts, w);
+        float bias = (float)LingualBuccalBiasSlider.Value;
+        var ribbonMesh = SplintEngine.GenerateRibbonMesh(pts, w, bias);
         if (ribbonMesh.Length < 9) return;
         _lowerRibbon = MeshHelper.BuildModel3D(ribbonMesh, 0, 188, 212, 100);
         LowerGroup.Children.Add(_lowerRibbon);
@@ -407,6 +408,17 @@ public partial class SplintPlannerWindow : Window
 
     private void LowerPenetrationSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
     { if (LowerPenetrationLabel != null) LowerPenetrationLabel.Text = $"{e.NewValue:F1} mm"; }
+
+    private void BridgeThicknessSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
+    { if (BridgeThicknessLabel != null) BridgeThicknessLabel.Text = $"{e.NewValue:F1} mm"; }
+
+    private void LingualBuccalBiasSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (LingualBuccalBiasLabel != null) LingualBuccalBiasLabel.Text = $"{e.NewValue:F1} mm";
+        // Live ribbon update when slider moves
+        if (_upperArch?.ControlPointCount >= 2) RefreshUpperRibbon();
+        if (_lowerArch?.ControlPointCount >= 2) RefreshLowerRibbon();
+    }
 
     // ═══════════════════════════════════════════════════════════
     //  CLEAR
@@ -459,6 +471,8 @@ public partial class SplintPlannerWindow : Window
         float thickness      = (float)ThicknessSlider.Value;
         float upperPenetration = (float)UpperPenetrationSlider.Value;
         float lowerPenetration = (float)LowerPenetrationSlider.Value;
+        float lingualBuccalBias = (float)LingualBuccalBiasSlider.Value;
+        float bridgeThickness = (float)BridgeThicknessSlider.Value;
         var upperSampled  = _upperArch.Sample(160);
         var lowerSampled  = _lowerArch.Sample(160);
         float[] uMesh = _upperMesh, lMesh = _lowerMesh;
@@ -468,9 +482,11 @@ public partial class SplintPlannerWindow : Window
         {
             splint = await Task.Run(() => SplintEngine.GenerateSplint(
                 upperSampled, lowerSampled,
-                labiolingualMm:    thickness,
-                upperPenetrationMm: upperPenetration,
-                lowerPenetrationMm: lowerPenetration,
+                labiolingualMm:       thickness,
+                upperPenetrationMm:   upperPenetration,
+                lowerPenetrationMm:   lowerPenetration,
+                lingualBuccalBiasMm:  lingualBuccalBias,
+                bridgeThicknessMm:    bridgeThickness,
                 upperMesh: uMesh, lowerMesh: lMesh,
                 sampleCount: 160));
         }

@@ -115,7 +115,8 @@ public static class SplintEngine
     /// <summary>Returns a thin flat ribbon along the arch showing the LL width.
     /// Used for live preview before Generate is clicked.</summary>
     public static float[] GenerateRibbonMesh(
-        List<(float x,float y,float z)> archCurve, float labiolingualMm)
+        List<(float x,float y,float z)> archCurve, float labiolingualMm,
+        float lingualBuccalBiasMm = 0f)
     {
         int n = archCurve.Count;
         if (n < 2) return Array.Empty<float>();
@@ -127,8 +128,11 @@ public static class SplintEngine
         for (int i=0; i<n; i++)
         {
             var p = archCurve[i]; var N = nor[i];
-            outer[i] = (p.x+N.x*half, p.y+N.y*half, p.z+0.3f);
-            inner[i] = (p.x-N.x*half, p.y-N.y*half, p.z+0.3f);
+            // Bias shifts the center outward (+) or inward (-) while keeping total width constant
+            float biasedCx = p.x + N.x * lingualBuccalBiasMm;
+            float biasedCy = p.y + N.y * lingualBuccalBiasMm;
+            outer[i] = (biasedCx+N.x*half, biasedCy+N.y*half, p.z+0.3f);
+            inner[i] = (biasedCx-N.x*half, biasedCy-N.y*half, p.z+0.3f);
         }
 
         var tris = new List<float>(n*12);
@@ -139,10 +143,41 @@ public static class SplintEngine
             // back face (so it's visible from below too)
             AddQuad(tris, outer[i],inner[i],inner[i+1],outer[i+1]);
         }
+
+        // ── Semicircular end-caps on the ribbon ──
+        float rcx = 0, rcy = 0;
+        for (int i = 0; i < n; i++) { rcx += archCurve[i].x; rcy += archCurve[i].y; }
+        rcx /= n; rcy /= n;
+        const int rCapSegs = 8;
+        for (int capEnd = 0; capEnd < 2; capEnd++)
+        {
+            int idx = capEnd == 0 ? 0 : n - 1;
+            var center = ((outer[idx].x+inner[idx].x)*0.5f, (outer[idx].y+inner[idx].y)*0.5f, outer[idx].z);
+            float dxD = outer[idx].x - inner[idx].x, dyD = outer[idx].y - inner[idx].y;
+            float dL = MathF.Sqrt(dxD*dxD + dyD*dyD);
+            if (dL < 1e-6f) continue;
+            float cR = dL * 0.5f, ux2 = dxD/dL, uy2 = dyD/dL;
+            float ppx = capEnd == 0 ? uy2 : -uy2, ppy = capEnd == 0 ? -ux2 : ux2;
+            float tmx = rcx - center.Item1, tmy = rcy - center.Item2;
+            if (ppx*tmx + ppy*tmy > 0) { ppx = -ppx; ppy = -ppy; }
+            for (int s = 0; s < rCapSegs; s++)
+            {
+                float a0 = MathF.PI*s/rCapSegs, a1 = MathF.PI*(s+1)/rCapSegs;
+                float ox0=cR*(ux2*MathF.Cos(a0)+ppx*MathF.Sin(a0)), oy0=cR*(uy2*MathF.Cos(a0)+ppy*MathF.Sin(a0));
+                float ox1=cR*(ux2*MathF.Cos(a1)+ppx*MathF.Sin(a1)), oy1=cR*(uy2*MathF.Cos(a1)+ppy*MathF.Sin(a1));
+                tris.Add(center.Item1);tris.Add(center.Item2);tris.Add(center.Item3);
+                tris.Add(center.Item1+ox0);tris.Add(center.Item2+oy0);tris.Add(center.Item3);
+                tris.Add(center.Item1+ox1);tris.Add(center.Item2+oy1);tris.Add(center.Item3);
+                tris.Add(center.Item1);tris.Add(center.Item2);tris.Add(center.Item3);
+                tris.Add(center.Item1+ox1);tris.Add(center.Item2+oy1);tris.Add(center.Item3);
+                tris.Add(center.Item1+ox0);tris.Add(center.Item2+oy0);tris.Add(center.Item3);
+            }
+        }
+
         return tris.ToArray();
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Horseshoe solid Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // ── Horseshoe solid ─────────────────────────────────────────────────────────────────────────────────────────────
     /// <summary>
     /// Generates a clean horseshoe-shaped splint solid.
     /// The top surface follows the upper arch curve (tooth contact).
@@ -187,24 +222,29 @@ public static class SplintEngine
         return result;
     }
 
-    // Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
-    //  GENERATE SPLINT Ã¢â‚¬â€ correct closed-solid boolean pipeline
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    //  GENERATE SPLINT — refined pipeline
     //
-    //  Step A  Dilate upper mesh 1mm, clip below upperZ, cap at upperZ Ã¢â€ â€™ closed solid
-    //  Step B  Same for lower (clip above lowerZ, cap at lowerZ)          Ã¢â€ â€™ closed solid
-    //  Step C  horseshoe Ã¢Ë†Âª solidUpper1mm Ã¢Ë†Âª solidLower1mm (all closed)    Ã¢â€ â€™ splint blank
-    //  Step D  Dilate 0.1mm versions, clip+cap Ã¢â€ â€™ closed subtraction tools
-    //  Step E  blank Ã¢Ë†â€™ upper0.1mm Ã¢Ë†â€™ lower0.1mm                           Ã¢â€ â€™ final splint
-    // Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+    //  Step A  Dilate upper mesh 1mm  → closed solid
+    //  Step B  Dilate lower mesh 1mm  → closed solid
+    //  Step C  horseshoe ∪ upper1mm ∪ lower1mm  → raw blank
+    //  Step D  Per-voxel Z-clip at exact user-defined horseshoe surfaces:
+    //          Upper cut: archCurveZ(x,y) - upperPenetrationMm  (+ = deeper into teeth)
+    //          Lower cut: archCurveZ(x,y) + lowerPenetrationMm  (+ = deeper into teeth)
+    //  Step E  Posterior limit: curved boundary matching horseshoe end-caps
+    //  Step F  Subtract 0.1mm-dilated tooth surfaces → tooth pockets
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     public static float[] GenerateSplint(
         List<(float x,float y,float z)> upperCurve,
         List<(float x,float y,float z)> lowerCurve,
-        float labiolingualMm     = 8f,
-        float upperPenetrationMm = 0f,   // UI only Ã¢â‚¬â€ not used here
-        float lowerPenetrationMm = 0f,   // UI only Ã¢â‚¬â€ not used here
-        float[]? upperMesh       = null,
-        float[]? lowerMesh       = null,
-        int sampleCount          = 160)
+        float labiolingualMm        = 8f,
+        float upperPenetrationMm    = 0f,   // + = deeper into teeth (cut moves caudally)
+        float lowerPenetrationMm    = 0f,   // + = deeper into teeth (cut moves cranially)
+        float lingualBuccalBiasMm   = 0f,   // + = shift center buccally, − = lingually
+        float bridgeThicknessMm     = 0f,   // extra thickness added to the bridge connection
+        float[]? upperMesh          = null,
+        float[]? lowerMesh          = null,
+        int sampleCount             = 160)
     {
         if (upperCurve.Count < 2 || lowerCurve.Count < 2) return Array.Empty<float>();
 
@@ -224,27 +264,72 @@ public static class SplintEngine
         var norU = ComputeNormals(upper, n);
         var norL = ComputeNormals(lower, n);
 
+        // Apply lingual-buccal bias: shift center along normal, keep total width
         var TO = new (float x,float y,float z)[n]; var TI = new (float x,float y,float z)[n];
         var BO = new (float x,float y,float z)[n]; var BI = new (float x,float y,float z)[n];
         for (int i = 0; i < n; i++)
         {
             var u=upper[i]; var nu=norU[i]; var l=lower[i]; var nl=norL[i];
-            TO[i]=(u.x+nu.x*half, u.y+nu.y*half, u.z); TI[i]=(u.x-nu.x*half, u.y-nu.y*half, u.z);
-            BO[i]=(l.x+nl.x*half, l.y+nl.y*half, l.z); BI[i]=(l.x-nl.x*half, l.y-nl.y*half, l.z);
+            float uCx = u.x + nu.x * lingualBuccalBiasMm;
+            float uCy = u.y + nu.y * lingualBuccalBiasMm;
+            float lCx = l.x + nl.x * lingualBuccalBiasMm;
+            float lCy = l.y + nl.y * lingualBuccalBiasMm;
+            TO[i]=(uCx+nu.x*half, uCy+nu.y*half, u.z); TI[i]=(uCx-nu.x*half, uCy-nu.y*half, u.z);
+            BO[i]=(lCx+nl.x*half, lCy+nl.y*half, l.z); BI[i]=(lCx-nl.x*half, lCy-nl.y*half, l.z);
         }
 
-        // Ã¢â€â‚¬Ã¢â€â‚¬ Build horseshoe (closed by construction) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+        // ── Build horseshoe body (closed by construction) ─────────────────────
         var horseshoeTris = new List<float>(n * 6 * 2 * 9);
         for (int i = 0; i < n-1; i++)
         {
             int j=i+1;
             AddQuad(horseshoeTris, TO[i], TO[j], BO[j], BO[i]);   // outer wall
             AddQuad(horseshoeTris, TI[j], TI[i], BI[i], BI[j]);   // inner wall
-            AddQuad(horseshoeTris, TI[i], TO[i], TO[j], TI[j]);   // top face
+            AddQuad(horseshoeTris, TO[i], TI[i], TI[j], TO[j]);   // top face (normal +Z)
             AddQuad(horseshoeTris, BO[i], BO[j], BI[j], BI[i]);   // bottom face
         }
-        AddQuad(horseshoeTris, TO[0],   TI[0],   BI[0],   BO[0]);
-        AddQuad(horseshoeTris, TI[n-1], TO[n-1], BO[n-1], BI[n-1]);
+
+        // Arch midpoint (for cap orientation)
+        float archMidX = (upper[n/2].x + lower[n/2].x) * 0.5f;
+        float archMidY = (upper[n/2].y + lower[n/2].y) * 0.5f;
+
+        // ── Semicircular end-caps ──
+        const int capSegs = 8;
+        for (int capEnd = 0; capEnd < 2; capEnd++)
+        {
+            int idx = capEnd == 0 ? 0 : n - 1;
+            var tCenter = ((TO[idx].x+TI[idx].x)*0.5f, (TO[idx].y+TI[idx].y)*0.5f, TO[idx].z);
+            var bCenter = ((BO[idx].x+BI[idx].x)*0.5f, (BO[idx].y+BI[idx].y)*0.5f, BO[idx].z);
+            float dxDir = TO[idx].x - TI[idx].x, dyDir = TO[idx].y - TI[idx].y;
+            float dLen = MathF.Sqrt(dxDir*dxDir + dyDir*dyDir);
+            if (dLen < 1e-6f) continue;
+            float capR = dLen * 0.5f, ux = dxDir/dLen, uy = dyDir/dLen;
+            float px_ = capEnd == 0 ? uy : -uy, py_ = capEnd == 0 ? -ux : ux;
+            float toMidX = archMidX - tCenter.Item1, toMidY = archMidY - tCenter.Item2;
+            if (px_*toMidX + py_*toMidY > 0) { px_ = -px_; py_ = -py_; }
+
+            var topPts = new (float x,float y,float z)[capSegs+1];
+            var botPts = new (float x,float y,float z)[capSegs+1];
+            for (int s = 0; s <= capSegs; s++)
+            {
+                float angle = MathF.PI * s / capSegs;
+                float offX = capR*(ux*MathF.Cos(angle) + px_*MathF.Sin(angle));
+                float offY = capR*(uy*MathF.Cos(angle) + py_*MathF.Sin(angle));
+                topPts[s] = (tCenter.Item1+offX, tCenter.Item2+offY, tCenter.Item3);
+                botPts[s] = (bCenter.Item1+offX, bCenter.Item2+offY, bCenter.Item3);
+            }
+            for (int s = 0; s < capSegs; s++)
+            {
+                horseshoeTris.Add(tCenter.Item1);horseshoeTris.Add(tCenter.Item2);horseshoeTris.Add(tCenter.Item3);
+                if (capEnd==0) { horseshoeTris.Add(topPts[s+1].x);horseshoeTris.Add(topPts[s+1].y);horseshoeTris.Add(topPts[s+1].z); horseshoeTris.Add(topPts[s].x);horseshoeTris.Add(topPts[s].y);horseshoeTris.Add(topPts[s].z); }
+                else { horseshoeTris.Add(topPts[s].x);horseshoeTris.Add(topPts[s].y);horseshoeTris.Add(topPts[s].z); horseshoeTris.Add(topPts[s+1].x);horseshoeTris.Add(topPts[s+1].y);horseshoeTris.Add(topPts[s+1].z); }
+                horseshoeTris.Add(bCenter.Item1);horseshoeTris.Add(bCenter.Item2);horseshoeTris.Add(bCenter.Item3);
+                if (capEnd==0) { horseshoeTris.Add(botPts[s].x);horseshoeTris.Add(botPts[s].y);horseshoeTris.Add(botPts[s].z); horseshoeTris.Add(botPts[s+1].x);horseshoeTris.Add(botPts[s+1].y);horseshoeTris.Add(botPts[s+1].z); }
+                else { horseshoeTris.Add(botPts[s+1].x);horseshoeTris.Add(botPts[s+1].y);horseshoeTris.Add(botPts[s+1].z); horseshoeTris.Add(botPts[s].x);horseshoeTris.Add(botPts[s].y);horseshoeTris.Add(botPts[s].z); }
+                if (capEnd==0) AddQuad(horseshoeTris, topPts[s+1], topPts[s], botPts[s], botPts[s+1]);
+                else AddQuad(horseshoeTris, topPts[s], topPts[s+1], botPts[s+1], botPts[s]);
+            }
+        }
         float[] horseshoeFlat = horseshoeTris.ToArray();
 
         if (upperMesh == null || upperMesh.Length < 9 ||
@@ -253,18 +338,15 @@ public static class SplintEngine
 
         try
         {
-            const double VS_SDF  = 0.2;   // SDF grid resolution: 8x less RAM than 0.1mm (feasible on desktop)
-            const double VS_MC   = 0.1;   // MC sampling resolution: queries SDF via trilinear interp
+            const double VS_SDF  = 0.2;   // SDF grid resolution
+            const double VS_MC   = 0.1;   // MC sampling resolution
             const double CrownMm = 10.0;
             const double Dil1    = 1.0;
             const double Dil01   = 0.1;
 
-            float upperZ = upper.Max(p => p.z);
-            float lowerZ = lower.Min(p => p.z);
-            System.Diagnostics.Debug.WriteLine($"[Splint] upperZ={upperZ:F1} lowerZ={lowerZ:F1}");
+            System.Diagnostics.Debug.WriteLine($"[Splint] upperPen={upperPenetrationMm:F1} lowerPen={lowerPenetrationMm:F1} bias={lingualBuccalBiasMm:F1}");
 
             // BoundedImplicitFunction3d wrapper that shifts the iso by 'Offset'
-            // (positive Offset = shrink, negative = expand/dilate)
             BoundedImplicitFunction3d Offset(BoundedImplicitFunction3d a, double off)
                 => new OffsetImpl(a, off);
 
@@ -277,14 +359,13 @@ public static class SplintEngine
                 return dm;
             }
 
-            // Z-clip triangle soup by triangle centroid
-            float[] ClipZ(float[] s, float zMin, float zMax){var r=new List<float>();for(int i=0;i+8<s.Length;i+=9){float cz=(s[i+2]+s[i+5]+s[i+8])/3f;if(cz>=zMin&&cz<=zMax)for(int k=0;k<9;k++)r.Add(s[i+k]);}return r.ToArray();}
-
             // Pre-clip meshes to crown+horseshoe region before SDF (avoids full-skull BVH)
             float mnX=float.MaxValue,mnY=float.MaxValue,mxX=float.MinValue,mxY=float.MinValue;
             foreach(var p in upper){if(p.x<mnX)mnX=p.x;if(p.x>mxX)mxX=p.x;if(p.y<mnY)mnY=p.y;if(p.y>mxY)mxY=p.y;}
             foreach(var p in lower){if(p.x<mnX)mnX=p.x;if(p.x>mxX)mxX=p.x;if(p.y<mnY)mnY=p.y;if(p.y>mxY)mxY=p.y;}
-            float clipPad=(float)(labiolingualMm*0.5+Dil1+6);
+            float upperZ = upper.Max(p => p.z);
+            float lowerZ = lower.Min(p => p.z);
+            float clipPad=(float)(labiolingualMm*0.5+Math.Abs(lingualBuccalBiasMm)+Dil1+6);
             float[] Crop(float[] s){
                 var r=new List<float>();
                 for(int i=0;i+8<s.Length;i+=9){
@@ -296,17 +377,17 @@ public static class SplintEngine
                 return r.ToArray();
             }
 
-            // Compute SDF ONCE per mesh (at 0.2mm) — reuse via OffsetImpl for both offsets.
-            // UseParallel=true requires Spatial (AABB tree) + NarrowBandMaxDistance to be set.
-            BoundedImplicitFunction3d? BaseSdf(float[] soup){
+            // Compute SDF ONCE per mesh (at 0.2mm)
+            BoundedImplicitFunction3d? BaseSdf(float[] soup, double band = -1){
                 if(soup.Length<9) return null;
                 var m=ToMesh(soup); if(m.TriangleCount==0) return null;
-                System.Diagnostics.Debug.WriteLine($"[Splint] SDF {m.TriangleCount} tris @ {VS_SDF}mm");
+                double b = band > 0 ? band : Dil1 + VS_SDF*5;
+                System.Diagnostics.Debug.WriteLine($"[Splint] SDF {m.TriangleCount} tris @ {VS_SDF}mm band={b:F1}");
                 var spatial = new DMeshAABBTree3(m, autoBuild:true);
                 var sdf=new MeshSignedDistanceGrid(m,(float)VS_SDF){
                     Spatial              = spatial,
-                    NarrowBandMaxDistance= Dil1 + VS_SDF*5,
-                    ExactBandWidth       = (int)Math.Ceiling(Dil1/VS_SDF)+4,
+                    NarrowBandMaxDistance= b,
+                    ExactBandWidth       = (int)Math.Ceiling(b/VS_SDF)+4,
                     ComputeSigns         = true,
                     ComputeMode          = MeshSignedDistanceGrid.ComputeModes.NarrowBand_SpatialFloodFill,
                     InsideMode           = MeshSignedDistanceGrid.InsideModes.ParityCount,
@@ -317,70 +398,296 @@ public static class SplintEngine
                 return new DenseGridTrilinearImplicit(sdf.Grid,sdf.GridOrigin,(float)VS_SDF);
             }
 
+            // ── Build a KD-like fast nearest-arch-Z lookup from both curves ──
+            // For each (x,y) query, find nearest point on the arch curve and return its Z
+            float NearestUpperZ(double px, double py){
+                float bestD=float.MaxValue, bestZ=0f;
+                foreach(var pt in upper){float dx=(float)px-pt.x,dy=(float)py-pt.y,d=dx*dx+dy*dy;if(d<bestD){bestD=d;bestZ=pt.z;}}
+                return bestZ;
+            }
+            float NearestLowerZ(double px, double py){
+                float bestD=float.MaxValue, bestZ=0f;
+                foreach(var pt in lower){float dx=(float)px-pt.x,dy=(float)py-pt.y,d=dx*dx+dy*dy;if(d<bestD){bestD=d;bestZ=pt.z;}}
+                return bestZ;
+            }
 
-            float[] upCrop=Crop(upperMesh), loCrop=Crop(lowerMesh), hoCrop=Crop(horseshoeFlat);
-            System.Diagnostics.Debug.WriteLine($"[Splint] Cropped tris: up={upCrop.Length/9} lo={loCrop.Length/9} horse={hoCrop.Length/9}");
-            if(upCrop.Length<9||loCrop.Length<9||hoCrop.Length<9) return horseshoeFlat;
+            // ── Posterior limit: compute the curved boundary from horseshoe end-caps ──
+            float Cap0Cx = (TO[0].x + TI[0].x + BO[0].x + BI[0].x) * 0.25f;
+            float Cap0Cy = (TO[0].y + TI[0].y + BO[0].y + BI[0].y) * 0.25f;
+            float CapNCx = (TO[n-1].x + TI[n-1].x + BO[n-1].x + BI[n-1].x) * 0.25f;
+            float CapNCy = (TO[n-1].y + TI[n-1].y + BO[n-1].y + BI[n-1].y) * 0.25f;
 
-            var horseBase = BaseSdf(hoCrop);
+            float cap0DirX = TI[0].x - TO[0].x, cap0DirY = TI[0].y - TO[0].y;
+            float cap0NX = -cap0DirY, cap0NY = cap0DirX;
+            if (cap0NX*(archMidX-Cap0Cx) + cap0NY*(archMidY-Cap0Cy) < 0) { cap0NX=-cap0NX; cap0NY=-cap0NY; }
+
+            float capNDirX = TI[n-1].x - TO[n-1].x, capNDirY = TI[n-1].y - TO[n-1].y;
+            float capNNX = -capNDirY, capNNY = capNDirX;
+            if (capNNX*(archMidX-CapNCx) + capNNY*(archMidY-CapNCy) < 0) { capNNX=-capNNX; capNNY=-capNNY; }
+
+            bool IsAnteriorToPosteriorLimit(double px, double py)
+            {
+                float d0 = cap0NX*((float)px-Cap0Cx) + cap0NY*((float)py-Cap0Cy);
+                float dN = capNNX*((float)px-CapNCx) + capNNY*((float)py-CapNCy);
+                return d0 >= -0.5f && dN >= -0.5f;
+            }
+
+            float[] upCrop=Crop(upperMesh), loCrop=Crop(lowerMesh);
+            System.Diagnostics.Debug.WriteLine($"[Splint] Cropped tris: up={upCrop.Length/9} lo={loCrop.Length/9}");
+            if(upCrop.Length<9||loCrop.Length<9) return horseshoeFlat;
+
             var upBase    = BaseSdf(upCrop);
             var loBase    = BaseSdf(loCrop);
-            if(horseBase==null||upBase==null||loBase==null) return horseshoeFlat;
+            if(upBase==null||loBase==null) return horseshoeFlat;
 
-            // Apply offsets lazily — zero extra cost, same underlying grid
-            var horseImpl = horseBase;
             var upImpl1   = Offset(upBase,  -Dil1);
             var loImpl1   = Offset(loBase,  -Dil1);
             var upImpl01  = Offset(upBase,  -Dil01);
             var loImpl01  = Offset(loBase,  -Dil01);
 
-
-            // Clip box: caps the blank at the arch planes (user requirement):
-            //   Z top    = upperZ + 1.5mm  (1.5mm above upper arch curve)
-            //   Z bottom = lowerZ - 1.5mm  (1.5mm below lower arch curve)
-            //   XY       = arch footprint ± labiolingual pad (caps the back too)
-            const double CapAbove = 1.5;
-            const double CapBelow = 1.5;
-            float pad=(float)(labiolingualMm*0.5+Dil1+3);
-            var clipAAB = new AxisAlignedBox3d(
-                new Vector3d(mnX-pad, mnY-pad, lowerZ-CapBelow),
-                new Vector3d(mxX+pad, mxY+pad, upperZ+CapAbove));
-            BoundedImplicitFunction3d clipBox = new ImplicitAxisAlignedBox3d { AABox = clipAAB };
-
-            // blank = (horse ∪ up1mm ∪ lo1mm) ∩ clipBox  → capped solid
-            BoundedImplicitFunction3d rawBlank = new ImplicitUnion3d{A=horseImpl,B=new ImplicitUnion3d{A=upImpl1,B=loImpl1}};
-            BoundedImplicitFunction3d blank    = new ImplicitIntersection3d{A=rawBlank, B=clipBox};
-
-            // final = blank − up0.1mm − lo0.1mm  → tooth pockets carved
-            BoundedImplicitFunction3d final2   = new ImplicitDifference3d{A=new ImplicitDifference3d{A=blank,B=upImpl01},B=loImpl01};
-
-            // ── Pre-bake the combined SDF to a flat float[] in parallel ─────────
-            // This replaces 240M lazy implicit-chain evaluations during MC with
-            // simple array reads, giving 5-10x speedup on the MC phase.
-            var mcBounds = new AxisAlignedBox3d(clipAAB.Min - new Vector3d(1,1,1), clipAAB.Max + new Vector3d(1,1,1));
+            // ── PHASE 1: Bake blank SDF (upper_1mm ∪ lower_1mm, Z-clipped at arch surfaces) ──
+            float mcPad = (float)(labiolingualMm*0.5 + Math.Abs(lingualBuccalBiasMm) + 4.0);
+            float zPadTop = Math.Max(upperPenetrationMm, 0f) + 2.0f;
+            float zPadBot = Math.Max(lowerPenetrationMm, 0f) + 2.0f;
+            var mcBounds = new AxisAlignedBox3d(
+                new Vector3d(mnX-mcPad, mnY-mcPad, lowerZ-zPadBot-1.0),
+                new Vector3d(mxX+mcPad, mxY+mcPad, upperZ+zPadTop+1.0));
             int gnx=(int)Math.Ceiling(mcBounds.Width /VS_MC)+1;
             int gny=(int)Math.Ceiling(mcBounds.Height/VS_MC)+1;
             int gnz=(int)Math.Ceiling(mcBounds.Depth /VS_MC)+1;
             float gox=(float)mcBounds.Min.x, goy=(float)mcBounds.Min.y, goz=(float)mcBounds.Min.z;
             var bakedGrid = new float[gnx*gny*gnz];
-            System.Diagnostics.Debug.WriteLine($"[Splint] Baking SDF {gnx}x{gny}x{gnz}={gnx*gny*gnz/1_000_000}M voxels...");
+            System.Diagnostics.Debug.WriteLine($"[Splint] PHASE1 Baking blank {gnx}x{gny}x{gnz}={gnx*gny*gnz/1_000_000}M voxels...");
             System.Threading.Tasks.Parallel.For(0, gnz, iz => {
                 for(int iy=0;iy<gny;iy++) for(int ix=0;ix<gnx;ix++) {
-                    var pt=new Vector3d(gox+ix*VS_MC, goy+iy*VS_MC, goz+iz*VS_MC);
-                    bakedGrid[iz*gnx*gny+iy*gnx+ix]=(float)final2.Value(ref pt);
+                    double px = gox+ix*VS_MC, py = goy+iy*VS_MC, pz = goz+iz*VS_MC;
+                    int vIdx = iz*gnx*gny+iy*gnx+ix;
+
+                    // Z-clip at exact user-defined horseshoe surfaces (per-point Z following arch contour)
+                    float upperCutZ = NearestUpperZ(px, py) - upperPenetrationMm;
+                    float lowerCutZ = NearestLowerZ(px, py) + lowerPenetrationMm;
+                    if ((float)pz > upperCutZ || (float)pz < lowerCutZ)
+                    { bakedGrid[vIdx] = 1.0f; continue; }
+
+                    // Posterior limit
+                    if (!IsAnteriorToPosteriorLimit(px, py))
+                    { bakedGrid[vIdx] = 1.0f; continue; }
+
+                    // Raw blank = upper_1mm ∪ lower_1mm (NO horseshoe SDF)
+                    var pt = new Vector3d(px, py, pz);
+                    float upVal1 = (float)upImpl1.Value(ref pt);
+                    float loVal1 = (float)loImpl1.Value(ref pt);
+                    bakedGrid[vIdx] = MathF.Min(upVal1, loVal1);
                 }
             });
-            // Wrap in DenseGrid3f → DenseGridTrilinearImplicit for MC (O(1) lookup per corner)
+
+            // ── PHASE 1b: Remove floaters BEFORE closing (BFS from arch centroid) ──
+            {
+                int totalVox = gnx*gny*gnz;
+                int insideCount = 0;
+                for (int i = 0; i < totalVox; i++) if (bakedGrid[i] < 0) insideCount++;
+                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE1b {insideCount} inside voxels before floater removal");
+                if (insideCount == 0) return horseshoeFlat;
+
+                var visited = new bool[totalVox];
+                var queue = new Queue<int>();
+                float seedX = archMidX, seedY = archMidY, seedZ = (upperZ + lowerZ) * 0.5f;
+                int bestSeed = -1; float bestSeedD = float.MaxValue;
+                for (int iz2 = 0; iz2 < gnz; iz2++) for (int iy2 = 0; iy2 < gny; iy2++) for (int ix2 = 0; ix2 < gnx; ix2++) {
+                    int idx2 = iz2*gnx*gny+iy2*gnx+ix2;
+                    if (bakedGrid[idx2] >= 0) continue;
+                    float dx2 = gox+ix2*(float)VS_MC-seedX, dy2 = goy+iy2*(float)VS_MC-seedY, dz2 = goz+iz2*(float)VS_MC-seedZ;
+                    float d = dx2*dx2+dy2*dy2+dz2*dz2;
+                    if (d < bestSeedD) { bestSeedD = d; bestSeed = idx2; }
+                }
+                if (bestSeed < 0) return horseshoeFlat;
+                queue.Enqueue(bestSeed); visited[bestSeed] = true;
+                int mainSize = 0;
+                int[] dxN={1,-1,0,0,0,0}, dyN={0,0,1,-1,0,0}, dzN={0,0,0,0,1,-1};
+                while (queue.Count > 0) {
+                    int ci = queue.Dequeue(); mainSize++;
+                    int cz = ci/(gnx*gny), crem = ci%(gnx*gny), cy = crem/gnx, cx = crem%gnx;
+                    for (int d = 0; d < 6; d++) {
+                        int nx2=cx+dxN[d], ny2=cy+dyN[d], nz2=cz+dzN[d];
+                        if (nx2<0||nx2>=gnx||ny2<0||ny2>=gny||nz2<0||nz2>=gnz) continue;
+                        int ni = nz2*gnx*gny+ny2*gnx+nx2;
+                        if (!visited[ni] && bakedGrid[ni] < 0) { visited[ni]=true; queue.Enqueue(ni); }
+                    }
+                }
+                int removed = 0;
+                for (int i = 0; i < totalVox; i++) {
+                    if (bakedGrid[i] < 0 && !visited[i]) { bakedGrid[i] = 1.0f; removed++; }
+                }
+                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE1b Kept {mainSize} voxels, removed {removed} floaters");
+            }
+
+            // ── PHASE 2: GPU morphological closing on PADDED coarse grid ──
+            // Padding by closeR on all faces ensures dilation never hits the volume
+            // boundary, so erosion fully retracts — no boundary artifacts.
+            float maxGap = 0;
+            for (int i = 0; i < n; i++) {
+                float gap = MathF.Abs(upper[i].z - lower[i].z);
+                if (gap > maxGap) maxGap = gap;
+            }
+            const float coarseVS = 0.5f;
+            int closeR = (int)MathF.Ceiling(maxGap * 0.55f / coarseVS);
+            closeR = Math.Clamp(closeR, 2, 30);
+            System.Diagnostics.Debug.WriteLine($"[Splint] PHASE2 GPU closing: maxGap={maxGap:F1}mm closeR={closeR} coarseVS={coarseVS}");
+
+            // Coarse grid dimensions WITH padding
+            int pad = closeR + 1; // padding on each side
+            int cnxBase = (int)Math.Ceiling(mcBounds.Width  / coarseVS) + 1;
+            int cnyBase = (int)Math.Ceiling(mcBounds.Height / coarseVS) + 1;
+            int cnzBase = (int)Math.Ceiling(mcBounds.Depth  / coarseVS) + 1;
+            int cnx = cnxBase + 2*pad;
+            int cny = cnyBase + 2*pad;
+            int cnz = cnzBase + 2*pad;
+            var coarse = new byte[cnx * cny * cnz]; // all zeros = outside (padding is empty)
+            System.Diagnostics.Debug.WriteLine($"[Splint] PHASE2 padded coarse grid {cnx}x{cny}x{cnz} (pad={pad}), {cnx*cny*cnz/1000}K voxels");
+
+            // Fill interior (offset by pad) from fine SDF
+            for (int ciz = 0; ciz < cnzBase; ciz++) for (int ciy = 0; ciy < cnyBase; ciy++) for (int cix = 0; cix < cnxBase; cix++) {
+                int fix = Math.Clamp((int)(cix * coarseVS / VS_MC), 0, gnx-1);
+                int fiy = Math.Clamp((int)(ciy * coarseVS / VS_MC), 0, gny-1);
+                int fiz = Math.Clamp((int)(ciz * coarseVS / VS_MC), 0, gnz-1);
+                if (bakedGrid[fiz*gnx*gny + fiy*gnx + fix] < 0)
+                    coarse[(ciz+pad)*cnx*cny + (ciy+pad)*cnx + (cix+pad)] = 1;
+            }
+
+            // GPU: close (bridge the gap between arches)
+            byte[] closed;
+            using (var gpu = new GpuMorphology3D()) {
+                closed = gpu.Close(coarse, cnx, cny, cnz, closeR);
+                // Extra thickness?
+                if (bridgeThicknessMm > 0.01f) {
+                    int dilateR = (int)MathF.Ceiling(bridgeThicknessMm / coarseVS);
+                    closed = gpu.Dilate(closed, cnx, cny, cnz, dilateR);
+                }
+            }
+            System.Diagnostics.Debug.WriteLine("[Splint] PHASE2 GPU closing done");
+
+            // Apply closed result back to fine grid (reading from padded coordinates)
+            System.Threading.Tasks.Parallel.For(0, gnz, iz => {
+                for (int iy = 0; iy < gny; iy++) for (int ix = 0; ix < gnx; ix++) {
+                    int vIdx = iz*gnx*gny + iy*gnx + ix;
+                    if (bakedGrid[vIdx] < 0) continue; // already inside
+                    // Map fine voxel to padded coarse grid
+                    int cix = Math.Clamp((int)(ix * VS_MC / coarseVS), 0, cnxBase-1) + pad;
+                    int ciy = Math.Clamp((int)(iy * VS_MC / coarseVS), 0, cnyBase-1) + pad;
+                    int ciz = Math.Clamp((int)(iz * VS_MC / coarseVS), 0, cnzBase-1) + pad;
+                    if (closed[ciz*cnx*cny + ciy*cnx + cix] == 1)
+                        bakedGrid[vIdx] = -0.5f;
+                }
+            });
+
+            // ── PHASE 2b: SDF smoothing (separable box blur) ──
+            // Smooth the blank SDF BEFORE pocket subtraction so pockets stay precise.
+            // 3 passes of box blur with radius 2 ≈ Gaussian σ≈2.4 voxels.
+            {
+                int blurR = 2, blurPasses = 3;
+                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE2b SDF smoothing: blurR={blurR} passes={blurPasses}");
+                var temp = new float[bakedGrid.Length];
+
+                for (int pass = 0; pass < blurPasses; pass++) {
+                    // Blur X
+                    System.Threading.Tasks.Parallel.For(0, gnz, iz => {
+                        for (int iy = 0; iy < gny; iy++) {
+                            int rowBase = iz*gnx*gny + iy*gnx;
+                            for (int ix = 0; ix < gnx; ix++) {
+                                float sum = 0; int cnt = 0;
+                                int lo = Math.Max(0,ix-blurR), hi = Math.Min(gnx-1,ix+blurR);
+                                for (int k = lo; k <= hi; k++) { sum += bakedGrid[rowBase+k]; cnt++; }
+                                temp[rowBase+ix] = sum / cnt;
+                            }
+                        }
+                    });
+                    // Blur Y
+                    System.Threading.Tasks.Parallel.For(0, gnz, iz => {
+                        for (int ix = 0; ix < gnx; ix++) {
+                            for (int iy = 0; iy < gny; iy++) {
+                                float sum = 0; int cnt = 0;
+                                int lo = Math.Max(0,iy-blurR), hi = Math.Min(gny-1,iy+blurR);
+                                for (int k = lo; k <= hi; k++) { sum += temp[iz*gnx*gny+k*gnx+ix]; cnt++; }
+                                bakedGrid[iz*gnx*gny+iy*gnx+ix] = sum / cnt;
+                            }
+                        }
+                    });
+                    // Blur Z
+                    System.Threading.Tasks.Parallel.For(0, gny, iy => {
+                        for (int ix = 0; ix < gnx; ix++) {
+                            for (int iz = 0; iz < gnz; iz++) {
+                                float sum = 0; int cnt = 0;
+                                int lo = Math.Max(0,iz-blurR), hi = Math.Min(gnz-1,iz+blurR);
+                                for (int k = lo; k <= hi; k++) { sum += bakedGrid[k*gnx*gny+iy*gnx+ix]; cnt++; }
+                                temp[iz*gnx*gny+iy*gnx+ix] = sum / cnt;
+                            }
+                        }
+                    });
+                    // Copy temp → bakedGrid for next pass
+                    Array.Copy(temp, bakedGrid, bakedGrid.Length);
+                }
+                System.Diagnostics.Debug.WriteLine("[Splint] PHASE2b SDF smoothing done");
+            }
+
+            // (Floater removal already done in PHASE 1b, before closing)
+
+            // ── PHASE 4: Subtract tooth pockets (0.1mm offset) ──
+            System.Diagnostics.Debug.WriteLine("[Splint] PHASE4 Subtracting tooth pockets...");
+            System.Threading.Tasks.Parallel.For(0, gnz, iz => {
+                for(int iy=0;iy<gny;iy++) for(int ix=0;ix<gnx;ix++) {
+                    int vIdx = iz*gnx*gny+iy*gnx+ix;
+                    float blankVal = bakedGrid[vIdx];
+                    if (blankVal >= 0.5f) continue;
+                    double px = gox+ix*VS_MC, py = goy+iy*VS_MC, pz = goz+iz*VS_MC;
+                    var pt = new Vector3d(px, py, pz);
+                    float upVal01 = (float)upImpl01.Value(ref pt);
+                    float loVal01 = (float)loImpl01.Value(ref pt);
+                    bakedGrid[vIdx] = MathF.Max(blankVal, MathF.Max(-upVal01, -loVal01));
+                }
+            });
+
+            // ── PHASE 5: MC surface extraction ──
+            int finalInside = bakedGrid.Count(v => v < 0f);
+            System.Diagnostics.Debug.WriteLine($"[Splint] PHASE5 {finalInside} inside voxels → MC...");
+            if (finalInside == 0) return horseshoeFlat;
             var bakedDense = new DenseGrid3f(gnx,gny,gnz,float.MaxValue);
             for(int i=0;i<bakedGrid.Length;i++) bakedDense[i]=bakedGrid[i];
             var bakedImpl  = new DenseGridTrilinearImplicit(bakedDense, new Vector3f(gox,goy,goz), (float)VS_MC);
-            System.Diagnostics.Debug.WriteLine($"[Splint] Bake done. Running MC...");
             var mc = new MarchingCubes{Implicit=bakedImpl, Bounds=mcBounds, CubeSize=VS_MC, ParallelCompute=true};
             mc.Generate();
             System.Diagnostics.Debug.WriteLine($"[Splint] MC → {mc.Mesh?.TriangleCount} tris");
 
             if(mc.Mesh==null||mc.Mesh.TriangleCount==0) return horseshoeFlat;
-            var dm=mc.Mesh; var res=new float[dm.TriangleCount*9]; int ri=0;
+            var dm=mc.Mesh;
+
+            // ── PHASE 5b: Mesh-level floater removal — keep only largest component ──
+            {
+                var cc = new MeshConnectedComponents(dm);
+                cc.FindConnectedT();
+                if (cc.Count > 1) {
+                    // Find largest component
+                    int bestIdx = 0, bestSize = 0;
+                    for (int ci = 0; ci < cc.Count; ci++) {
+                        if (cc.Components[ci].Indices.Length > bestSize) {
+                            bestSize = cc.Components[ci].Indices.Length;
+                            bestIdx = ci;
+                        }
+                    }
+                    // Remove all triangles NOT in the largest component
+                    int removedTris = 0;
+                    for (int ci = 0; ci < cc.Count; ci++) {
+                        if (ci == bestIdx) continue;
+                        foreach (int tid in cc.Components[ci].Indices) {
+                            dm.RemoveTriangle(tid);
+                            removedTris++;
+                        }
+                    }
+                    dm.CompactInPlace();
+                    System.Diagnostics.Debug.WriteLine($"[Splint] PHASE5b Removed {removedTris} floater triangles ({cc.Count-1} small components), kept {dm.TriangleCount} tris");
+                }
+            }
+
+            var res=new float[dm.TriangleCount*9]; int ri=0;
             foreach(int tid in dm.TriangleIndices()){var t=dm.GetTriangle(tid);var va=dm.GetVertex(t.a);var vb=dm.GetVertex(t.b);var vc=dm.GetVertex(t.c);res[ri++]=(float)va.x;res[ri++]=(float)va.y;res[ri++]=(float)va.z;res[ri++]=(float)vb.x;res[ri++]=(float)vb.y;res[ri++]=(float)vb.z;res[ri++]=(float)vc.x;res[ri++]=(float)vc.y;res[ri++]=(float)vc.z;}
             return res.Length>=9?res:horseshoeFlat;
         }

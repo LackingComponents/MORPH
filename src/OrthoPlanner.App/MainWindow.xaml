@@ -976,6 +976,57 @@
                                 </ContextMenu>
                             </CheckBox.ContextMenu>
                         </CheckBox>
+
+                        <Border Width="1" Background="#FF3A4A5A" Margin="4,4,12,4"/>
+
+                        <CheckBox x:Name="DistanceMeasButton" Content="📏 Distance"
+                                  FontSize="11" Margin="0,0,12,0" VerticalAlignment="Center"
+                                  Checked="OnMeasurementToolChecked" Unchecked="OnMeasurementToolChecked"
+                                  Tag="Distance">
+                            <CheckBox.Style>
+                                <Style TargetType="CheckBox">
+                                    <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="CheckBox">
+                                                <TextBlock x:Name="txt" Text="{TemplateBinding Content}" 
+                                                           VerticalAlignment="Center" Cursor="Hand" />
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsChecked" Value="True">
+                                                        <Setter TargetName="txt" Property="Foreground" Value="#FF1B98E0" />
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </CheckBox.Style>
+                        </CheckBox>
+
+                        <CheckBox x:Name="AngleMeasButton" Content="📐 Angle"
+                                  FontSize="11" Margin="0,0,12,0" VerticalAlignment="Center"
+                                  Checked="OnMeasurementToolChecked" Unchecked="OnMeasurementToolChecked"
+                                  Tag="Angle">
+                            <CheckBox.Style>
+                                <Style TargetType="CheckBox">
+                                    <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="CheckBox">
+                                                <TextBlock x:Name="txt" Text="{TemplateBinding Content}" 
+                                                           VerticalAlignment="Center" Cursor="Hand" />
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsChecked" Value="True">
+                                                        <Setter TargetName="txt" Property="Foreground" Value="#FF1B98E0" />
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </CheckBox.Style>
+                        </CheckBox>
+
                     </StackPanel>
 
                     <!-- 3D Viewport. ShowViewCube="False" = custom NavCube active.
@@ -1094,10 +1145,57 @@
                     </Border>
                     
                     <!-- Overlay: placeholder text when no data -->
-                    <TextBlock Grid.Row="1" Text="Load a DICOM / CBCT folder to visualize"
-                               HorizontalAlignment="Center" VerticalAlignment="Center"
-                               FontSize="16" Foreground="{StaticResource TextSecondaryBrush}"
-                               Visibility="{Binding IsVolumeLoaded, Converter={StaticResource InverseBoolToVisibility}}" />
+                    <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Visibility="{Binding IsVolumeLoaded, Converter={StaticResource InverseBoolToVisibility}}">
+                        <Button Command="{Binding OpenDicomFolderCommand}"
+                                HorizontalAlignment="Center"
+                                Cursor="Hand">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="BtnBorder" Background="Transparent" CornerRadius="6" Padding="24,3,24,7" BorderBrush="Transparent" BorderThickness="1">
+                                        <TextBlock x:Name="BtnText" Text="Load CT Scan"
+                                                   FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" FontWeight="SemiBold" />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="BtnBorder" Property="Background" Value="#0FFFFFFF" />
+                                            <Setter TargetName="BtnBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                            <Setter TargetName="BtnText" Property="Foreground" Value="White" />
+                                        </Trigger>
+                                        <Trigger Property="IsPressed" Value="True">
+                                            <Setter TargetName="BtnBorder" Property="Background" Value="#1CFFFFFF" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                        
+                        <TextBlock Text="or" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}"
+                                   FontWeight="Normal" HorizontalAlignment="Center" Margin="0,2" />
+                        
+                        <Button Command="{Binding OpenProjectCommand}"
+                                HorizontalAlignment="Center"
+                                Cursor="Hand">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="BtnBorder" Background="Transparent" CornerRadius="6" Padding="24,3,24,7" BorderBrush="Transparent" BorderThickness="1">
+                                        <TextBlock x:Name="BtnText" Text="Open Project"
+                                                   FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" FontWeight="SemiBold" />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="BtnBorder" Property="Background" Value="#0FFFFFFF" />
+                                            <Setter TargetName="BtnBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                            <Setter TargetName="BtnText" Property="Foreground" Value="White" />
+                                        </Trigger>
+                                        <Trigger Property="IsPressed" Value="True">
+                                            <Setter TargetName="BtnBorder" Property="Background" Value="#1CFFFFFF" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                    </StackPanel>
                 </Grid>
             </Border>
 
