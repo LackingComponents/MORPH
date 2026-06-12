@@ -79,7 +79,9 @@ public partial class MainViewModel
         var group = new HelixToolkit.SharpDX.Model.Scene.GroupNode();
         group.AddChildNode(node);
         VolumeNode = group;
-        // Release large managed buffers held during texture upload
-        GC.Collect(2, GCCollectionMode.Aggressive, true, true);
+        // The large transient buffers (pixels + the marshalled byte[]) die with this
+        // scope; a non-blocking hint is enough. A blocking compacting Gen2 collect
+        // here froze the UI for seconds on large volumes.
+        GC.Collect(2, GCCollectionMode.Optimized, blocking: false);
     }
 }

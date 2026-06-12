@@ -35,7 +35,7 @@ public partial class MainViewModel
             // Add upper maxilla piece
             var upperVm = new SegmentViewModel
             {
-                Label = (byte)(Segments.Count + 1),
+                Label = NextSegmentLabel(),
                 Name = "Cranium (LeFort Upper)",
                 Vertices = MeshHelper.ToFlatArray(wizard.UpperMaxillaResult),
                 ColorR = 220, ColorG = 200, ColorB = 170,
@@ -48,7 +48,7 @@ public partial class MainViewModel
             // Add lower maxilla piece
             var lowerVm = new SegmentViewModel
             {
-                Label = (byte)(Segments.Count + 1),
+                Label = NextSegmentLabel(),
                 Name = "Maxilla (LeFort 1 Separated)",
                 Vertices = MeshHelper.ToFlatArray(wizard.LowerMaxillaResult),
                 ColorR = 120, ColorG = 220, ColorB = 210,
@@ -86,7 +86,7 @@ public partial class MainViewModel
 
             var leftVm = new SegmentViewModel
             {
-                Label = (byte)(Segments.Count + 1),
+                Label = NextSegmentLabel(),
                 Name  = "Maxilla Left (2-Piece)",
                 Vertices = MeshHelper.ToFlatArray(wizard.LeftResult),
                 ColorR = 100, ColorG = 200, ColorB = 255, IsVisible = true
@@ -97,7 +97,7 @@ public partial class MainViewModel
 
             var rightVm = new SegmentViewModel
             {
-                Label = (byte)(Segments.Count + 1),
+                Label = NextSegmentLabel(),
                 Name  = "Maxilla Right (2-Piece)",
                 Vertices = MeshHelper.ToFlatArray(wizard.RightResult),
                 ColorR = 120, ColorG = 220, ColorB = 210, IsVisible = true
@@ -133,7 +133,7 @@ public partial class MainViewModel
 
             var leftVm = new SegmentViewModel
             {
-                Label = (byte)(Segments.Count + 1),
+                Label = NextSegmentLabel(),
                 Name  = "Maxilla Left (3-Piece)",
                 Vertices = MeshHelper.ToFlatArray(wizard.LeftResult),
                 ColorR = 100, ColorG = 200, ColorB = 255, IsVisible = true
@@ -144,7 +144,7 @@ public partial class MainViewModel
 
             var rightVm = new SegmentViewModel
             {
-                Label = (byte)(Segments.Count + 1),
+                Label = NextSegmentLabel(),
                 Name  = "Maxilla Right (3-Piece)",
                 Vertices = MeshHelper.ToFlatArray(wizard.RightResult),
                 ColorR = 120, ColorG = 220, ColorB = 210, IsVisible = true
@@ -155,7 +155,7 @@ public partial class MainViewModel
 
             var centralVm = new SegmentViewModel
             {
-                Label = (byte)(Segments.Count + 1),
+                Label = NextSegmentLabel(),
                 Name  = "Maxilla Central / Premaxilla (3-Piece)",
                 Vertices = MeshHelper.ToFlatArray(wizard.CentralResult),
                 ColorR = 220, ColorG = 180, ColorB = 255, IsVisible = true
@@ -199,7 +199,7 @@ public partial class MainViewModel
             // Add remaining mandible piece (posterior/superior)
             var upperVm = new SegmentViewModel
             {
-                Label = (byte)(Segments.Count + 1),
+                Label = NextSegmentLabel(),
                 Name = targetSeg.Name + " (Chin Removed)",
                 Vertices = MeshHelper.ToFlatArray(wizard.UpperMandibleResult),
                 ColorR = targetSeg.ColorR, ColorG = targetSeg.ColorG, ColorB = targetSeg.ColorB,
@@ -212,7 +212,7 @@ public partial class MainViewModel
             // Add chin piece
             var lowerVm = new SegmentViewModel
             {
-                Label = (byte)(Segments.Count + 1),
+                Label = NextSegmentLabel(),
                 Name = "Chin Segment",
                 Vertices = MeshHelper.ToFlatArray(wizard.ChinSegmentResult),
                 ColorR = 120, ColorG = 220, ColorB = 160,
@@ -257,7 +257,7 @@ public partial class MainViewModel
             string sideName = wizard.IsLeftSide ? "Right" : "Left";
             var proxVm = new SegmentViewModel
             {
-                Label    = (byte)(Segments.Count + 1),
+                Label    = NextSegmentLabel(),
                 Name     = $"Ramus {sideName}",
                 Vertices = MeshHelper.ToFlatArray(wizard.ProximalResult),
                 ColorR = 120, ColorG = 160, ColorB = 240,
@@ -281,7 +281,7 @@ public partial class MainViewModel
                 if (origMandible != null) origMandible.IsVisible = false;
                 var distVm = new SegmentViewModel
                 {
-                    Label    = (byte)(Segments.Count + 1),
+                    Label    = NextSegmentLabel(),
                     Name     = "Mandible",
                     Vertices = MeshHelper.ToFlatArray(wizard.DistalResult),
                     ColorR = 220, ColorG = 140, ColorB = 120,
@@ -369,7 +369,7 @@ public partial class MainViewModel
                 {
                     var cranVm = new SegmentViewModel
                     {
-                        Label = (byte)(Segments.Count + 1),
+                        Label = NextSegmentLabel(),
                         Name = "Cranium (Split)",
                         ColorR = 220, ColorG = 200, ColorB = 170,
                         Vertices = MeshHelper.ToFlatArray(wizard.CraniumResult),
@@ -385,7 +385,7 @@ public partial class MainViewModel
                 {
                     var mandVm = new SegmentViewModel
                     {
-                        Label = (byte)(Segments.Count + 1),
+                        Label = NextSegmentLabel(),
                         Name = "Mandible (Split)",
                         ColorR = 220, ColorG = 140, ColorB = 120,
                         Vertices = MeshHelper.ToFlatArray(wizard.MandibleResult),
@@ -402,7 +402,6 @@ public partial class MainViewModel
                 }
 
                 RefreshCombinedModel();
-                GC.Collect(2, GCCollectionMode.Optimized, false);
                 StatusText = $"Split complete. Points saved: L=({LeftCondyleCenter?.X:F1},{LeftCondyleCenter?.Y:F1}), R=({RightCondyleCenter?.X:F1},{RightCondyleCenter?.Y:F1}), Mid=({DentalMidlinePoint?.X:F1},{DentalMidlinePoint?.Y:F1})";
             }
             else
@@ -418,8 +417,8 @@ public partial class MainViewModel
             StatusText = "Cranium/Mandible split failed.";
         }
 
-        // Force cleanup of wizard window's freed resources (EffectsManager, viewport geometry, mesh data)
-        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-        GC.Collect(2, GCCollectionMode.Aggressive, true, true);
+        // Nudge cleanup of wizard window's freed resources without blocking the UI
+        // thread - the previous blocking compacting collect froze the app for seconds.
+        GC.Collect(2, GCCollectionMode.Optimized, blocking: false);
     }
 }

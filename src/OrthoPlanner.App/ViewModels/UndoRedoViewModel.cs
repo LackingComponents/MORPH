@@ -15,6 +15,13 @@ public partial class MainViewModel
         public SegmentViewModel? HardTissueModel { get; init; }
         public SegmentViewModel? SoftTissueModel { get; init; }
         public SegmentViewModel? DentalModel { get; init; }
+
+        // Deep copies of vertex arrays at snapshot time. Several commands (BSSO,
+        // CleanMerge, AlignDentalScans, EditDentalCasts, NHP bake) mutate Vertices
+        // on the SAME object instances held by this snapshot, so keeping only the
+        // references would make Undo silently no-op for those operations.
+        public Dictionary<SegmentViewModel, float[]?> SegmentVertices { get; init; } = new();
+        public Dictionary<MeshViewModel, float[]?> MeshVertices { get; init; } = new();
     }
 
     private void SaveStateForUndo()
@@ -48,7 +55,7 @@ public partial class MainViewModel
 
     private StateSnapshot CreateStateSnapshot()
     {
-        return new StateSnapshot
+        var snapshot = new StateSnapshot
         {
             Segments = Segments.ToList(),
             ImportedMeshes = ImportedMeshes.ToList(),
@@ -56,6 +63,16 @@ public partial class MainViewModel
             SoftTissueModel = SoftTissueModel,
             DentalModel = DentalModel
         };
+
+        foreach (var s in snapshot.Segments)
+            snapshot.SegmentVertices[s] = (float[]?)s.Vertices?.Clone();
+        foreach (var s in new[] { HardTissueModel, SoftTissueModel, DentalModel })
+            if (s != null && !snapshot.SegmentVertices.ContainsKey(s))
+                snapshot.SegmentVertices[s] = (float[]?)s.Vertices?.Clone();
+        foreach (var m in snapshot.ImportedMeshes)
+            snapshot.MeshVertices[m] = (float[]?)m.Vertices?.Clone();
+
+        return snapshot;
     }
 
     private void RestoreStateSnapshot(StateSnapshot snapshot)
@@ -70,6 +87,23 @@ public partial class MainViewModel
         SoftTissueModel = snapshot.SoftTissueModel;
         DentalModel = snapshot.DentalModel;
 
+        // Revert any in-place vertex mutations; rebuild geometry only when needed.
+        foreach (var (seg, savedVerts) in snapshot.SegmentVertices)
+        {
+            if (SameVertices(seg.Vertices, savedVerts)) continue;
+            seg.Vertices = savedVerts;
+            seg.BuildModel();
+        }
+        foreach (var (mesh, savedVerts) in snapshot.MeshVertices)
+        {
+            if (SameVertices(mesh.Vertices, savedVerts)) continue;
+            mesh.Vertices = savedVerts;
+            mesh.BuildModel();
+        }
+
         RefreshCombinedModel();
     }
+
+    private static bool SameVertices(float[]? a, float[]? b)
+        => ReferenceEquals(a, b) || (a != null && b != null && a.AsSpan().SequenceEqual(b));
 }
