@@ -143,6 +143,37 @@ public static class SplintEngine
             // back face (so it's visible from below too)
             AddQuad(tris, outer[i],inner[i],inner[i+1],outer[i+1]);
         }
+
+        // ── Semicircular end-caps on the ribbon ──
+        float rcx = 0, rcy = 0;
+        for (int i = 0; i < n; i++) { rcx += archCurve[i].x; rcy += archCurve[i].y; }
+        rcx /= n; rcy /= n;
+        const int rCapSegs = 8;
+        for (int capEnd = 0; capEnd < 2; capEnd++)
+        {
+            int idx = capEnd == 0 ? 0 : n - 1;
+            var center = ((outer[idx].x+inner[idx].x)*0.5f, (outer[idx].y+inner[idx].y)*0.5f, outer[idx].z);
+            float dxD = outer[idx].x - inner[idx].x, dyD = outer[idx].y - inner[idx].y;
+            float dL = MathF.Sqrt(dxD*dxD + dyD*dyD);
+            if (dL < 1e-6f) continue;
+            float cR = dL * 0.5f, ux2 = dxD/dL, uy2 = dyD/dL;
+            float ppx = capEnd == 0 ? uy2 : -uy2, ppy = capEnd == 0 ? -ux2 : ux2;
+            float tmx = rcx - center.Item1, tmy = rcy - center.Item2;
+            if (ppx*tmx + ppy*tmy > 0) { ppx = -ppx; ppy = -ppy; }
+            for (int s = 0; s < rCapSegs; s++)
+            {
+                float a0 = MathF.PI*s/rCapSegs, a1 = MathF.PI*(s+1)/rCapSegs;
+                float ox0=cR*(ux2*MathF.Cos(a0)+ppx*MathF.Sin(a0)), oy0=cR*(uy2*MathF.Cos(a0)+ppy*MathF.Sin(a0));
+                float ox1=cR*(ux2*MathF.Cos(a1)+ppx*MathF.Sin(a1)), oy1=cR*(uy2*MathF.Cos(a1)+ppy*MathF.Sin(a1));
+                tris.Add(center.Item1);tris.Add(center.Item2);tris.Add(center.Item3);
+                tris.Add(center.Item1+ox0);tris.Add(center.Item2+oy0);tris.Add(center.Item3);
+                tris.Add(center.Item1+ox1);tris.Add(center.Item2+oy1);tris.Add(center.Item3);
+                tris.Add(center.Item1);tris.Add(center.Item2);tris.Add(center.Item3);
+                tris.Add(center.Item1+ox1);tris.Add(center.Item2+oy1);tris.Add(center.Item3);
+                tris.Add(center.Item1+ox0);tris.Add(center.Item2+oy0);tris.Add(center.Item3);
+            }
+        }
+
         return tris.ToArray();
     }
 
@@ -210,6 +241,7 @@ public static class SplintEngine
         float upperPenetrationMm    = 0f,   // + = deeper into teeth (cut moves caudally)
         float lowerPenetrationMm    = 0f,   // + = deeper into teeth (cut moves cranially)
         float lingualBuccalBiasMm   = 0f,   // + = shift center buccally, − = lingually
+        float bridgeThicknessMm     = 0f,   // extra thickness added to the bridge connection
         float[]? upperMesh          = null,
         float[]? lowerMesh          = null,
         int sampleCount             = 160)
@@ -246,7 +278,7 @@ public static class SplintEngine
             BO[i]=(lCx+nl.x*half, lCy+nl.y*half, l.z); BI[i]=(lCx-nl.x*half, lCy-nl.y*half, l.z);
         }
 
-        // ── Build horseshoe (closed by construction) ─────────────────────────
+        // ── Build horseshoe body (closed by construction) ─────────────────────
         var horseshoeTris = new List<float>(n * 6 * 2 * 9);
         for (int i = 0; i < n-1; i++)
         {
@@ -256,8 +288,48 @@ public static class SplintEngine
             AddQuad(horseshoeTris, TO[i], TI[i], TI[j], TO[j]);   // top face (normal +Z)
             AddQuad(horseshoeTris, BO[i], BO[j], BI[j], BI[i]);   // bottom face
         }
-        AddQuad(horseshoeTris, TI[0],   TO[0],   BO[0],   BI[0]);   // start cap (normal away)
-        AddQuad(horseshoeTris, TO[n-1], TI[n-1], BI[n-1], BO[n-1]); // end cap (normal away)
+
+        // Arch midpoint (for cap orientation)
+        float archMidX = (upper[n/2].x + lower[n/2].x) * 0.5f;
+        float archMidY = (upper[n/2].y + lower[n/2].y) * 0.5f;
+
+        // ── Semicircular end-caps ──
+        const int capSegs = 8;
+        for (int capEnd = 0; capEnd < 2; capEnd++)
+        {
+            int idx = capEnd == 0 ? 0 : n - 1;
+            var tCenter = ((TO[idx].x+TI[idx].x)*0.5f, (TO[idx].y+TI[idx].y)*0.5f, TO[idx].z);
+            var bCenter = ((BO[idx].x+BI[idx].x)*0.5f, (BO[idx].y+BI[idx].y)*0.5f, BO[idx].z);
+            float dxDir = TO[idx].x - TI[idx].x, dyDir = TO[idx].y - TI[idx].y;
+            float dLen = MathF.Sqrt(dxDir*dxDir + dyDir*dyDir);
+            if (dLen < 1e-6f) continue;
+            float capR = dLen * 0.5f, ux = dxDir/dLen, uy = dyDir/dLen;
+            float px_ = capEnd == 0 ? uy : -uy, py_ = capEnd == 0 ? -ux : ux;
+            float toMidX = archMidX - tCenter.Item1, toMidY = archMidY - tCenter.Item2;
+            if (px_*toMidX + py_*toMidY > 0) { px_ = -px_; py_ = -py_; }
+
+            var topPts = new (float x,float y,float z)[capSegs+1];
+            var botPts = new (float x,float y,float z)[capSegs+1];
+            for (int s = 0; s <= capSegs; s++)
+            {
+                float angle = MathF.PI * s / capSegs;
+                float offX = capR*(ux*MathF.Cos(angle) + px_*MathF.Sin(angle));
+                float offY = capR*(uy*MathF.Cos(angle) + py_*MathF.Sin(angle));
+                topPts[s] = (tCenter.Item1+offX, tCenter.Item2+offY, tCenter.Item3);
+                botPts[s] = (bCenter.Item1+offX, bCenter.Item2+offY, bCenter.Item3);
+            }
+            for (int s = 0; s < capSegs; s++)
+            {
+                horseshoeTris.Add(tCenter.Item1);horseshoeTris.Add(tCenter.Item2);horseshoeTris.Add(tCenter.Item3);
+                if (capEnd==0) { horseshoeTris.Add(topPts[s+1].x);horseshoeTris.Add(topPts[s+1].y);horseshoeTris.Add(topPts[s+1].z); horseshoeTris.Add(topPts[s].x);horseshoeTris.Add(topPts[s].y);horseshoeTris.Add(topPts[s].z); }
+                else { horseshoeTris.Add(topPts[s].x);horseshoeTris.Add(topPts[s].y);horseshoeTris.Add(topPts[s].z); horseshoeTris.Add(topPts[s+1].x);horseshoeTris.Add(topPts[s+1].y);horseshoeTris.Add(topPts[s+1].z); }
+                horseshoeTris.Add(bCenter.Item1);horseshoeTris.Add(bCenter.Item2);horseshoeTris.Add(bCenter.Item3);
+                if (capEnd==0) { horseshoeTris.Add(botPts[s].x);horseshoeTris.Add(botPts[s].y);horseshoeTris.Add(botPts[s].z); horseshoeTris.Add(botPts[s+1].x);horseshoeTris.Add(botPts[s+1].y);horseshoeTris.Add(botPts[s+1].z); }
+                else { horseshoeTris.Add(botPts[s+1].x);horseshoeTris.Add(botPts[s+1].y);horseshoeTris.Add(botPts[s+1].z); horseshoeTris.Add(botPts[s].x);horseshoeTris.Add(botPts[s].y);horseshoeTris.Add(botPts[s].z); }
+                if (capEnd==0) AddQuad(horseshoeTris, topPts[s+1], topPts[s], botPts[s], botPts[s+1]);
+                else AddQuad(horseshoeTris, topPts[s], topPts[s+1], botPts[s+1], botPts[s]);
+            }
+        }
         float[] horseshoeFlat = horseshoeTris.ToArray();
 
         if (upperMesh == null || upperMesh.Length < 9 ||
@@ -340,8 +412,6 @@ public static class SplintEngine
             }
 
             // ── Posterior limit: compute the curved boundary from horseshoe end-caps ──
-            float archMidX = (upper[n/2].x + lower[n/2].x) * 0.5f;
-            float archMidY = (upper[n/2].y + lower[n/2].y) * 0.5f;
             float Cap0Cx = (TO[0].x + TI[0].x + BO[0].x + BI[0].x) * 0.25f;
             float Cap0Cy = (TO[0].y + TI[0].y + BO[0].y + BI[0].y) * 0.25f;
             float CapNCx = (TO[n-1].x + TI[n-1].x + BO[n-1].x + BI[n-1].x) * 0.25f;
@@ -362,28 +432,20 @@ public static class SplintEngine
                 return d0 >= -0.5f && dN >= -0.5f;
             }
 
-            float[] upCrop=Crop(upperMesh), loCrop=Crop(lowerMesh), hoCrop=Crop(horseshoeFlat);
-            System.Diagnostics.Debug.WriteLine($"[Splint] Cropped tris: up={upCrop.Length/9} lo={loCrop.Length/9} horse={hoCrop.Length/9}");
-            if(upCrop.Length<9||loCrop.Length<9||hoCrop.Length<9) return horseshoeFlat;
+            float[] upCrop=Crop(upperMesh), loCrop=Crop(lowerMesh);
+            System.Diagnostics.Debug.WriteLine($"[Splint] Cropped tris: up={upCrop.Length/9} lo={loCrop.Length/9}");
+            if(upCrop.Length<9||loCrop.Length<9) return horseshoeFlat;
 
-            var horseBase = BaseSdf(hoCrop, 4.0);
             var upBase    = BaseSdf(upCrop);
             var loBase    = BaseSdf(loCrop);
-            if(horseBase==null||upBase==null||loBase==null) return horseshoeFlat;
+            if(upBase==null||loBase==null) return horseshoeFlat;
 
-            var horseImpl = horseBase;
             var upImpl1   = Offset(upBase,  -Dil1);
             var loImpl1   = Offset(loBase,  -Dil1);
             var upImpl01  = Offset(upBase,  -Dil01);
             var loImpl01  = Offset(loBase,  -Dil01);
 
-            // Raw blank = horseshoe ∪ upper1mm ∪ lower1mm (NO envelope intersection)
-            BoundedImplicitFunction3d rawBlank = new ImplicitUnion3d{A=horseImpl,B=new ImplicitUnion3d{A=upImpl1,B=loImpl1}};
-
-            // Subtract tooth pockets
-            BoundedImplicitFunction3d pocketed = new ImplicitDifference3d{A=new ImplicitDifference3d{A=rawBlank,B=upImpl01},B=loImpl01};
-
-            // ── Pre-bake the combined SDF with per-voxel Z-clipping ─────────
+            // ── PHASE 1: Bake blank SDF (upper_1mm ∪ lower_1mm, Z-clipped at arch surfaces) ──
             float mcPad = (float)(labiolingualMm*0.5 + Math.Abs(lingualBuccalBiasMm) + 4.0);
             float zPadTop = Math.Max(upperPenetrationMm, 0f) + 2.0f;
             float zPadBot = Math.Max(lowerPenetrationMm, 0f) + 2.0f;
@@ -395,47 +457,237 @@ public static class SplintEngine
             int gnz=(int)Math.Ceiling(mcBounds.Depth /VS_MC)+1;
             float gox=(float)mcBounds.Min.x, goy=(float)mcBounds.Min.y, goz=(float)mcBounds.Min.z;
             var bakedGrid = new float[gnx*gny*gnz];
-            System.Diagnostics.Debug.WriteLine($"[Splint] Baking SDF {gnx}x{gny}x{gnz}={gnx*gny*gnz/1_000_000}M voxels...");
+            System.Diagnostics.Debug.WriteLine($"[Splint] PHASE1 Baking blank {gnx}x{gny}x{gnz}={gnx*gny*gnz/1_000_000}M voxels...");
             System.Threading.Tasks.Parallel.For(0, gnz, iz => {
                 for(int iy=0;iy<gny;iy++) for(int ix=0;ix<gnx;ix++) {
                     double px = gox+ix*VS_MC, py = goy+iy*VS_MC, pz = goz+iz*VS_MC;
+                    int vIdx = iz*gnx*gny+iy*gnx+ix;
 
-                    // ── Per-voxel Z-clip at exact user-defined horseshoe surfaces ──
-                    // Upper cut: material must be BELOW the upper arch surface
-                    //   upperPenetration > 0 → cut moves down (caudally) → allows more tooth engagement
+                    // Z-clip at exact user-defined horseshoe surfaces (per-point Z following arch contour)
                     float upperCutZ = NearestUpperZ(px, py) - upperPenetrationMm;
-                    // Lower cut: material must be ABOVE the lower arch surface
-                    //   lowerPenetration > 0 → cut moves up (cranially) → allows more tooth engagement
                     float lowerCutZ = NearestLowerZ(px, py) + lowerPenetrationMm;
-
                     if ((float)pz > upperCutZ || (float)pz < lowerCutZ)
-                    {
-                        bakedGrid[iz*gnx*gny+iy*gnx+ix] = 1.0f; // outside
-                        continue;
-                    }
+                    { bakedGrid[vIdx] = 1.0f; continue; }
 
-                    // ── Posterior limit: curved boundary ──
+                    // Posterior limit
                     if (!IsAnteriorToPosteriorLimit(px, py))
-                    {
-                        bakedGrid[iz*gnx*gny+iy*gnx+ix] = 1.0f; // outside
-                        continue;
-                    }
+                    { bakedGrid[vIdx] = 1.0f; continue; }
 
-                    var pt=new Vector3d(px, py, pz);
-                    bakedGrid[iz*gnx*gny+iy*gnx+ix]=(float)pocketed.Value(ref pt);
+                    // Raw blank = upper_1mm ∪ lower_1mm (NO horseshoe SDF)
+                    var pt = new Vector3d(px, py, pz);
+                    float upVal1 = (float)upImpl1.Value(ref pt);
+                    float loVal1 = (float)loImpl1.Value(ref pt);
+                    bakedGrid[vIdx] = MathF.Min(upVal1, loVal1);
                 }
             });
-            // Wrap in DenseGrid3f → DenseGridTrilinearImplicit for MC (O(1) lookup per corner)
+
+            // ── PHASE 1b: Remove floaters BEFORE closing (BFS from arch centroid) ──
+            {
+                int totalVox = gnx*gny*gnz;
+                int insideCount = 0;
+                for (int i = 0; i < totalVox; i++) if (bakedGrid[i] < 0) insideCount++;
+                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE1b {insideCount} inside voxels before floater removal");
+                if (insideCount == 0) return horseshoeFlat;
+
+                var visited = new bool[totalVox];
+                var queue = new Queue<int>();
+                float seedX = archMidX, seedY = archMidY, seedZ = (upperZ + lowerZ) * 0.5f;
+                int bestSeed = -1; float bestSeedD = float.MaxValue;
+                for (int iz2 = 0; iz2 < gnz; iz2++) for (int iy2 = 0; iy2 < gny; iy2++) for (int ix2 = 0; ix2 < gnx; ix2++) {
+                    int idx2 = iz2*gnx*gny+iy2*gnx+ix2;
+                    if (bakedGrid[idx2] >= 0) continue;
+                    float dx2 = gox+ix2*(float)VS_MC-seedX, dy2 = goy+iy2*(float)VS_MC-seedY, dz2 = goz+iz2*(float)VS_MC-seedZ;
+                    float d = dx2*dx2+dy2*dy2+dz2*dz2;
+                    if (d < bestSeedD) { bestSeedD = d; bestSeed = idx2; }
+                }
+                if (bestSeed < 0) return horseshoeFlat;
+                queue.Enqueue(bestSeed); visited[bestSeed] = true;
+                int mainSize = 0;
+                int[] dxN={1,-1,0,0,0,0}, dyN={0,0,1,-1,0,0}, dzN={0,0,0,0,1,-1};
+                while (queue.Count > 0) {
+                    int ci = queue.Dequeue(); mainSize++;
+                    int cz = ci/(gnx*gny), crem = ci%(gnx*gny), cy = crem/gnx, cx = crem%gnx;
+                    for (int d = 0; d < 6; d++) {
+                        int nx2=cx+dxN[d], ny2=cy+dyN[d], nz2=cz+dzN[d];
+                        if (nx2<0||nx2>=gnx||ny2<0||ny2>=gny||nz2<0||nz2>=gnz) continue;
+                        int ni = nz2*gnx*gny+ny2*gnx+nx2;
+                        if (!visited[ni] && bakedGrid[ni] < 0) { visited[ni]=true; queue.Enqueue(ni); }
+                    }
+                }
+                int removed = 0;
+                for (int i = 0; i < totalVox; i++) {
+                    if (bakedGrid[i] < 0 && !visited[i]) { bakedGrid[i] = 1.0f; removed++; }
+                }
+                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE1b Kept {mainSize} voxels, removed {removed} floaters");
+            }
+
+            // ── PHASE 2: GPU morphological closing on PADDED coarse grid ──
+            // Padding by closeR on all faces ensures dilation never hits the volume
+            // boundary, so erosion fully retracts — no boundary artifacts.
+            float maxGap = 0;
+            for (int i = 0; i < n; i++) {
+                float gap = MathF.Abs(upper[i].z - lower[i].z);
+                if (gap > maxGap) maxGap = gap;
+            }
+            const float coarseVS = 0.5f;
+            int closeR = (int)MathF.Ceiling(maxGap * 0.55f / coarseVS);
+            closeR = Math.Clamp(closeR, 2, 30);
+            System.Diagnostics.Debug.WriteLine($"[Splint] PHASE2 GPU closing: maxGap={maxGap:F1}mm closeR={closeR} coarseVS={coarseVS}");
+
+            // Coarse grid dimensions WITH padding
+            int pad = closeR + 1; // padding on each side
+            int cnxBase = (int)Math.Ceiling(mcBounds.Width  / coarseVS) + 1;
+            int cnyBase = (int)Math.Ceiling(mcBounds.Height / coarseVS) + 1;
+            int cnzBase = (int)Math.Ceiling(mcBounds.Depth  / coarseVS) + 1;
+            int cnx = cnxBase + 2*pad;
+            int cny = cnyBase + 2*pad;
+            int cnz = cnzBase + 2*pad;
+            var coarse = new byte[cnx * cny * cnz]; // all zeros = outside (padding is empty)
+            System.Diagnostics.Debug.WriteLine($"[Splint] PHASE2 padded coarse grid {cnx}x{cny}x{cnz} (pad={pad}), {cnx*cny*cnz/1000}K voxels");
+
+            // Fill interior (offset by pad) from fine SDF
+            for (int ciz = 0; ciz < cnzBase; ciz++) for (int ciy = 0; ciy < cnyBase; ciy++) for (int cix = 0; cix < cnxBase; cix++) {
+                int fix = Math.Clamp((int)(cix * coarseVS / VS_MC), 0, gnx-1);
+                int fiy = Math.Clamp((int)(ciy * coarseVS / VS_MC), 0, gny-1);
+                int fiz = Math.Clamp((int)(ciz * coarseVS / VS_MC), 0, gnz-1);
+                if (bakedGrid[fiz*gnx*gny + fiy*gnx + fix] < 0)
+                    coarse[(ciz+pad)*cnx*cny + (ciy+pad)*cnx + (cix+pad)] = 1;
+            }
+
+            // GPU: close (bridge the gap between arches)
+            byte[] closed;
+            using (var gpu = new GpuMorphology3D()) {
+                closed = gpu.Close(coarse, cnx, cny, cnz, closeR);
+                // Extra thickness?
+                if (bridgeThicknessMm > 0.01f) {
+                    int dilateR = (int)MathF.Ceiling(bridgeThicknessMm / coarseVS);
+                    closed = gpu.Dilate(closed, cnx, cny, cnz, dilateR);
+                }
+            }
+            System.Diagnostics.Debug.WriteLine("[Splint] PHASE2 GPU closing done");
+
+            // Apply closed result back to fine grid (reading from padded coordinates)
+            System.Threading.Tasks.Parallel.For(0, gnz, iz => {
+                for (int iy = 0; iy < gny; iy++) for (int ix = 0; ix < gnx; ix++) {
+                    int vIdx = iz*gnx*gny + iy*gnx + ix;
+                    if (bakedGrid[vIdx] < 0) continue; // already inside
+                    // Map fine voxel to padded coarse grid
+                    int cix = Math.Clamp((int)(ix * VS_MC / coarseVS), 0, cnxBase-1) + pad;
+                    int ciy = Math.Clamp((int)(iy * VS_MC / coarseVS), 0, cnyBase-1) + pad;
+                    int ciz = Math.Clamp((int)(iz * VS_MC / coarseVS), 0, cnzBase-1) + pad;
+                    if (closed[ciz*cnx*cny + ciy*cnx + cix] == 1)
+                        bakedGrid[vIdx] = -0.5f;
+                }
+            });
+
+            // ── PHASE 2b: SDF smoothing (separable box blur) ──
+            // Smooth the blank SDF BEFORE pocket subtraction so pockets stay precise.
+            // 3 passes of box blur with radius 2 ≈ Gaussian σ≈2.4 voxels.
+            {
+                int blurR = 2, blurPasses = 3;
+                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE2b SDF smoothing: blurR={blurR} passes={blurPasses}");
+                var temp = new float[bakedGrid.Length];
+
+                for (int pass = 0; pass < blurPasses; pass++) {
+                    // Blur X
+                    System.Threading.Tasks.Parallel.For(0, gnz, iz => {
+                        for (int iy = 0; iy < gny; iy++) {
+                            int rowBase = iz*gnx*gny + iy*gnx;
+                            for (int ix = 0; ix < gnx; ix++) {
+                                float sum = 0; int cnt = 0;
+                                int lo = Math.Max(0,ix-blurR), hi = Math.Min(gnx-1,ix+blurR);
+                                for (int k = lo; k <= hi; k++) { sum += bakedGrid[rowBase+k]; cnt++; }
+                                temp[rowBase+ix] = sum / cnt;
+                            }
+                        }
+                    });
+                    // Blur Y
+                    System.Threading.Tasks.Parallel.For(0, gnz, iz => {
+                        for (int ix = 0; ix < gnx; ix++) {
+                            for (int iy = 0; iy < gny; iy++) {
+                                float sum = 0; int cnt = 0;
+                                int lo = Math.Max(0,iy-blurR), hi = Math.Min(gny-1,iy+blurR);
+                                for (int k = lo; k <= hi; k++) { sum += temp[iz*gnx*gny+k*gnx+ix]; cnt++; }
+                                bakedGrid[iz*gnx*gny+iy*gnx+ix] = sum / cnt;
+                            }
+                        }
+                    });
+                    // Blur Z
+                    System.Threading.Tasks.Parallel.For(0, gny, iy => {
+                        for (int ix = 0; ix < gnx; ix++) {
+                            for (int iz = 0; iz < gnz; iz++) {
+                                float sum = 0; int cnt = 0;
+                                int lo = Math.Max(0,iz-blurR), hi = Math.Min(gnz-1,iz+blurR);
+                                for (int k = lo; k <= hi; k++) { sum += bakedGrid[k*gnx*gny+iy*gnx+ix]; cnt++; }
+                                temp[iz*gnx*gny+iy*gnx+ix] = sum / cnt;
+                            }
+                        }
+                    });
+                    // Copy temp → bakedGrid for next pass
+                    Array.Copy(temp, bakedGrid, bakedGrid.Length);
+                }
+                System.Diagnostics.Debug.WriteLine("[Splint] PHASE2b SDF smoothing done");
+            }
+
+            // (Floater removal already done in PHASE 1b, before closing)
+
+            // ── PHASE 4: Subtract tooth pockets (0.1mm offset) ──
+            System.Diagnostics.Debug.WriteLine("[Splint] PHASE4 Subtracting tooth pockets...");
+            System.Threading.Tasks.Parallel.For(0, gnz, iz => {
+                for(int iy=0;iy<gny;iy++) for(int ix=0;ix<gnx;ix++) {
+                    int vIdx = iz*gnx*gny+iy*gnx+ix;
+                    float blankVal = bakedGrid[vIdx];
+                    if (blankVal >= 0.5f) continue;
+                    double px = gox+ix*VS_MC, py = goy+iy*VS_MC, pz = goz+iz*VS_MC;
+                    var pt = new Vector3d(px, py, pz);
+                    float upVal01 = (float)upImpl01.Value(ref pt);
+                    float loVal01 = (float)loImpl01.Value(ref pt);
+                    bakedGrid[vIdx] = MathF.Max(blankVal, MathF.Max(-upVal01, -loVal01));
+                }
+            });
+
+            // ── PHASE 5: MC surface extraction ──
+            int finalInside = bakedGrid.Count(v => v < 0f);
+            System.Diagnostics.Debug.WriteLine($"[Splint] PHASE5 {finalInside} inside voxels → MC...");
+            if (finalInside == 0) return horseshoeFlat;
             var bakedDense = new DenseGrid3f(gnx,gny,gnz,float.MaxValue);
             for(int i=0;i<bakedGrid.Length;i++) bakedDense[i]=bakedGrid[i];
             var bakedImpl  = new DenseGridTrilinearImplicit(bakedDense, new Vector3f(gox,goy,goz), (float)VS_MC);
-            System.Diagnostics.Debug.WriteLine($"[Splint] Bake done. Running MC...");
             var mc = new MarchingCubes{Implicit=bakedImpl, Bounds=mcBounds, CubeSize=VS_MC, ParallelCompute=true};
             mc.Generate();
             System.Diagnostics.Debug.WriteLine($"[Splint] MC → {mc.Mesh?.TriangleCount} tris");
 
             if(mc.Mesh==null||mc.Mesh.TriangleCount==0) return horseshoeFlat;
-            var dm=mc.Mesh; var res=new float[dm.TriangleCount*9]; int ri=0;
+            var dm=mc.Mesh;
+
+            // ── PHASE 5b: Mesh-level floater removal — keep only largest component ──
+            {
+                var cc = new MeshConnectedComponents(dm);
+                cc.FindConnectedT();
+                if (cc.Count > 1) {
+                    // Find largest component
+                    int bestIdx = 0, bestSize = 0;
+                    for (int ci = 0; ci < cc.Count; ci++) {
+                        if (cc.Components[ci].Indices.Length > bestSize) {
+                            bestSize = cc.Components[ci].Indices.Length;
+                            bestIdx = ci;
+                        }
+                    }
+                    // Remove all triangles NOT in the largest component
+                    int removedTris = 0;
+                    for (int ci = 0; ci < cc.Count; ci++) {
+                        if (ci == bestIdx) continue;
+                        foreach (int tid in cc.Components[ci].Indices) {
+                            dm.RemoveTriangle(tid);
+                            removedTris++;
+                        }
+                    }
+                    dm.CompactInPlace();
+                    System.Diagnostics.Debug.WriteLine($"[Splint] PHASE5b Removed {removedTris} floater triangles ({cc.Count-1} small components), kept {dm.TriangleCount} tris");
+                }
+            }
+
+            var res=new float[dm.TriangleCount*9]; int ri=0;
             foreach(int tid in dm.TriangleIndices()){var t=dm.GetTriangle(tid);var va=dm.GetVertex(t.a);var vb=dm.GetVertex(t.b);var vc=dm.GetVertex(t.c);res[ri++]=(float)va.x;res[ri++]=(float)va.y;res[ri++]=(float)va.z;res[ri++]=(float)vb.x;res[ri++]=(float)vb.y;res[ri++]=(float)vb.z;res[ri++]=(float)vc.x;res[ri++]=(float)vc.y;res[ri++]=(float)vc.z;}
             return res.Length>=9?res:horseshoeFlat;
         }
