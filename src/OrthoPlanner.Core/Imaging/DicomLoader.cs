@@ -50,14 +50,7 @@ public static class DicomLoader
                     seriesSlices[seriesUid] = new List<(string, double)>();
                 }
 
-                double slicePos = dcm.Dataset.GetSingleValueOrDefault(DicomTag.SliceLocation, 0.0);
-                if (slicePos == 0.0 && dcm.Dataset.Contains(DicomTag.ImagePositionPatient))
-                {
-                    var ipp = dcm.Dataset.GetValues<double>(DicomTag.ImagePositionPatient);
-                    if (ipp.Length >= 3) slicePos = ipp[2];
-                }
-
-                seriesSlices[seriesUid].Add((filePath, slicePos));
+                seriesSlices[seriesUid].Add((filePath, GetSlicePosition(dcm.Dataset)));
             }
             catch { /* Skip unreadable files */ }
 
@@ -155,13 +148,7 @@ public static class DicomLoader
                 var dcm = await DicomFile.OpenAsync(filePath);
                 if (!dcm.Dataset.Contains(DicomTag.PixelData)) continue;
 
-                double slicePos = dcm.Dataset.GetSingleValueOrDefault(DicomTag.SliceLocation, 0.0);
-                if (slicePos == 0.0 && dcm.Dataset.Contains(DicomTag.ImagePositionPatient))
-                {
-                    var ipp = dcm.Dataset.GetValues<double>(DicomTag.ImagePositionPatient);
-                    if (ipp.Length >= 3) slicePos = ipp[2];
-                }
-                slices.Add((filePath, slicePos));
+                slices.Add((filePath, GetSlicePosition(dcm.Dataset)));
             }
             catch { continue; }
         }
@@ -186,11 +173,18 @@ public static class DicomLoader
             if (ps.Length >= 2) { psY = ps[0]; psX = ps[1]; }
         }
 
+        // Median inter-slice delta across the whole series: robust against a single
+        // duplicated/missing slice or a bad first gap, which would otherwise scale
+        // the entire volume wrong along Z.
         double sliceSpacing = 1.0;
         if (slices.Count > 1)
         {
-            sliceSpacing = Math.Abs(slices[1].SlicePosition - slices[0].SlicePosition);
-            if (sliceSpacing < 0.001) sliceSpacing = 1.0;
+            var deltas = new List<double>(slices.Count - 1);
+            for (int i = 1; i < slices.Count; i++)
+                deltas.Add(Math.Abs(slices[i].SlicePosition - slices[i - 1].SlicePosition));
+            deltas.Sort();
+            double median = deltas[deltas.Count / 2];
+            if (median > 0.001) sliceSpacing = median;
         }
 
         var volume = new VolumeData(width, height, depth, [psX, psY, sliceSpacing]);
@@ -203,6 +197,7 @@ public static class DicomLoader
         // Each file is re-opened with FileReadOption.ReadAll to guarantee that pixel
         // bytes are fully loaded into memory ÔÇö avoids fo-dicom's lazy IByteBuffer
         // returning garbage for Implicit VR / large-tag deferred reads.
+        int failedSlices = 0;
         for (int z = 0; z < depth; z++)
         {
             try
@@ -251,7 +246,7 @@ public static class DicomLoader
             }
             catch
             {
-                // Failed slice ÔåÆ fill with air so volume isn't corrupted
+                failedSlices++;
                 for (int y = 0; y < height; y++)
                 for (int x = 0; x < width; x++)
                     volume.SetVoxel(x, y, z, -1000);
@@ -260,8 +255,42 @@ public static class DicomLoader
             progress?.Invoke((double)(z + 1) / depth);
         }
 
+        // A surgical plan must never be built on a volume with silently missing
+        // anatomy — surface the failure instead of shipping air-filled slices.
+        if (failedSlices > 0)
+            throw new InvalidOperationException(
+                $"{failedSlices}/{depth} slices failed to decode (likely a compressed transfer syntax without the codec). Volume is incomplete.");
+
         volume.ComputeMinMax();
         return volume;
+    }
+
+    /// <summary>
+    /// Sort position of a slice along the stacking axis.
+    /// Prefers ImagePositionPatient projected onto the slice normal (cross product of
+    /// the ImageOrientationPatient row/column vectors), which is correct for tilted
+    /// and oblique acquisitions. Falls back to raw IPP Z, then SliceLocation (using
+    /// Contains rather than a 0.0 sentinel, since 0 is a legitimate location), then
+    /// InstanceNumber as a last resort.
+    /// </summary>
+    private static double GetSlicePosition(DicomDataset ds)
+    {
+        if (ds.TryGetValues(DicomTag.ImagePositionPatient, out double[]? ipp) && ipp.Length >= 3)
+        {
+            if (ds.TryGetValues(DicomTag.ImageOrientationPatient, out double[]? iop) && iop.Length >= 6)
+            {
+                double nx = iop[1] * iop[5] - iop[2] * iop[4];
+                double ny = iop[2] * iop[3] - iop[0] * iop[5];
+                double nz = iop[0] * iop[4] - iop[1] * iop[3];
+                return ipp[0] * nx + ipp[1] * ny + ipp[2] * nz;
+            }
+            return ipp[2];
+        }
+
+        if (ds.Contains(DicomTag.SliceLocation))
+            return ds.GetSingleValueOrDefault(DicomTag.SliceLocation, 0.0);
+
+        return ds.GetSingleValueOrDefault(DicomTag.InstanceNumber, 0);
     }
 
     private static string FormatDicomDate(string dicomDate)
