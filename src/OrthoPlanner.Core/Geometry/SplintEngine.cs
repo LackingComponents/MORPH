@@ -252,19 +252,26 @@ public static class SplintEngine
             warnings.Add("Dental surfaces are the CT-bone fallback, not registered intraoral scans — "
                        + "seating accuracy is reduced. Import upper/lower intraoral scans for a clinical splint.");
 
-        float[] soup = GenerateSplintSoup(upperCurve, lowerCurve, config, upperMesh, lowerMesh);
+        var diag = new GenDiagnostics();
+        float[] soup = GenerateSplintSoup(upperCurve, lowerCurve, config, upperMesh, lowerMesh, diag);
         if (soup.Length < 9)
         {
             warnings.Add("Splint generation produced no geometry.");
             return new SplintResult(Array.Empty<float>(), false, 1f, 0, warnings);
         }
 
+        if (diag.MinThicknessFixes > 0)
+            warnings.Add($"Thickened {diag.MinThicknessFixes} thin spot(s) to the {config.MinThicknessMm:F1} mm minimum.");
+        if (config.FlagIncidentalPerforations && diag.IncidentalPerforations > 0)
+            warnings.Add($"{diag.IncidentalPerforations} spot(s) are below the {config.MinThicknessMm:F1} mm "
+                       + "minimum thickness and may perforate — enable min-thickness enforcement or thicken the bridge.");
+
         if (!config.GuaranteeManifold)
         {
             float open = WatertightScore(soup);
             if (open > 1e-4f)
                 warnings.Add($"Output is not watertight (open-edge fraction {open:P1}); manifold guarantee is off.");
-            return new SplintResult(soup, open <= 1e-4f, open, 0, warnings);
+            return new SplintResult(soup, open <= 1e-4f, open, diag.IncidentalPerforations, warnings);
         }
 
         var rep = SplintMeshRepair.Repair(soup);
@@ -274,7 +281,17 @@ public static class SplintEngine
         else if (rep.BoundaryLoopsFilled > 0)
             warnings.Add($"Sealed {rep.BoundaryLoopsFilled} stray boundary loop(s) during manifold repair.");
 
-        return new SplintResult(rep.Vertices, rep.IsManifold, rep.OpenEdgeFraction, 0, warnings);
+        return new SplintResult(rep.Vertices, rep.IsManifold, rep.OpenEdgeFraction,
+                                diag.IncidentalPerforations, warnings);
+    }
+
+    /// <summary>Mutable diagnostics channel: the soup builder fills these in-place so
+    /// the public entry point can surface them without threading out-params through
+    /// every early-return path.</summary>
+    private sealed class GenDiagnostics
+    {
+        public int IncidentalPerforations;   // sub-min-thickness spots left unfixed
+        public int MinThicknessFixes;        // thin spots thickened to the minimum
     }
 
     // ── Core geometry: pose-agnostic triangle-soup builder (no manifold guarantee). ──
@@ -283,7 +300,8 @@ public static class SplintEngine
         List<(float x,float y,float z)> lowerCurve,
         SplintConfig config,
         float[]? upperMesh = null,
-        float[]? lowerMesh = null)
+        float[]? lowerMesh = null,
+        GenDiagnostics? diag = null)
     {
         // Map config → the local names the geometry body below already uses.
         float labiolingualMm      = config.LabiolingualMm;
@@ -494,8 +512,11 @@ public static class SplintEngine
 
             // ── PHASE 1: Bake blank SDF (upper_1mm ∪ lower_1mm, Z-clipped at arch surfaces) ──
             float mcPad = (float)(labiolingualMm*0.5 + Math.Abs(lingualBuccalBiasMm) + 4.0);
-            float zPadTop = Math.Max(upperPenetrationMm, 0f) + 2.0f;
-            float zPadBot = Math.Max(lowerPenetrationMm, 0f) + 2.0f;
+            // Reserve apical room for a buccal flange so it isn't clipped by the grid.
+            float upFlangePad = (config.BuccalFlangeDepthMm > 0f &&  config.FlangeOnUpper) ? config.BuccalFlangeDepthMm : 0f;
+            float loFlangePad = (config.BuccalFlangeDepthMm > 0f && !config.FlangeOnUpper) ? config.BuccalFlangeDepthMm : 0f;
+            float zPadTop = Math.Max(upperPenetrationMm, 0f) + 2.0f + upFlangePad;
+            float zPadBot = Math.Max(lowerPenetrationMm, 0f) + 2.0f + loFlangePad;
             var mcBounds = new AxisAlignedBox3d(
                 new Vector3d(mnX-mcPad, mnY-mcPad, lowerZ-zPadBot-1.0),
                 new Vector3d(mxX+mcPad, mxY+mcPad, upperZ+zPadTop+1.0));
@@ -692,6 +713,280 @@ public static class SplintEngine
                     bakedGrid[vIdx] = MathF.Max(blankVal, MathF.Max(-upVal01, -loVal01));
                 }
             });
+
+            // ── PHASE 4e: Buccal flange (apical fixation skirt) ──
+            // A distinct structural feature — NOT the lingual-buccal ribbon bias. We
+            // extrude the wafer's buccal rim apically along one arch by the requested
+            // depth, then relieve it against the tooth so it still seats. Fixation
+            // screw holes (HoleKind.Fixation) are carved through it in PHASE 4d.
+            if (config.BuccalFlangeDepthMm > 0f)
+            {
+                float flangeDepth = config.BuccalFlangeDepthMm;
+                bool onUpper = config.FlangeOnUpper;
+                var flangeArch = onUpper ? upper : lower;
+                var flangeImpl01 = onUpper ? upImpl01 : loImpl01;
+                float vs = (float)VS_MC;
+                long planeStride = (long)gnx * gny;
+                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE4e buccal flange depth={flangeDepth:F1}mm onUpper={onUpper}");
+
+                // Nearest arch point + whether a column lies on the buccal (outer) side.
+                bool IsBuccal(double qx, double qy)
+                {
+                    float bestD = float.MaxValue, archDc = 0f;
+                    foreach (var pt in flangeArch)
+                    {
+                        float dx = (float)qx - pt.x, dy = (float)qy - pt.y, d = dx * dx + dy * dy;
+                        if (d < bestD)
+                        {
+                            bestD = d;
+                            float adx = pt.x - archMidX, ady = pt.y - archMidY;
+                            archDc = adx * adx + ady * ady;
+                        }
+                    }
+                    float vdx = (float)qx - archMidX, vdy = (float)qy - archMidY;
+                    return (vdx * vdx + vdy * vdy) > archDc;   // farther from centroid ⇒ buccal
+                }
+
+                System.Threading.Tasks.Parallel.For(0, gny, iy =>
+                {
+                    for (int ix = 0; ix < gnx; ix++)
+                    {
+                        double px = gox + ix * VS_MC, py = goy + iy * VS_MC;
+                        if (!IsBuccal(px, py)) continue;
+                        int colBase = iy * gnx + ix;
+
+                        if (onUpper)
+                        {
+                            float contact = NearestUpperZ(px, py) - upperPenetrationMm;
+                            // Need an existing buccal rim just below the contact to extrude from.
+                            bool hasRim = false;
+                            for (int iz = 0; iz < gnz; iz++)
+                            {
+                                float pz = goz + iz * vs;
+                                if (pz < contact - 1.0f || pz > contact + 0.25f) continue;
+                                if (bakedGrid[iz * planeStride + colBase] < 0f) { hasRim = true; break; }
+                            }
+                            if (!hasRim) continue;
+                            for (int iz = 0; iz < gnz; iz++)
+                            {
+                                float pz = goz + iz * vs;
+                                if (pz <= contact || pz > contact + flangeDepth) continue;
+                                long vi = iz * planeStride + colBase;
+                                var pt = new Vector3d(px, py, pz);
+                                // Solid skirt, relieved 0.1 mm off the tooth so it still seats.
+                                if ((float)flangeImpl01.Value(ref pt) > 0f) bakedGrid[vi] = -0.5f;
+                            }
+                        }
+                        else
+                        {
+                            float contact = NearestLowerZ(px, py) + lowerPenetrationMm;
+                            bool hasRim = false;
+                            for (int iz = 0; iz < gnz; iz++)
+                            {
+                                float pz = goz + iz * vs;
+                                if (pz > contact + 1.0f || pz < contact - 0.25f) continue;
+                                if (bakedGrid[iz * planeStride + colBase] < 0f) { hasRim = true; break; }
+                            }
+                            if (!hasRim) continue;
+                            for (int iz = 0; iz < gnz; iz++)
+                            {
+                                float pz = goz + iz * vs;
+                                if (pz >= contact || pz < contact - flangeDepth) continue;
+                                long vi = iz * planeStride + colBase;
+                                var pt = new Vector3d(px, py, pz);
+                                if ((float)flangeImpl01.Value(ref pt) > 0f) bakedGrid[vi] = -0.5f;
+                            }
+                        }
+                    }
+                });
+            }
+
+            // ── PHASE 4b: Engagement-depth clamp + undercut blockout (seatability) ──
+            // A wafer can only seat if every tooth pocket releases along the insertion
+            // axis (≈ global Z). Following the tooth past its height of contour creates
+            // re-entrant "fingers" that lock the splint. We straighten each engaged
+            // column into a vertical pull-out path and cap how deep it may engage.
+            //   Upper teeth seat from above → wafer pulls toward −Z (pocket opens +Z).
+            //   Lower teeth seat from below → wafer pulls toward +Z (pocket opens −Z).
+            if (config.BlockoutUndercuts && config.EngagementDepthMm > 0f)
+            {
+                float engDepth = config.EngagementDepthMm;
+                float vs = (float)VS_MC;
+                long planeStride = (long)gnx * gny;
+                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE4b undercut blockout, engagement={engDepth:F1}mm");
+
+                System.Threading.Tasks.Parallel.For(0, gny, iy =>
+                {
+                    for (int ix = 0; ix < gnx; ix++)
+                    {
+                        double px = gox + ix * VS_MC, py = goy + iy * VS_MC;
+                        float upContact = NearestUpperZ(px, py) - upperPenetrationMm; // wafer top  (upper occlusal)
+                        float loContact = NearestLowerZ(px, py) + lowerPenetrationMm; // wafer base (lower occlusal)
+                        if (upContact <= loContact) continue;                          // degenerate column
+                        float midZ    = (upContact + loContact) * 0.5f;
+                        float upFloor = MathF.Max(upContact - engDepth, midZ);         // deepest legal upper engagement
+                        float loCeil  = MathF.Min(loContact + engDepth, midZ);         // highest legal lower engagement
+                        int colBase = iy * gnx + ix;
+
+                        // ── UPPER zone: straighten engaged columns, cap depth ──
+                        bool upperEngaged = false;
+                        for (int iz = 0; iz < gnz; iz++)
+                        {
+                            float pz = goz + iz * vs;
+                            if (pz < upFloor || pz > upContact + 0.5f) continue;
+                            if (bakedGrid[iz * planeStride + colBase] >= 0f) { upperEngaged = true; break; }
+                        }
+                        for (int iz = 0; iz < gnz; iz++)
+                        {
+                            float pz = goz + iz * vs;
+                            long vi = iz * planeStride + colBase;
+                            if (pz > midZ && pz < upFloor)
+                            {
+                                // Below the engagement floor: refill any deep pocket → caps engagement.
+                                if (bakedGrid[vi] >= 0f) bakedGrid[vi] = -0.5f;
+                            }
+                            else if (upperEngaged && pz >= upFloor && pz <= upContact + 0.5f)
+                            {
+                                // Within the engagement band of an engaged column: vertical wall.
+                                bakedGrid[vi] = 1.0f;
+                            }
+                        }
+
+                        // ── LOWER zone: mirror of the above ──
+                        bool lowerEngaged = false;
+                        for (int iz = 0; iz < gnz; iz++)
+                        {
+                            float pz = goz + iz * vs;
+                            if (pz > loCeil || pz < loContact - 0.5f) continue;
+                            if (bakedGrid[iz * planeStride + colBase] >= 0f) { lowerEngaged = true; break; }
+                        }
+                        for (int iz = 0; iz < gnz; iz++)
+                        {
+                            float pz = goz + iz * vs;
+                            long vi = iz * planeStride + colBase;
+                            if (pz < midZ && pz > loCeil)
+                            {
+                                if (bakedGrid[vi] >= 0f) bakedGrid[vi] = -0.5f;
+                            }
+                            else if (lowerEngaged && pz <= loCeil && pz >= loContact - 0.5f)
+                            {
+                                bakedGrid[vi] = 1.0f;
+                            }
+                        }
+                    }
+                });
+            }
+
+            // ── PHASE 4c: Min-thickness on the connecting body + perforation flagging ──
+            // The bridge that joins the two arch impressions must stay thick enough to
+            // print and survive handling. We measure the solid core that straddles the
+            // arch midline per column; columns thinner than the minimum are either
+            // thickened (enforcement on) or counted as incipient perforations (off).
+            if (config.EnforceMinThickness || config.FlagIncidentalPerforations)
+            {
+                float minT = MathF.Max(0f, config.MinThicknessMm);
+                float halfT = minT * 0.5f;
+                float vs = (float)VS_MC;
+                long planeStride = (long)gnx * gny;
+                int thinColumns = 0;
+                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE4c min-thickness={minT:F1}mm enforce={config.EnforceMinThickness}");
+
+                System.Threading.Tasks.Parallel.For(0, gny, iy =>
+                {
+                    int local = 0;
+                    for (int ix = 0; ix < gnx; ix++)
+                    {
+                        double px = gox + ix * VS_MC, py = goy + iy * VS_MC;
+                        float upContact = NearestUpperZ(px, py) - upperPenetrationMm;
+                        float loContact = NearestLowerZ(px, py) + lowerPenetrationMm;
+                        if (upContact <= loContact) continue;
+                        float midZ = (upContact + loContact) * 0.5f;
+                        int colBase = iy * gnx + ix;
+
+                        // Only enforce where there is actually a body in this column.
+                        bool hasBody = false;
+                        for (int iz = 0; iz < gnz; iz++)
+                        {
+                            float pz = goz + iz * vs;
+                            if (pz < loContact - 0.5f || pz > upContact + 0.5f) continue;
+                            if (bakedGrid[iz * planeStride + colBase] < 0f) { hasBody = true; break; }
+                        }
+                        if (!hasBody) continue;
+
+                        // Is the centred min-thickness band fully solid already?
+                        bool bandSolid = true;
+                        for (int iz = 0; iz < gnz; iz++)
+                        {
+                            float pz = goz + iz * vs;
+                            if (pz < midZ - halfT || pz > midZ + halfT) continue;
+                            if (bakedGrid[iz * planeStride + colBase] >= 0f) { bandSolid = false; break; }
+                        }
+                        if (bandSolid) continue;
+
+                        local++;
+                        if (config.EnforceMinThickness)
+                            for (int iz = 0; iz < gnz; iz++)
+                            {
+                                float pz = goz + iz * vs;
+                                if (pz >= midZ - halfT && pz <= midZ + halfT)
+                                    bakedGrid[iz * planeStride + colBase] = -0.5f;
+                            }
+                    }
+                    if (local > 0) System.Threading.Interlocked.Add(ref thinColumns, local);
+                });
+
+                if (diag != null)
+                {
+                    if (config.EnforceMinThickness) diag.MinThicknessFixes = thinColumns;
+                    else                            diag.IncidentalPerforations = thinColumns;
+                }
+                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE4c thin columns={thinColumns}");
+            }
+
+            // ── PHASE 4d: Carve protected holes (fixation / inspection / irrigation / fenestration) ──
+            // These are intentional through-tunnels: carved AFTER min-thickness so they
+            // stay open, and BEFORE MC so the surface wraps them as a closed manifold.
+            if (config.Holes.Count > 0)
+            {
+                float vs = (float)VS_MC;
+                long planeStride = (long)gnx * gny;
+                double gridDiag = mcBounds.DiagonalLength;
+                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE4d carving {config.Holes.Count} protected hole(s)");
+
+                foreach (var hole in config.Holes)
+                {
+                    var (dx, dy, dz) = hole.Direction;
+                    float r = MathF.Max(0.1f, hole.DiameterMm * 0.5f);
+                    float r2 = r * r;
+                    // Full-through holes sweep the whole grid span; depth-limited holes only DepthMm.
+                    float tStart = hole.DepthMm > 0f ? 0f : -(float)gridDiag;
+                    float tEnd   = hole.DepthMm > 0f ? hole.DepthMm : (float)gridDiag;
+                    float step = vs * 0.5f;
+                    int rVox = (int)MathF.Ceiling(r / vs) + 1;
+
+                    for (float t = tStart; t <= tEnd; t += step)
+                    {
+                        float cx = hole.X + dx * t, cy = hole.Y + dy * t, cz = hole.Z + dz * t;
+                        int cix = (int)MathF.Round((cx - gox) / vs);
+                        int ciy = (int)MathF.Round((cy - goy) / vs);
+                        int ciz = (int)MathF.Round((cz - goz) / vs);
+                        if (cix < -rVox || cix > gnx + rVox ||
+                            ciy < -rVox || ciy > gny + rVox ||
+                            ciz < -rVox || ciz > gnz + rVox) continue;
+
+                        for (int oz = -rVox; oz <= rVox; oz++)
+                        for (int oy = -rVox; oy <= rVox; oy++)
+                        for (int ox = -rVox; ox <= rVox; ox++)
+                        {
+                            int vx = cix + ox, vy = ciy + oy, vz = ciz + oz;
+                            if (vx < 0 || vx >= gnx || vy < 0 || vy >= gny || vz < 0 || vz >= gnz) continue;
+                            float wx = gox + vx * vs - cx, wy = goy + vy * vs - cy, wz = goz + vz * vs - cz;
+                            if (wx * wx + wy * wy + wz * wz <= r2)
+                                bakedGrid[vz * planeStride + vy * gnx + vx] = 1.0f;   // carve void
+                        }
+                    }
+                }
+            }
 
             // ── PHASE 5: MC surface extraction ──
             int finalInside = bakedGrid.Count(v => v < 0f);

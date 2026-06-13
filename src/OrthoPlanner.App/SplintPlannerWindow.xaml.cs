@@ -421,6 +421,15 @@ public partial class SplintPlannerWindow : Window
     private void BridgeThicknessSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
     { if (BridgeThicknessLabel != null) BridgeThicknessLabel.Text = $"{e.NewValue:F1} mm"; }
 
+    private void EngagementDepthSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
+    { if (EngagementDepthLabel != null) EngagementDepthLabel.Text = $"{e.NewValue:F1} mm"; }
+
+    private void MinThicknessSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
+    { if (MinThicknessLabel != null) MinThicknessLabel.Text = $"{e.NewValue:F1} mm"; }
+
+    private void FlangeDepthSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
+    { if (FlangeDepthLabel != null) FlangeDepthLabel.Text = $"{e.NewValue:F1} mm"; }
+
     private void LingualBuccalBiasSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
     {
         if (LingualBuccalBiasLabel != null) LingualBuccalBiasLabel.Text = $"{e.NewValue:F1} mm";
@@ -490,6 +499,14 @@ public partial class SplintPlannerWindow : Window
             LingualBuccalBiasMm = (float)LingualBuccalBiasSlider.Value,
             BridgeThicknessMm   = (float)BridgeThicknessSlider.Value,
             SampleCount         = 160,
+
+            // Clinical-fit controls (steps 4–6).
+            BlockoutUndercuts   = BlockoutCheck.IsChecked == true,
+            EngagementDepthMm   = (float)EngagementDepthSlider.Value,
+            EnforceMinThickness = MinThicknessCheck.IsChecked == true,
+            MinThicknessMm      = (float)MinThicknessSlider.Value,
+            BuccalFlangeDepthMm = (float)FlangeDepthSlider.Value,
+            FlangeOnUpper       = FlangeUpperRadio.IsChecked == true,
         };
 
         SplintResult result;
