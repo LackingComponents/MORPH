@@ -234,18 +234,65 @@ public static class SplintEngine
     //  Step E  Posterior limit: curved boundary matching horseshoe end-caps
     //  Step F  Subtract 0.1mm-dilated tooth surfaces → tooth pockets
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    public static float[] GenerateSplint(
+    // ── Public entry: config-driven, manifold-gated. Returns a printable result. ──
+    public static SplintResult GenerateSplint(
         List<(float x,float y,float z)> upperCurve,
         List<(float x,float y,float z)> lowerCurve,
-        float labiolingualMm        = 8f,
-        float upperPenetrationMm    = 0f,   // + = deeper into teeth (cut moves caudally)
-        float lowerPenetrationMm    = 0f,   // + = deeper into teeth (cut moves cranially)
-        float lingualBuccalBiasMm   = 0f,   // + = shift center buccally, − = lingually
-        float bridgeThicknessMm     = 0f,   // extra thickness added to the bridge connection
-        float[]? upperMesh          = null,
-        float[]? lowerMesh          = null,
-        int sampleCount             = 160)
+        SplintConfig config,
+        float[]? upperMesh = null,
+        float[]? lowerMesh = null)
     {
+        if (config == null) return SplintResult.Empty("No splint configuration supplied.");
+        if (upperCurve == null || lowerCurve == null ||
+            upperCurve.Count < 2 || lowerCurve.Count < 2)
+            return SplintResult.Empty("Need at least two points on each arch curve.");
+
+        var warnings = new List<string>();
+        if (!config.FromIntraoralScans)
+            warnings.Add("Dental surfaces are the CT-bone fallback, not registered intraoral scans — "
+                       + "seating accuracy is reduced. Import upper/lower intraoral scans for a clinical splint.");
+
+        float[] soup = GenerateSplintSoup(upperCurve, lowerCurve, config, upperMesh, lowerMesh);
+        if (soup.Length < 9)
+        {
+            warnings.Add("Splint generation produced no geometry.");
+            return new SplintResult(Array.Empty<float>(), false, 1f, 0, warnings);
+        }
+
+        if (!config.GuaranteeManifold)
+        {
+            float open = WatertightScore(soup);
+            if (open > 1e-4f)
+                warnings.Add($"Output is not watertight (open-edge fraction {open:P1}); manifold guarantee is off.");
+            return new SplintResult(soup, open <= 1e-4f, open, 0, warnings);
+        }
+
+        var rep = SplintMeshRepair.Repair(soup);
+        if (!rep.IsManifold)
+            warnings.Add($"Mesh repair could not fully close the splint "
+                       + $"(open-edge fraction {rep.OpenEdgeFraction:P1}); review before printing.");
+        else if (rep.BoundaryLoopsFilled > 0)
+            warnings.Add($"Sealed {rep.BoundaryLoopsFilled} stray boundary loop(s) during manifold repair.");
+
+        return new SplintResult(rep.Vertices, rep.IsManifold, rep.OpenEdgeFraction, 0, warnings);
+    }
+
+    // ── Core geometry: pose-agnostic triangle-soup builder (no manifold guarantee). ──
+    private static float[] GenerateSplintSoup(
+        List<(float x,float y,float z)> upperCurve,
+        List<(float x,float y,float z)> lowerCurve,
+        SplintConfig config,
+        float[]? upperMesh = null,
+        float[]? lowerMesh = null)
+    {
+        // Map config → the local names the geometry body below already uses.
+        float labiolingualMm      = config.LabiolingualMm;
+        float upperPenetrationMm  = config.UpperPenetrationMm;   // + = deeper into teeth (cut moves caudally)
+        float lowerPenetrationMm  = config.LowerPenetrationMm;   // + = deeper into teeth (cut moves cranially)
+        float lingualBuccalBiasMm = config.LingualBuccalBiasMm;  // + = buccal, − = lingual
+        float bridgeThicknessMm   = config.BridgeThicknessMm;    // extra thickness on the bridge connection
+        int   sampleCount         = config.SampleCount;
+
         if (upperCurve.Count < 2 || lowerCurve.Count < 2) return Array.Empty<float>();
 
         var upper = ResampleByArcLength(upperCurve, sampleCount);

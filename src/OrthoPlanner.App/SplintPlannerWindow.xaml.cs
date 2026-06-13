@@ -18,6 +18,10 @@ public partial class SplintPlannerWindow : Window
     private readonly float[] _upperMesh;  // maxilla / upper dental cast
     private readonly float[] _lowerMesh;  // mandible / lower dental cast
 
+    // ── Clinical config (pose/labelling carried from caller; geometry merged
+    //    from the sliders at Generate time) ─────────────────────────────────
+    private readonly SplintConfig _config;
+
     // ── Arch curves ───────────────────────────────────────────────────────
     private readonly ArchCurve _upperArch = new();
     private readonly ArchCurve _lowerArch = new();
@@ -50,12 +54,17 @@ public partial class SplintPlannerWindow : Window
     public float[]? SplintVertices { get; private set; }
 
     // ─────────────────────────────────────────────────────────────────────
-    public SplintPlannerWindow(float[] upperMesh, float[] lowerMesh, MainViewModel _)
+    public SplintPlannerWindow(float[] upperMesh, float[] lowerMesh, MainViewModel _,
+        SplintConfig? config = null)
     {
         InitializeComponent();
 
         _upperMesh = upperMesh;
         _lowerMesh = lowerMesh;
+        _config    = config ?? new SplintConfig();
+
+        // Drive the title from the clinical config (no hard-coded "Final Occlusion").
+        Title = $"Splint Planner — {_config.DisplayName}";
 
         // EffectsManagers — set directly, not via binding
         UpperViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
@@ -468,27 +477,27 @@ public partial class SplintPlannerWindow : Window
         AcceptBtn.Visibility  = Visibility.Collapsed;
         StatusText.Text = "Generating…";
 
-        float thickness      = (float)ThicknessSlider.Value;
-        float upperPenetration = (float)UpperPenetrationSlider.Value;
-        float lowerPenetration = (float)LowerPenetrationSlider.Value;
-        float lingualBuccalBias = (float)LingualBuccalBiasSlider.Value;
-        float bridgeThickness = (float)BridgeThicknessSlider.Value;
         var upperSampled  = _upperArch.Sample(160);
         var lowerSampled  = _lowerArch.Sample(160);
         float[] uMesh = _upperMesh, lMesh = _lowerMesh;
 
-        float[]? splint = null;
+        // Merge live slider geometry into the clinical config carried from the caller.
+        var genConfig = _config with
+        {
+            LabiolingualMm      = (float)ThicknessSlider.Value,
+            UpperPenetrationMm  = (float)UpperPenetrationSlider.Value,
+            LowerPenetrationMm  = (float)LowerPenetrationSlider.Value,
+            LingualBuccalBiasMm = (float)LingualBuccalBiasSlider.Value,
+            BridgeThicknessMm   = (float)BridgeThicknessSlider.Value,
+            SampleCount         = 160,
+        };
+
+        SplintResult result;
         try
         {
-            splint = await Task.Run(() => SplintEngine.GenerateSplint(
-                upperSampled, lowerSampled,
-                labiolingualMm:       thickness,
-                upperPenetrationMm:   upperPenetration,
-                lowerPenetrationMm:   lowerPenetration,
-                lingualBuccalBiasMm:  lingualBuccalBias,
-                bridgeThicknessMm:    bridgeThickness,
-                upperMesh: uMesh, lowerMesh: lMesh,
-                sampleCount: 160));
+            result = await Task.Run(() => SplintEngine.GenerateSplint(
+                upperSampled, lowerSampled, genConfig,
+                upperMesh: uMesh, lowerMesh: lMesh));
         }
         catch (Exception ex)
         {
@@ -497,9 +506,12 @@ public partial class SplintPlannerWindow : Window
             return;
         }
 
-        if (splint == null || splint.Length < 9)
+        float[] splint = result.Vertices;
+        if (splint.Length < 9)
         {
-            StatusText.Text = "No geometry produced.";
+            StatusText.Text = result.Warnings.Count > 0
+                ? result.Warnings[0]
+                : "No geometry produced.";
             GenerateBtn.IsEnabled = true;
             return;
         }
@@ -531,13 +543,16 @@ public partial class SplintPlannerWindow : Window
         StepTitle.Text = "Step 2: Review Splint";
         StepInstructions.Text = "Blue solid = splint. Grey = opposing arch. Rotate to inspect. Click Accept.";
 
-        float manifoldScore = SplintEngine.WatertightScore(splint);
-        int openPct = (int)(manifoldScore * 100);
         StatusText.Text = $"{splint.Length / 9:N0} triangles";
-        if (openPct == 0)
-            QualityText.Text = "✔ Splint is a closed manifold";
+        if (result.IsManifold)
+            QualityText.Text = "✔ Splint is a closed, printable manifold";
         else
-            QualityText.Text = $"⚠ Splint: {openPct}% open edges — may need repair before printing";
+            QualityText.Text = $"⚠ Splint: {result.OpenEdgeFraction:P0} open edges — review before printing";
+
+        // Surface any clinical/repair warnings (scan fallback, residual open edges, …).
+        if (result.Warnings.Count > 0)
+            MessageBox.Show(string.Join("\n\n", result.Warnings),
+                "Splint Warnings", MessageBoxButton.OK, MessageBoxImage.Warning);
 
         AcceptBtn.Visibility  = Visibility.Visible;
         GenerateBtn.IsEnabled = true;

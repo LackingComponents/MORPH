@@ -11,29 +11,25 @@ public partial class MainViewModel
     /// Resolves the best available upper and lower dental meshes.
     /// Priority: aligned ImportedMeshes (ScanType Upper/Lower) → Split bone segments.
     /// </summary>
-    private (float[]? upper, float[]? lower) ResolveDentalMeshes()
+    private (float[]? upper, float[]? lower, bool upperFromScan, bool lowerFromScan) ResolveDentalMeshes()
     {
         // ── UPPER (maxilla / upper dental cast) ─────────────────────────────
-        // Priority:
-        //   1. Dental cast STL classified as Upper
-        //   2. "Maxilla (LeFort 1 Separated)" — after LeFort1 osteotomy
-        //   3. Any segment whose name contains "Maxilla"
-        //   4. "Cranium (Split)" — condyle-split result (NOT "Cranium (LeFort Upper)")
+        // A registered intraoral scan (classified Upper) is the clinical-grade
+        // surface. Everything below it is a CT-bone fallback (flagged, not blocked).
+        var upperScan = ImportedMeshes.FirstOrDefault(m => m.ScanType == DentalScanType.Upper && m.Vertices != null)?.Vertices;
         float[]? upper =
-            ImportedMeshes.FirstOrDefault(m => m.ScanType == DentalScanType.Upper && m.Vertices != null)?.Vertices
+            upperScan
             ?? Segments.FirstOrDefault(s => s.IsVisible && s.Name.Contains("Maxilla (LeFort 1 Separated)"))?.Vertices
             ?? Segments.FirstOrDefault(s => s.IsVisible && s.Name.Contains("Maxilla"))?.Vertices
             ?? Segments.FirstOrDefault(s => s.IsVisible && s.Name == "Cranium (Split)")?.Vertices;
 
         // ── LOWER (mandible / lower dental cast) ────────────────────────────
-        // Priority:
-        //   1. Dental cast STL classified as Lower
-        //   2. Any segment whose name contains "Mandible"
+        var lowerScan = ImportedMeshes.FirstOrDefault(m => m.ScanType == DentalScanType.Lower && m.Vertices != null)?.Vertices;
         float[]? lower =
-            ImportedMeshes.FirstOrDefault(m => m.ScanType == DentalScanType.Lower && m.Vertices != null)?.Vertices
+            lowerScan
             ?? Segments.FirstOrDefault(s => s.IsVisible && s.Name.Contains("Mandible"))?.Vertices;
 
-        return (upper, lower);
+        return (upper, lower, upperScan != null, lowerScan != null);
     }
 
     [RelayCommand]
@@ -41,7 +37,7 @@ public partial class MainViewModel
     {
         try
         {
-            var (upper, lower) = ResolveDentalMeshes();
+            var (upper, lower, upperFromScan, lowerFromScan) = ResolveDentalMeshes();
 
             if (upper == null || lower == null)
             {
@@ -58,7 +54,35 @@ public partial class MainViewModel
                 return;
             }
 
-            var win = new SplintPlannerWindow(upper, lower, this);
+            // Step 3: registered intraoral scans are the clinical surface. Warn — but
+            // don't block — when either arch falls back to CT-segmented bone.
+            bool fromScans = upperFromScan && lowerFromScan;
+            if (!fromScans)
+            {
+                var src = new System.Text.StringBuilder();
+                if (!upperFromScan) src.AppendLine("• Upper arch is using CT-segmented bone, not a registered intraoral scan.");
+                if (!lowerFromScan) src.AppendLine("• Lower arch is using CT-segmented bone, not a registered intraoral scan.");
+                var choice = MessageBox.Show(
+                    "For a clinically accurate splint, both arches should come from registered "
+                    + "intraoral scans (classified Upper / Lower):\n\n" + src.ToString()
+                    + "\nCT bone lacks true crown anatomy, so the splint may not seat precisely.\n\n"
+                    + "Continue with the CT-bone fallback anyway?",
+                    "Intraoral Scans Recommended",
+                    MessageBoxButton.OKCancel, MessageBoxImage.Warning);
+                if (choice != MessageBoxResult.OK) return;
+            }
+
+            // Step 2: clinical pose/labelling is carried as config, not hard-coded.
+            // (Geometry sliders are merged into this inside the window.)
+            var config = new OrthoPlanner.Core.Geometry.SplintConfig
+            {
+                Type               = OrthoPlanner.Core.Geometry.SplintType.Final,
+                FirstOperated      = OrthoPlanner.Core.Geometry.MobileJaw.Maxilla,
+                Scope              = OrthoPlanner.Core.Geometry.JawScope.Bimaxillary,
+                FromIntraoralScans = fromScans,
+            };
+
+            var win = new SplintPlannerWindow(upper, lower, this, config);
             win.Owner = Application.Current.MainWindow;
 
             // Use Closed event so result is read after the window fully shuts down
@@ -74,7 +98,7 @@ public partial class MainViewModel
                     {
                         var splintMesh = new MeshViewModel
                         {
-                            Name      = "Splint (Final Occlusion)",
+                            Name      = config.DisplayName,
                             Vertices  = verts,
                             ColorR    = 200,
                             ColorG    = 230,
