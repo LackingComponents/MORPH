@@ -288,9 +288,7 @@ public static class SplintEngine
         if (upperCurve.Count < 2 || lowerCurve.Count < 2)
             return new MandibularAutorotationResult(lowerCurve, lowerMesh, 0f, warnings);
 
-        float targetClearance = config.AutorotationMinClearanceMm > 0
-            ? config.AutorotationMinClearanceMm
-            : Math.Max(config.MinThicknessMm, 0f);
+        float targetClearance = config.AutorotationMinClearanceMm;
         if (targetClearance <= 0.01f)
             return new MandibularAutorotationResult(lowerCurve, lowerMesh, 0f, warnings);
 
@@ -859,7 +857,6 @@ public static class SplintEngine
     // â”€â”€ Isotropic mesh offset via geometry3Sharp â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     /// <summary>
     /// Offsets every vertex of the triangle soup by <paramref name="offsetMm"/> mm
-
     /// along its area-weighted vertex normal, using geometry3Sharp for robust
     /// per-vertex normal computation on non-watertight meshes.
     /// </summary>

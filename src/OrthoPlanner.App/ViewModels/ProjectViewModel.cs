@@ -7,6 +7,14 @@ namespace OrthoPlanner.App.ViewModels;
 
 public partial class MainViewModel
 {
+    private void ReportLoadProgress(double value)
+    {
+        LoadProgress = value;
+        Application.Current.Dispatcher.Invoke(
+            System.Windows.Threading.DispatcherPriority.Render,
+            static () => { });
+    }
+
     [RelayCommand]
     private void SaveProject()
     {
@@ -22,6 +30,7 @@ public partial class MainViewModel
         try
         {
             IsLoading = true;
+            LoadProgress = 0;
             StatusText = "Saving project...";
 
             using var fs = new FileStream(dialog.FileName, FileMode.Create);
@@ -58,7 +67,7 @@ public partial class MainViewModel
                     CustomMinHU, CustomMaxHU,
                     Segments = Segments.Select(s => new { s.Name, s.IsVisible, s.ColorR, s.ColorG, s.ColorB }).ToArray()
                 },
-                ImportedMeshes = ImportedMeshes.Select(m => new { m.Name, m.IsVisible, m.ColorR, m.ColorG, m.ColorB, ScanType = m.ScanType.ToString() }).ToArray(),
+                ImportedMeshes = ImportedMeshes.Select(m => new { m.Name, m.IsVisible, m.ColorR, m.ColorG, m.ColorB, ScanType = m.ScanType.ToString(), m.ShowInModelsPanel }).ToArray(),
                 // Issue 11: occlusion meshes with their alignment transforms
                 OcclusionMeshes = LoadedOcclusions.Select(o => new
                 {
@@ -91,6 +100,7 @@ public partial class MainViewModel
                 sw.Write(System.Text.Json.JsonSerializer.Serialize(meta,
                     new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
             }
+            LoadProgress = 10;
 
             // 2. volume.bin — raw voxel data
             if (Volume != null)
@@ -99,8 +109,16 @@ public partial class MainViewModel
                 using var volStream = volEntry.Open();
                 var bytes = new byte[Volume.Voxels.Length * 2];
                 Buffer.BlockCopy(Volume.Voxels, 0, bytes, 0, bytes.Length);
-                volStream.Write(bytes, 0, bytes.Length);
+                const int chunkSize = 1 << 20;
+                for (int offset = 0; offset < bytes.Length; offset += chunkSize)
+                {
+                    int count = Math.Min(chunkSize, bytes.Length - offset);
+                    volStream.Write(bytes, offset, count);
+                    ReportLoadProgress(10 + (double)offset / bytes.Length * 40);
+                }
             }
+            else
+                ReportLoadProgress(50);
 
             // 3. meshes/*.bin — imported STL vertex data
             for (int i = 0; i < ImportedMeshes.Count; i++)
@@ -113,6 +131,7 @@ public partial class MainViewModel
                 bw.Write(mesh.Vertices.Length / 3);
                 for (int vi = 0; vi < mesh.Vertices.Length; vi += 3)
                     { bw.Write(mesh.Vertices[vi]); bw.Write(mesh.Vertices[vi + 1]); bw.Write(mesh.Vertices[vi + 2]); }
+                ReportLoadProgress(50 + (double)(i + 1) / Math.Max(1, ImportedMeshes.Count) * 15);
             }
 
             // 4. segments/*.bin — segmented 3D model vertex data
@@ -126,6 +145,7 @@ public partial class MainViewModel
                 bw2.Write(seg.Vertices.Length / 3);
                 for (int vi = 0; vi < seg.Vertices.Length; vi += 3)
                     { bw2.Write(seg.Vertices[vi]); bw2.Write(seg.Vertices[vi + 1]); bw2.Write(seg.Vertices[vi + 2]); }
+                ReportLoadProgress(65 + (double)(i + 1) / Math.Max(1, Segments.Count) * 15);
             }
 
             // 5. (Issue 11) occlusions/*.bin — occlusion STL vertex data
@@ -139,15 +159,21 @@ public partial class MainViewModel
                 bw3.Write(occ.Vertices.Length / 3);
                 for (int vi = 0; vi < occ.Vertices.Length; vi += 3)
                     { bw3.Write(occ.Vertices[vi]); bw3.Write(occ.Vertices[vi + 1]); bw3.Write(occ.Vertices[vi + 2]); }
+                ReportLoadProgress(80 + (double)(i + 1) / Math.Max(1, LoadedOcclusions.Count) * 15);
             }
 
+            LoadProgress = 100;
             StatusText = $"Project saved: {Path.GetFileName(dialog.FileName)}";
         }
         catch (Exception ex)
         {
             StatusText = $"Save failed: {ex.Message}";
         }
-        finally { IsLoading = false; }
+        finally
+        {
+            IsLoading = false;
+            LoadProgress = 100;
+        }
     }
 
     [RelayCommand]
@@ -174,6 +200,7 @@ public partial class MainViewModel
         try
         {
             IsLoading = true;
+            LoadProgress = 0;
             StatusText = "Loading project...";
 
             using var fs = new FileStream(dialog.FileName, FileMode.Open, FileAccess.Read);
@@ -186,6 +213,7 @@ public partial class MainViewModel
             string json;
             using (var sr = new StreamReader(jsonEntry.Open()))
                 json = await sr.ReadToEndAsync();
+            LoadProgress = 10;
 
             using var doc = System.Text.Json.JsonDocument.Parse(json);
             var root = doc.RootElement;
@@ -270,6 +298,7 @@ public partial class MainViewModel
                         int read = await volStream.ReadAsync(bytes, totalRead, bytes.Length - totalRead);
                         if (read == 0) break;
                         totalRead += read;
+                        ReportLoadProgress(10 + (double)totalRead / bytes.Length * 35);
                     }
                     Buffer.BlockCopy(bytes, 0, vol.Voxels, 0, bytes.Length);
                     vol.PatientName = PatientName;
@@ -410,13 +439,17 @@ public partial class MainViewModel
                         ColorG = meshMeta.TryGetProperty("ColorG", out var cg) ? cg.GetByte() : (byte)245,
                         ColorB = meshMeta.TryGetProperty("ColorB", out var cb) ? cb.GetByte() : (byte)230,
                         ScanType = ReadScanType(meshMeta, name),
-                        IsVisible = meshMeta.GetProperty("IsVisible").GetBoolean()
+                        IsVisible = meshMeta.GetProperty("IsVisible").GetBoolean(),
+                        ShowInModelsPanel = meshMeta.TryGetProperty("ShowInModelsPanel", out var sip)
+                            ? sip.GetBoolean()
+                            : name.Contains("Splint", StringComparison.OrdinalIgnoreCase)
                     };
                     meshVm.OnVisibilityChanged = RefreshCombinedModel;
                     meshVm.BuildModel();
                     ImportedMeshes.Add(meshVm);
                 }
                 meshIdx++;
+                ReportLoadProgress(45 + (double)meshIdx / Math.Max(1, meshesArr.GetArrayLength()) * 15);
             }
 
             // 4. Read segments
@@ -456,6 +489,7 @@ public partial class MainViewModel
                         else if (sName == "Dental Scan" || sName.StartsWith("Dental")) DentalModel = segVm;
                     }
                     segIdx++;
+                    ReportLoadProgress(60 + (double)segIdx / Math.Max(1, segsArr.GetArrayLength()) * 15);
                 }
             }
 
@@ -507,6 +541,7 @@ public partial class MainViewModel
                         LoadedOcclusions.Add(occVm);
                     }
                     occIdx++;
+                    ReportLoadProgress(75 + (double)occIdx / Math.Max(1, occArr.GetArrayLength()) * 10);
                 }
             }
 
@@ -609,12 +644,17 @@ public partial class MainViewModel
 
             RefreshCombinedModel();
             OnPropertyChanged(nameof(HasUpperAndLowerScans));
+            LoadProgress = 100;
             StatusText = $"Project loaded: {Path.GetFileName(dialog.FileName)}";
         }
         catch (Exception ex)
         {
             StatusText = $"Open failed: {ex.Message}";
         }
-        finally { IsLoading = false; }
+        finally
+        {
+            IsLoading = false;
+            LoadProgress = 100;
+        }
     }
 }

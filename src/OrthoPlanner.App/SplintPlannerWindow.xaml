@@ -36,7 +36,7 @@
             </Grid.ColumnDefinitions>
 
             <!-- UPPER ARCH (maxilla) — left viewport, camera from below -->
-            <Border Grid.Column="0" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4">
+            <Border x:Name="UpperViewportBorder" Grid.Column="0" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4">
                 <Grid>
                     <hx:Viewport3DX x:Name="UpperViewport" BackgroundColor="#FF0E1420"
                                     ShowCoordinateSystem="True" CoordinateSystemLabelForeground="#00000000"
@@ -60,22 +60,38 @@
                         <hx:DirectionalLight3D x:Name="UpperBacklamp"  Direction="0,0,-1" Color="#808080"/>
                         <hx:GroupModel3D x:Name="UpperGroup"/>
                     </hx:Viewport3DX>
-                    <TextBlock Text="🦷 Upper Arch (Maxilla) — Occlusal from below"
+                    <TextBlock x:Name="UpperViewportTitle" Text="🦷 Upper Arch (Maxilla) — Occlusal from below"
                                FontSize="11" Foreground="#88FFFFFF"
                                HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6"
                                IsHitTestVisible="False"/>
-                    <TextBlock Text="Left-click = add point  |  Right-click = remove last"
+                    <TextBlock x:Name="UpperViewportHint" Text="Left-click = add point  |  Right-click = remove last"
                                FontSize="9" Foreground="#44FFFFFF"
                                HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,4"
                                IsHitTestVisible="False"/>
+                    <StackPanel x:Name="ReviewVisibilityPanel"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Bottom"
+                                Margin="8,0,0,8"
+                                Visibility="Collapsed">
+                        <CheckBox x:Name="ShowUpperCastToggle"
+                                  Content="Upper"
+                                  IsChecked="True"
+                                  Margin="0,0,10,0"
+                                  ToolTip="Show/hide the superior dental cast"/>
+                        <CheckBox x:Name="ShowLowerCastToggle"
+                                  Content="Lower"
+                                  IsChecked="True"
+                                  ToolTip="Show/hide the inferior dental cast"/>
+                    </StackPanel>
                 </Grid>
             </Border>
 
-            <GridSplitter Grid.Column="1" Width="6" Background="Transparent"
+            <GridSplitter x:Name="ViewportSplitter" Grid.Column="1" Width="6" Background="Transparent"
                           HorizontalAlignment="Center" VerticalAlignment="Stretch"/>
 
             <!-- LOWER ARCH (mandible) — right viewport, camera from above -->
-            <Border Grid.Column="2" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4">
+            <Border x:Name="LowerViewportBorder" Grid.Column="2" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4">
                 <Grid>
                     <hx:Viewport3DX x:Name="LowerViewport" BackgroundColor="#FF0E1420"
                                     ShowCoordinateSystem="True" CoordinateSystemLabelForeground="#00000000"
@@ -171,16 +187,6 @@
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
                     <Slider x:Name="EngagementDepthSlider" Minimum="0" Maximum="5" Value="1.5" Width="170" SmallChange="0.25" ValueChanged="EngagementDepthSlider_ValueChanged"/>
                     <TextBlock x:Name="EngagementDepthLabel" Text="1.5 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
-                </StackPanel>
-
-                <CheckBox x:Name="MinThicknessCheck" Content="Enforce minimum thickness" IsChecked="True"
-                          Foreground="#AABBCC" Margin="0,0,0,8"
-                          ToolTip="Thickens any part of the connecting body that is thinner than the minimum; otherwise thin spots are flagged as possible perforations."/>
-
-                <TextBlock Text="Minimum thickness:" FontSize="11" Foreground="#AABBCC"/>
-                <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
-                    <Slider x:Name="MinThicknessSlider" Minimum="0.5" Maximum="5" Value="2" Width="170" SmallChange="0.25" ValueChanged="MinThicknessSlider_ValueChanged"/>
-                    <TextBlock x:Name="MinThicknessLabel" Text="2.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
 
                 <TextBlock Text="Buccal flange depth:" FontSize="11" Foreground="#AABBCC" ToolTip="Apical fixation skirt down the buccal wall (0 = none). Screw holes can be carved through it."/>

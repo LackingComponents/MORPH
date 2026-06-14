@@ -27,6 +27,48 @@
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
         <cv:IntToVisibilityConverter x:Key="IntToVisibilityConverter" />
         <cv:EnumToBoolConverter x:Key="EnumToBoolConverter" />
+
+        <ContextMenu x:Key="ThreeDModelContextMenu" x:Shared="False"
+                     Background="#FF1E222A" BorderThickness="1" BorderBrush="#FF30343D">
+            <MenuItem StaysOpenOnClick="True" Focusable="False" Background="Transparent" Padding="2">
+                <MenuItem.Header>
+                    <ctrl:ThreeDModelContextPanel DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                </MenuItem.Header>
+            </MenuItem>
+        </ContextMenu>
+
+        <DataTemplate DataType="{x:Type vm:SegmentViewModel}">
+            <Border Padding="4,3" Margin="0,1" CornerRadius="3" Background="#10FFFFFF"
+                    ContextMenu="{StaticResource ThreeDModelContextMenu}">
+                <DockPanel Background="Transparent">
+                    <CheckBox IsChecked="{Binding IsVisible}" DockPanel.Dock="Left"
+                              VerticalAlignment="Center" Margin="0,0,4,0" />
+                    <Button DockPanel.Dock="Right" Content="✕"
+                            Background="Transparent" BorderThickness="0" Foreground="#888"
+                            Padding="3,0" VerticalAlignment="Center" Cursor="Hand"
+                            Command="{Binding DataContext.DeleteSegmentItemCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}" ToolTip="Delete" />
+                    <TextBlock Text="{Binding Name}" FontSize="10" VerticalAlignment="Center" />
+                </DockPanel>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type vm:MeshViewModel}">
+            <Border Padding="4,3" Margin="0,1" CornerRadius="3" Background="#10FFFFFF"
+                    ContextMenu="{StaticResource ThreeDModelContextMenu}">
+                <DockPanel Background="Transparent">
+                    <CheckBox IsChecked="{Binding IsVisible}" DockPanel.Dock="Left"
+                              VerticalAlignment="Center" Margin="0,0,4,0" />
+                    <Button DockPanel.Dock="Right" Content="✕"
+                            Background="Transparent" BorderThickness="0" Foreground="#888"
+                            Padding="3,0" VerticalAlignment="Center" Cursor="Hand"
+                            Command="{Binding DataContext.DeleteImportedMeshCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}" ToolTip="Delete" />
+                    <TextBlock Text="{Binding Name}" FontSize="10" VerticalAlignment="Center" />
+                </DockPanel>
+            </Border>
+        </DataTemplate>
+
         <Style x:Key="PanelTabButtonStyle" TargetType="RadioButton">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="#FFA0AAB5" />
@@ -794,22 +836,8 @@
                                 <ItemsControl ItemsSource="{Binding ImportedMeshes}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Border Padding="4,3" Margin="0,1" CornerRadius="3" Background="#10FFFFFF">
-                                                <Border.ContextMenu>
-                                                    <ContextMenu Background="#FF1E222A" BorderThickness="1" BorderBrush="#FF30343D" Foreground="White">
-                                                        <MenuItem StaysOpenOnClick="True" Focusable="False" Background="Transparent" Padding="0">
-                                                            <MenuItem.Header>
-                                                                <StackPanel Width="170" Margin="2">
-                                                                    <TextBlock Text="Transparency" FontSize="11" Foreground="#FFA0AAB5" Margin="0,0,0,4"/>
-                                                                    <DockPanel>
-                                                                        <TextBox DockPanel.Dock="Right" Width="45" Margin="4,0,0,0" Text="{Binding OpacityPercent, StringFormat=\{0:F0\}, UpdateSourceTrigger=LostFocus}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" FontSize="11" VerticalAlignment="Center" />
-                                                                        <Slider Minimum="0" Maximum="100" Value="{Binding OpacityPercent}" VerticalAlignment="Center"/>
-                                                                    </DockPanel>
-                                                                </StackPanel>
-                                                            </MenuItem.Header>
-                                                        </MenuItem>
-                                                    </ContextMenu>
-                                                </Border.ContextMenu>
+                                            <Border Padding="4,3" Margin="0,1" CornerRadius="3" Background="#10FFFFFF"
+                                                    ContextMenu="{StaticResource ThreeDModelContextMenu}">
                                                 <DockPanel Background="Transparent">
                                                     <CheckBox IsChecked="{Binding IsVisible}" DockPanel.Dock="Left"
                                                               VerticalAlignment="Center" Margin="0,0,4,0" />
@@ -893,39 +921,7 @@
                     <StackPanel>
                         <TextBlock Text="3D MODELS" Style="{StaticResource PanelHeader}" FontSize="9" Margin="0,0,0,4" />
                         <ScrollViewer MaxHeight="200" VerticalScrollBarVisibility="Auto">
-                            <ItemsControl ItemsSource="{Binding Segments}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border Padding="4,3" Margin="0,1" CornerRadius="3" Background="#10FFFFFF">
-                                            <Border.ContextMenu>
-                                                <ContextMenu Background="#FF1E222A" BorderThickness="1" BorderBrush="#FF30343D" Foreground="White">
-                                                    <MenuItem StaysOpenOnClick="True" Focusable="False" Background="Transparent" Padding="0">
-                                                        <MenuItem.Header>
-                                                            <StackPanel Width="170" Margin="2">
-                                                                <TextBlock Text="Transparency" FontSize="11" Foreground="#FFA0AAB5" Margin="0,0,0,4"/>
-                                                                <DockPanel>
-                                                                    <TextBox DockPanel.Dock="Right" Width="45" Margin="4,0,0,0" Text="{Binding OpacityPercent, StringFormat=\{0:F0\}, UpdateSourceTrigger=LostFocus}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" FontSize="11" VerticalAlignment="Center" />
-                                                                    <Slider Minimum="0" Maximum="100" Value="{Binding OpacityPercent}" VerticalAlignment="Center"/>
-                                                                </DockPanel>
-                                                            </StackPanel>
-                                                        </MenuItem.Header>
-                                                    </MenuItem>
-                                                </ContextMenu>
-                                            </Border.ContextMenu>
-                                            <DockPanel Background="Transparent">
-                                                <CheckBox IsChecked="{Binding IsVisible}" DockPanel.Dock="Left"
-                                                          VerticalAlignment="Center" Margin="0,0,4,0" />
-                                                <Button DockPanel.Dock="Right" Content="✕"
-                                                        Background="Transparent" BorderThickness="0" Foreground="#888"
-                                                        Padding="3,0" VerticalAlignment="Center" Cursor="Hand"
-                                                        Command="{Binding DataContext.DeleteSegmentItemCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                        CommandParameter="{Binding}" ToolTip="Delete" />
-                                                <TextBlock Text="{Binding Name}" FontSize="10" VerticalAlignment="Center" />
-                                            </DockPanel>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
+                            <ItemsControl ItemsSource="{Binding ThreeDModelsPanelItems}" />
                         </ScrollViewer>
                     </StackPanel>
                 </Border>
@@ -1259,7 +1255,7 @@
                               MouseRightButtonUp="SlicePanel_RightUp"
                               MouseMove="SlicePanel_MouseMove"
                               Background="Transparent">
-                            <Image Source="{Binding AxialImage}" Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                            <Image Source="{Binding AxialImage}" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor" />
                             <Canvas x:Name="AxialCrosshairCanvas" IsHitTestVisible="False" />
                             <TextBlock Text="AXIAL" Style="{StaticResource PanelHeader}"
                                        HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6" />
@@ -1280,7 +1276,7 @@
                               MouseRightButtonUp="SlicePanel_RightUp"
                               MouseMove="SlicePanel_MouseMove"
                               Background="Transparent">
-                            <Image Source="{Binding CoronalImage}" Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                            <Image Source="{Binding CoronalImage}" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor" />
                             <Canvas x:Name="CoronalCrosshairCanvas" IsHitTestVisible="False" />
                             <TextBlock Text="CORONAL" Style="{StaticResource PanelHeader}"
                                        HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6" />
@@ -1301,7 +1297,7 @@
                               MouseRightButtonUp="SlicePanel_RightUp"
                               MouseMove="SlicePanel_MouseMove"
                               Background="Transparent">
-                            <Image Source="{Binding SagittalImage}" Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                            <Image Source="{Binding SagittalImage}" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor" />
                             <Canvas x:Name="SagittalCrosshairCanvas" IsHitTestVisible="False" />
                             <TextBlock Text="SAGITTAL" Style="{StaticResource PanelHeader}"
                                        HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6" />

@@ -143,12 +143,13 @@ public partial class MainViewModel
                     {
                         var splintMesh = new MeshViewModel
                         {
-                            Name      = labelledConfig.DisplayName,
-                            Vertices  = verts,
-                            ColorR    = 200,
-                            ColorG    = 230,
-                            ColorB    = 255,
-                            IsVisible = true
+                            Name              = labelledConfig.DisplayName,
+                            Vertices          = verts,
+                            ColorR            = 200,
+                            ColorG            = 230,
+                            ColorB            = 255,
+                            IsVisible         = true,
+                            ShowInModelsPanel = true
                         };
                         splintMesh.OnVisibilityChanged = RefreshCombinedModel;
                         splintMesh.BuildModel();

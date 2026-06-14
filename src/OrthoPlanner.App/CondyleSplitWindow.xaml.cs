@@ -207,6 +207,13 @@ public partial class CondyleSplitWindow : Window
 
     private int GetNextEmptySlot()
     {
+        if (_landmarkOnlyMode)
+        {
+            if (_splitPoints[0] == null) return 0;
+            if (_splitPoints[4] == null) return 4;
+            return -1;
+        }
+
         for (int i = 0; i < 5; i++)
             if (_splitPoints[i] == null) return i;
         return -1;
@@ -214,22 +221,28 @@ public partial class CondyleSplitWindow : Window
 
     private void UpdateStep1Instructions()
     {
-        int total = 0;
-        for (int i = 0; i < 5; i++) if (_splitPoints[i] != null) total++;
+        int total = _landmarkOnlyMode
+            ? (_splitPoints[0] != null ? 1 : 0) + (_splitPoints[4] != null ? 1 : 0)
+            : _splitPoints.Count(p => p != null);
 
         int nextSlot = GetNextEmptySlot();
         if (nextSlot != -1)
         {
-            StatusText.Text = $"Placed {total}/5. Please click: {_pointNames[nextSlot]}";
+            int required = _landmarkOnlyMode ? 2 : 5;
+            StatusText.Text = $"Placed {total}/{required}. Please click: {_pointNames[nextSlot]}";
             StepInstructions.Text = _landmarkOnlyMode
-                ? "Click sequence: (1) Right Condyle, (2) Right Posterior, (3) Interincisal, (4) Left Posterior, (5) Left Condyle. Then review and adjust the condyle boxes."
+                ? "Click only the two condyle fulcrums: (1) Right Condyle, then (2) Left Condyle. Right-click a point to delete it."
                 : "Click sequence: (1) Right Condyle, (2) Right Posterior, (3) Interincisal, (4) Left Posterior, (5) Left Condyle. Right-click points to delete.";
             SplitBtn.IsEnabled = false;
         }
         else
         {
-            StatusText.Text = "All 5 points placed.";
-            StepInstructions.Text = "Click 'Next: Review' to view and adjust bounding boxes and the separation plane.";
+            StatusText.Text = _landmarkOnlyMode
+                ? "Both condyle fulcrums placed."
+                : "All 5 points placed.";
+            StepInstructions.Text = _landmarkOnlyMode
+                ? "Click 'Next: Review' to view and adjust the condyle bounding boxes."
+                : "Click 'Next: Review' to view and adjust bounding boxes and the separation plane.";
             SplitBtn.IsEnabled = true;
         }
     }
@@ -334,7 +347,10 @@ public partial class CondyleSplitWindow : Window
     {
         if (GetNextEmptySlot() != -1)
         {
-            MessageBox.Show("Please place all 5 points first.", "Need Points",
+            string message = _landmarkOnlyMode
+                ? "Please place the right and left condyle fulcrum points first."
+                : "Please place all 5 points first.";
+            MessageBox.Show(message, "Need Points",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
@@ -342,12 +358,15 @@ public partial class CondyleSplitWindow : Window
         _currentStep = 2;
         _dragPointIndex = -1;
 
-        // Compute and draw the plane
-        ComputePlane();
+        // Compute and draw the occlusal split plane only in the full split workflow.
+        if (!_landmarkOnlyMode)
+            ComputePlane();
 
         // Populate condylar boxes
         // 10mm medial shift: right side (+x) shifts -10, left side (-x) shifts +10 (assuming X origin near midline)
-        float midlineX = (float)(_splitPoints[2]!.Value.X);
+        float midlineX = _landmarkOnlyMode
+            ? (float)((_splitPoints[0]!.Value.X + _splitPoints[4]!.Value.X) * 0.5)
+            : (float)(_splitPoints[2]!.Value.X);
 
         if (_splitPoints[0] != null)
         {

@@ -22,6 +22,7 @@ public partial class MainViewModel : ObservableObject
         // Re-evaluate HasLeFort1Maxilla whenever the segments collection changes
         // (covers project load, undo/redo, and segment deletion).
         Segments.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasLeFort1Maxilla));
+        InitializeThreeDModelsPanel();
     }
 
     // ÔöÇÔöÇÔöÇ Photogrammetry ÔöÇÔöÇÔöÇ
@@ -165,6 +166,21 @@ public partial class SegmentViewModel : ObservableObject
     [ObservableProperty] private bool _isSelectedForExport = true;
     [ObservableProperty] private byte _colorR = 200, _colorG = 180, _colorB = 140;
 
+    public Brush DisplayColorBrush => new SolidColorBrush(Color.FromRgb(ColorR, ColorG, ColorB));
+
+    partial void OnColorRChanged(byte value) => ApplyColorChange();
+    partial void OnColorGChanged(byte value) => ApplyColorChange();
+    partial void OnColorBChanged(byte value) => ApplyColorChange();
+
+    private void ApplyColorChange()
+    {
+        OnPropertyChanged(nameof(DisplayColorBrush));
+        if (Material is HelixToolkit.Wpf.SharpDX.PhongMaterial phong)
+            phong.DiffuseColor = new HelixToolkit.Maths.Color4(ColorR / 255f, ColorG / 255f, ColorB / 255f, (float)_opacity);
+        else if (Vertices != null && Vertices.Length >= 3)
+            BuildModel();
+    }
+
     private double _opacity = 1.0;
     public double Opacity
     {
@@ -227,6 +243,8 @@ public partial class MeshViewModel : ObservableObject
     [ObservableProperty] private bool _isVisible = true;
     [ObservableProperty] private byte _colorR = 245, _colorG = 245, _colorB = 230;
     [ObservableProperty] private DentalScanType _scanType = DentalScanType.Other;
+    /// <summary>When true, this mesh also appears in the bottom 3D MODELS panel (e.g. splint).</summary>
+    [ObservableProperty] private bool _showInModelsPanel;
     public float[]? Vertices { get; set; }
     public object? Geometry { get; set; }
     public HelixToolkit.Wpf.SharpDX.Material? Material { get; set; }
@@ -236,16 +254,53 @@ public partial class MeshViewModel : ObservableObject
     [ObservableProperty] private System.Windows.Media.Media3D.Matrix3D _maxillaOcclusionTransform = System.Windows.Media.Media3D.Matrix3D.Identity;
     [ObservableProperty] private System.Windows.Media.Media3D.Matrix3D _mandibleOcclusionTransform = System.Windows.Media.Media3D.Matrix3D.Identity;
 
+    public Brush DisplayColorBrush => new SolidColorBrush(Color.FromRgb(ColorR, ColorG, ColorB));
+
+    partial void OnColorRChanged(byte value) => ApplyColorChange();
+    partial void OnColorGChanged(byte value) => ApplyColorChange();
+    partial void OnColorBChanged(byte value) => ApplyColorChange();
+
+    private void ApplyColorChange()
+    {
+        OnPropertyChanged(nameof(DisplayColorBrush));
+        if (Material is HelixToolkit.Wpf.SharpDX.PhongMaterial phong)
+            phong.DiffuseColor = new HelixToolkit.Maths.Color4(ColorR / 255f, ColorG / 255f, ColorB / 255f, (float)_opacity);
+        else if (Vertices != null && Vertices.Length >= 3)
+            BuildModel();
+    }
+
+    private double _opacity = 1.0;
+    public double Opacity
+    {
+        get => _opacity;
+        set
+        {
+            if (SetProperty(ref _opacity, value))
+            {
+                OnPropertyChanged(nameof(OpacityPercent));
+                if (Material is HelixToolkit.Wpf.SharpDX.PhongMaterial phong)
+                    phong.DiffuseColor = new HelixToolkit.Maths.Color4(ColorR / 255f, ColorG / 255f, ColorB / 255f, (float)_opacity);
+            }
+        }
+    }
+
+    public double OpacityPercent
+    {
+        get => _opacity * 100.0;
+        set => Opacity = Math.Max(0, Math.Min(100, value)) / 100.0;
+    }
+
     public Action? OnVisibilityChanged { get; set; }
     partial void OnIsVisibleChanged(bool value) => OnVisibilityChanged?.Invoke();
 
     public void BuildModel()
     {
         if (Vertices == null || Vertices.Length < 3) return;
-        MeshHelper.BuildModel3D(Vertices, ColorR, ColorG, ColorB, out var geom, out var mat);
+        MeshHelper.BuildModel3D(Vertices, ColorR, ColorG, ColorB, out var geom, out var mat, (byte)(Opacity * 255.0));
         Geometry = geom;
         Material = mat;
         OnPropertyChanged(nameof(Geometry));
+        OnPropertyChanged(nameof(Material));
     }
 }
 

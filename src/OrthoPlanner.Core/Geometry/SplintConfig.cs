@@ -105,17 +105,20 @@ public sealed record SplintConfig
     public float EngagementDepthMm  { get; init; } = 1.5f;
     public bool  BlockoutUndercuts  { get; init; } = true;
 
-    // ── Step 5: min-thickness + incidental-perforation policy ──────────────
-    public float MinThicknessMm     { get; init; } = 2.0f;
-    public bool  EnforceMinThickness{ get; init; } = true;
+    // ── Incidental-perforation policy ──────────────────────────────────────
+    // Splints may intentionally include holes/windows, so thickness is not
+    // enforced by default. These fields remain only for compatibility with
+    // older project/config data.
+    public float MinThicknessMm     { get; init; } = 0f;
+    public bool  EnforceMinThickness{ get; init; } = false;
     public bool  FlagIncidentalPerforations { get; init; } = true;
 
     // ── Condylar autorotation ──────────────────────────────────────────────
     /// <summary>When true, rotate the mandible open around the condylar axis before
     /// generating the wafer so the inter-arch space can receive the requested splint.</summary>
     public bool EnableAutorotation { get; init; } = true;
-    /// <summary>Target minimum clearance between sampled upper/lower arch curves.
-    /// Values <= 0 fall back to MinThicknessMm.</summary>
+    /// <summary>Optional target clearance between sampled upper/lower arch curves.
+    /// Values <= 0 disable automatic clearance enforcement.</summary>
     public float AutorotationMinClearanceMm { get; init; } = 0f;
     /// <summary>Safety cap for automatic mandibular opening.</summary>
     public float AutorotationMaxDegrees { get; init; } = 8f;

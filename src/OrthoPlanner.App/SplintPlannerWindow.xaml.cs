@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
@@ -41,11 +42,15 @@ public partial class SplintPlannerWindow : Window
     // ── Splint preview ────────────────────────────────────────────────────
     private MeshGeometryModel3D? _splintUpperPreview;
     private MeshGeometryModel3D? _splintLowerPreview;
+    private MeshGeometryModel3D? _lowerReviewModel;
     private MeshGeometryModel3D? _upperBaseModel;
     private MeshGeometryModel3D? _lowerBaseModel;
 
     // ── Headlamp handler ────────────────────────────────────────────────────
     private EventHandler? _renderingHandler;
+    private bool _reviewCastTogglesReady;
+    private bool _isReviewMode;
+    private bool _pointEditingHandlersAttached = true;
 
     // ── Drag state ────────────────────────────────────────────────────────
     private bool _draggingUpper, _draggingLower;
@@ -63,6 +68,14 @@ public partial class SplintPlannerWindow : Window
         SplintConfig? config = null)
     {
         InitializeComponent();
+
+        // Do not wire these in XAML: IsChecked=True can raise Checked while
+        // InitializeComponent is still constructing sibling controls.
+        ShowUpperCastToggle.Checked += CastVisibilityToggle_Changed;
+        ShowUpperCastToggle.Unchecked += CastVisibilityToggle_Changed;
+        ShowLowerCastToggle.Checked += CastVisibilityToggle_Changed;
+        ShowLowerCastToggle.Unchecked += CastVisibilityToggle_Changed;
+        _reviewCastTogglesReady = true;
 
         _upperMesh = upperMesh;
         _lowerMesh = lowerMesh;
@@ -189,6 +202,7 @@ public partial class SplintPlannerWindow : Window
     // ═══════════════════════════════════════════════════════════
     private void UpperViewport_MouseLeft(object sender, MouseButtonEventArgs e)
     {
+        if (_isReviewMode) return;
         if (Keyboard.Modifiers != ModifierKeys.None) return;
         var hits = UpperViewport.FindHits(e.GetPosition(UpperViewport));
         if (hits == null || hits.Count == 0) return;
@@ -214,6 +228,7 @@ public partial class SplintPlannerWindow : Window
 
     private void LowerViewport_MouseLeft(object sender, MouseButtonEventArgs e)
     {
+        if (_isReviewMode) return;
         if (Keyboard.Modifiers != ModifierKeys.None) return;
         var hits = LowerViewport.FindHits(e.GetPosition(LowerViewport));
         if (hits == null || hits.Count == 0) return;
@@ -240,6 +255,7 @@ public partial class SplintPlannerWindow : Window
     // ═══════════════════════════════════════════════════════════
     private void UpperViewport_MouseMove(object sender, MouseEventArgs e)
     {
+        if (_isReviewMode) { _draggingUpper = false; _dragIdxUpper = -1; return; }
         if (!_draggingUpper || _dragIdxUpper < 0) return;
         var hits = UpperViewport.FindHits(e.GetPosition(UpperViewport));
         if (hits == null) return;
@@ -258,6 +274,7 @@ public partial class SplintPlannerWindow : Window
 
     private void LowerViewport_MouseMove(object sender, MouseEventArgs e)
     {
+        if (_isReviewMode) { _draggingLower = false; _dragIdxLower = -1; return; }
         if (!_draggingLower || _dragIdxLower < 0) return;
         var hits = LowerViewport.FindHits(e.GetPosition(LowerViewport));
         if (hits == null) return;
@@ -284,6 +301,7 @@ public partial class SplintPlannerWindow : Window
     // ═══════════════════════════════════════════════════════════
     private void UpperViewport_MouseRight(object sender, MouseButtonEventArgs e)
     {
+        if (_isReviewMode) return;
         int idx = FindNearestMarker(_upperArch, e.GetPosition(UpperViewport), UpperViewport);
         if (idx < 0) return;
         UpperGroup.Children.Remove(_upperMarkers[idx]);
@@ -296,6 +314,7 @@ public partial class SplintPlannerWindow : Window
 
     private void LowerViewport_MouseRight(object sender, MouseButtonEventArgs e)
     {
+        if (_isReviewMode) return;
         int idx = FindNearestMarker(_lowerArch, e.GetPosition(LowerViewport), LowerViewport);
         if (idx < 0) return;
         LowerGroup.Children.Remove(_lowerMarkers[idx]);
@@ -439,9 +458,6 @@ public partial class SplintPlannerWindow : Window
     private void EngagementDepthSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
     { if (EngagementDepthLabel != null) EngagementDepthLabel.Text = $"{e.NewValue:F1} mm"; }
 
-    private void MinThicknessSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
-    { if (MinThicknessLabel != null) MinThicknessLabel.Text = $"{e.NewValue:F1} mm"; }
-
     private void FlangeDepthSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
     { if (FlangeDepthLabel != null) FlangeDepthLabel.Text = $"{e.NewValue:F1} mm"; }
 
@@ -523,9 +539,9 @@ public partial class SplintPlannerWindow : Window
             // Clinical-fit controls (steps 4–6).
             BlockoutUndercuts   = BlockoutCheck.IsChecked == true,
             EngagementDepthMm   = (float)EngagementDepthSlider.Value,
-            EnforceMinThickness = MinThicknessCheck.IsChecked == true,
-            MinThicknessMm      = (float)MinThicknessSlider.Value,
-            AutorotationMinClearanceMm = (float)MinThicknessSlider.Value,
+            EnforceMinThickness = false,
+            MinThicknessMm      = 0f,
+            AutorotationMinClearanceMm = 0f,
             BuccalFlangeDepthMm = (float)FlangeDepthSlider.Value,
             FlangeOnUpper       = FlangeUpperRadio.IsChecked == true,
         };
@@ -564,12 +580,9 @@ public partial class SplintPlannerWindow : Window
 
         SplintVertices = splint;
 
-        // Build splint model
-        var splintModel = MeshHelper.BuildModel3D(splint, 80, 160, 255, 140);
-
-        // Combined view: show BOTH meshes + splint in BOTH viewports
-        // Upper viewport: upper mesh (already there) + lower mesh (translucent) + splint
-        // Lower viewport: lower mesh (already there) + upper mesh (translucent) + splint
+        // Combined review view: after generation use one viewport containing the
+        // superior cast, inferior cast, and splint. The cast toggles below-left
+        // let the user declutter the review without hiding the splint.
         void AddIfNotNull(GroupModel3D grp, float[]? mesh, byte r, byte g, byte b, byte a,
             ref MeshGeometryModel3D? slot)
         {
@@ -578,8 +591,8 @@ public partial class SplintPlannerWindow : Window
             slot = MeshHelper.BuildModel3D(mesh, r, g, b, a);
             grp.Children.Add(slot);
         }
-        AddIfNotNull(UpperGroup, splint, 80, 160, 255, 140, ref _splintUpperPreview);
-        AddIfNotNull(LowerGroup, splint, 80, 160, 255, 140, ref _splintLowerPreview);
+        SetUpperCastAlpha(170);
+        AddIfNotNull(UpperGroup, splint, 80, 160, 255, 255, ref _splintUpperPreview);
 
         if (lowerWasAutorotated && _lowerBaseModel != null)
         {
@@ -588,10 +601,8 @@ public partial class SplintPlannerWindow : Window
             LowerGroup.Children.Add(_lowerBaseModel);
         }
 
-        // Add opposing arch to each viewport (translucent, grey)
-        MeshGeometryModel3D? _lowerInUpper = null, _upperInLower = null;
-        AddIfNotNull(UpperGroup, lMesh, 200, 200, 195, 120, ref _lowerInUpper);
-        AddIfNotNull(LowerGroup, _upperMesh, 200, 200, 195, 120, ref _upperInLower);
+        AddIfNotNull(UpperGroup, lMesh, 200, 200, 195, 170, ref _lowerReviewModel);
+        EnterCombinedReviewMode();
 
         StepTitle.Text = "Step 2: Review Splint";
         StepInstructions.Text = lowerWasAutorotated
@@ -614,6 +625,134 @@ public partial class SplintPlannerWindow : Window
         GenerateBtn.IsEnabled = true;
     }
 
+    private void EnterCombinedReviewMode()
+    {
+        _isReviewMode = true;
+        SetPointEditingHandlersEnabled(false);
+        UpperViewportBorder.SetValue(Grid.ColumnSpanProperty, 3);
+        ViewportSplitter.Visibility = Visibility.Collapsed;
+        LowerViewportBorder.Visibility = Visibility.Collapsed;
+        ReviewVisibilityPanel.Visibility = Visibility.Visible;
+        UpperViewportTitle.Text = "Splint Review — superior cast + inferior cast + splint";
+        UpperViewportHint.Text = "Use the cast toggles to hide/show dental casts";
+        RemoveArchAnnotationsFromScene();
+
+        ShowUpperCastToggle.IsChecked = true;
+        ShowLowerCastToggle.IsChecked = true;
+        ApplyCastVisibility();
+    }
+
+    private void ExitCombinedReviewMode()
+    {
+        _isReviewMode = false;
+        SetPointEditingHandlersEnabled(true);
+        UpperViewportBorder.SetValue(Grid.ColumnSpanProperty, 1);
+        ViewportSplitter.Visibility = Visibility.Visible;
+        LowerViewportBorder.Visibility = Visibility.Visible;
+        ReviewVisibilityPanel.Visibility = Visibility.Collapsed;
+        UpperViewportTitle.Text = "🦷 Upper Arch (Maxilla) — Occlusal from below";
+        UpperViewportHint.Text = "Left-click = add point  |  Right-click = remove last";
+        RestoreArchAnnotationsToScene();
+
+        ShowUpperCastToggle.IsChecked = true;
+        ShowLowerCastToggle.IsChecked = true;
+        SetUpperCastAlpha(255);
+        ApplyCastVisibility();
+    }
+
+    private void SetPointEditingHandlersEnabled(bool enabled)
+    {
+        if (enabled == _pointEditingHandlersAttached)
+            return;
+
+        if (enabled)
+        {
+            UpperViewport.PreviewMouseLeftButtonDown += UpperViewport_MouseLeft;
+            UpperViewport.PreviewMouseRightButtonDown += UpperViewport_MouseRight;
+            UpperViewport.PreviewMouseMove += UpperViewport_MouseMove;
+            UpperViewport.PreviewMouseLeftButtonUp += UpperViewport_MouseLeftUp;
+            LowerViewport.PreviewMouseLeftButtonDown += LowerViewport_MouseLeft;
+            LowerViewport.PreviewMouseRightButtonDown += LowerViewport_MouseRight;
+            LowerViewport.PreviewMouseMove += LowerViewport_MouseMove;
+            LowerViewport.PreviewMouseLeftButtonUp += LowerViewport_MouseLeftUp;
+        }
+        else
+        {
+            UpperViewport.PreviewMouseLeftButtonDown -= UpperViewport_MouseLeft;
+            UpperViewport.PreviewMouseRightButtonDown -= UpperViewport_MouseRight;
+            UpperViewport.PreviewMouseMove -= UpperViewport_MouseMove;
+            UpperViewport.PreviewMouseLeftButtonUp -= UpperViewport_MouseLeftUp;
+            LowerViewport.PreviewMouseLeftButtonDown -= LowerViewport_MouseLeft;
+            LowerViewport.PreviewMouseRightButtonDown -= LowerViewport_MouseRight;
+            LowerViewport.PreviewMouseMove -= LowerViewport_MouseMove;
+            LowerViewport.PreviewMouseLeftButtonUp -= LowerViewport_MouseLeftUp;
+        }
+
+        _pointEditingHandlersAttached = enabled;
+    }
+
+    private void SetUpperCastAlpha(byte alpha)
+    {
+        if (_upperBaseModel != null)
+            UpperGroup.Children.Remove(_upperBaseModel);
+
+        _upperBaseModel = MeshHelper.BuildModel3D(_upperMesh, 240, 230, 210, alpha);
+        UpperGroup.Children.Add(_upperBaseModel);
+    }
+
+    private void CastVisibilityToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        ApplyCastVisibility();
+    }
+
+    private void ApplyCastVisibility()
+    {
+        if (!_reviewCastTogglesReady || ShowUpperCastToggle == null || ShowLowerCastToggle == null)
+            return;
+
+        if (_upperBaseModel != null)
+            _upperBaseModel.Visibility = ShowUpperCastToggle.IsChecked == true
+                ? Visibility.Visible
+                : Visibility.Hidden;
+        if (_lowerReviewModel != null)
+            _lowerReviewModel.Visibility = ShowLowerCastToggle.IsChecked == true
+                ? Visibility.Visible
+                : Visibility.Hidden;
+
+        ShowUpperCastToggle.Content = "Upper";
+        ShowLowerCastToggle.Content = "Lower";
+    }
+
+    private void RemoveArchAnnotationsFromScene()
+    {
+        foreach (var marker in _upperMarkers)
+            UpperGroup.Children.Remove(marker);
+        foreach (var marker in _lowerMarkers)
+            LowerGroup.Children.Remove(marker);
+
+        if (_upperCurveLine != null) UpperGroup.Children.Remove(_upperCurveLine);
+        if (_lowerCurveLine != null) LowerGroup.Children.Remove(_lowerCurveLine);
+        if (_upperRibbon != null) UpperGroup.Children.Remove(_upperRibbon);
+        if (_lowerRibbon != null) LowerGroup.Children.Remove(_lowerRibbon);
+    }
+
+    private void RestoreArchAnnotationsToScene()
+    {
+        foreach (var marker in _upperMarkers)
+            if (!UpperGroup.Children.Contains(marker)) UpperGroup.Children.Add(marker);
+        foreach (var marker in _lowerMarkers)
+            if (!LowerGroup.Children.Contains(marker)) LowerGroup.Children.Add(marker);
+
+        if (_upperCurveLine != null && !UpperGroup.Children.Contains(_upperCurveLine))
+            UpperGroup.Children.Add(_upperCurveLine);
+        if (_lowerCurveLine != null && !LowerGroup.Children.Contains(_lowerCurveLine))
+            LowerGroup.Children.Add(_lowerCurveLine);
+        if (_upperRibbon != null && !UpperGroup.Children.Contains(_upperRibbon))
+            UpperGroup.Children.Add(_upperRibbon);
+        if (_lowerRibbon != null && !LowerGroup.Children.Contains(_lowerRibbon))
+            LowerGroup.Children.Add(_lowerRibbon);
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  ACCEPT / CANCEL
     // ═══════════════════════════════════════════════════════════
@@ -630,9 +769,11 @@ public partial class SplintPlannerWindow : Window
             // Step back: remove preview, let user tweak
             if (_splintUpperPreview != null) { UpperGroup.Children.Remove(_splintUpperPreview); _splintUpperPreview = null; }
             if (_splintLowerPreview != null) { LowerGroup.Children.Remove(_splintLowerPreview); _splintLowerPreview = null; }
+            if (_lowerReviewModel != null) { UpperGroup.Children.Remove(_lowerReviewModel); _lowerReviewModel = null; }
             if (_lowerBaseModel != null) LowerGroup.Children.Remove(_lowerBaseModel);
             _lowerBaseModel = MeshHelper.BuildModel3D(_lowerMesh, 240, 230, 210);
             LowerGroup.Children.Add(_lowerBaseModel);
+            ExitCombinedReviewMode();
             SplintVertices = null;
             AcceptBtn.Visibility = Visibility.Collapsed;
             StepTitle.Text = "Step 1: Place ≥ 3 points on each arch";

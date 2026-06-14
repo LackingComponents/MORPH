@@ -182,10 +182,7 @@ public partial class MandibleAutorotationWindow : Window
         else
             ClearanceLabel.Text = $"≈ {clearance:F1} mm (closed: {_baseClearance:F1} mm)";
 
-        if (!float.IsNaN(clearance) && clearance < 2.0f)
-            WarningLabel.Text = "⚠ Clearance below 2 mm — open further so the splint can reach its minimum thickness.";
-        else
-            WarningLabel.Text = "";
+        WarningLabel.Text = "";
     }
 
     private double _openSignOrDefault()

@@ -422,6 +422,15 @@ public partial class MainWindow : Window
     // ═══ MPR: Keyboard Navigation ═══
     private void Window_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
+        if (e.Key == System.Windows.Input.Key.Space &&
+            VM?.EnlargedView > 0 &&
+            EnlargedOverlay.Visibility == Visibility.Visible)
+        {
+            ToggleEnlarge(0);
+            e.Handled = true;
+            return;
+        }
+
         if (VM == null || !VM.IsVolumeLoaded) return;
 
         bool isUp = e.Key == System.Windows.Input.Key.Up;
@@ -465,6 +474,17 @@ public partial class MainWindow : Window
     {
         if (VM == null || !VM.IsVolumeLoaded) return;
 
+        if (e.ClickCount == 2 && sender is Grid doubleClickGrid)
+        {
+            var view = GetViewTypeFromPanel(doubleClickGrid);
+            if (view > 0)
+            {
+                ToggleEnlarge(view);
+                e.Handled = true;
+                return;
+            }
+        }
+
         // Region-grow mode: the click drops a seed at the voxel under the cursor
         // instead of moving the crosshair.
         if (VM.IsRegionGrowMode && TryGetVoxelFromClick(sender, e, out int vx, out int vy, out int vz))
@@ -505,11 +525,13 @@ public partial class MainWindow : Window
         x = y = z = 0;
         if (VM == null || sender is not Grid grid) return false;
 
+        int viewType = GetViewTypeFromPanel(grid);
+        var rect = GetDisplayedSliceRect(grid, viewType);
         var pos = e.GetPosition(grid);
-        double rx = Math.Clamp(pos.X / grid.ActualWidth, 0, 1);
-        double ry = Math.Clamp(pos.Y / grid.ActualHeight, 0, 1);
+        double rx = Math.Clamp((pos.X - rect.Left) / rect.Width, 0, 1);
+        double ry = Math.Clamp((pos.Y - rect.Top) / rect.Height, 0, 1);
 
-        switch (GetViewTypeFromPanel(grid))
+        switch (viewType)
         {
             case 1: // Axial (X=Sagittal, Y=Coronal)
                 x = (int)(rx * VM.SagittalMax);
@@ -536,13 +558,15 @@ public partial class MainWindow : Window
         var grid = sender as Grid;
         if (grid == null) return;
 
-        var pos = e.GetPosition(grid);
-        double rx = Math.Clamp(pos.X / grid.ActualWidth, 0, 1);
-        double ry = Math.Clamp(pos.Y / grid.ActualHeight, 0, 1);
-
         if (VM == null) return;
 
-        switch (GetViewTypeFromPanel(grid))
+        int viewType = GetViewTypeFromPanel(grid);
+        var rect = GetDisplayedSliceRect(grid, viewType);
+        var pos = e.GetPosition(grid);
+        double rx = Math.Clamp((pos.X - rect.Left) / rect.Width, 0, 1);
+        double ry = Math.Clamp((pos.Y - rect.Top) / rect.Height, 0, 1);
+
+        switch (viewType)
         {
             case 1: // Axial (X=Sagittal, Y=Coronal)
                 VM.SagittalIndex = (int)(rx * VM.SagittalMax);
@@ -663,6 +687,7 @@ public partial class MainWindow : Window
 
         // AXIAL view: shows X (sagittal position) and Y (coronal position)
         DrawCrosshair(AxialCrosshairCanvas,
+            1,
             VM.SagittalIndex, VM.Volume!.Width - 1,
             VM.CoronalIndex, VM.Volume.Height - 1,
             _chBlue, _chGreen);
@@ -670,6 +695,7 @@ public partial class MainWindow : Window
         // CORONAL view: shows X (sagittal position) and Z (axial position, inverted)
         int coronalH = VM.Volume.Depth;
         DrawCrosshair(CoronalCrosshairCanvas,
+            2,
             VM.SagittalIndex, VM.Volume.Width - 1,
             coronalH - 1 - VM.AxialIndex, coronalH - 1,
             _chBlue, _chRed);
@@ -677,6 +703,7 @@ public partial class MainWindow : Window
         // SAGITTAL view: shows Y (coronal position) and Z (axial position, inverted)
         int sagH = VM.Volume.Depth;
         DrawCrosshair(SagittalCrosshairCanvas,
+            3,
             VM.CoronalIndex, VM.Volume.Height - 1,
             sagH - 1 - VM.AxialIndex, sagH - 1,
             _chGreen, _chRed);
@@ -688,18 +715,21 @@ public partial class MainWindow : Window
             {
                 case 1: // Axial
                     DrawCrosshair(EnlargedCrosshairCanvas,
+                        1,
                         VM.SagittalIndex, VM.Volume.Width - 1,
                         VM.CoronalIndex, VM.Volume.Height - 1,
                         _chBlue, _chGreen);
                     break;
                 case 2: // Coronal
                     DrawCrosshair(EnlargedCrosshairCanvas,
+                        2,
                         VM.SagittalIndex, VM.Volume.Width - 1,
                         coronalH - 1 - VM.AxialIndex, coronalH - 1,
                         _chBlue, _chRed);
                     break;
                 case 3: // Sagittal
                     DrawCrosshair(EnlargedCrosshairCanvas,
+                        3,
                         VM.CoronalIndex, VM.Volume.Height - 1,
                         sagH - 1 - VM.AxialIndex, sagH - 1,
                         _chGreen, _chRed);
@@ -708,18 +738,65 @@ public partial class MainWindow : Window
         }
     }
 
-    private void DrawCrosshair(Canvas canvas, int vIdx, int vMax, int hIdx, int hMax,
+    private void DrawCrosshair(Canvas canvas, int viewType, int vIdx, int vMax, int hIdx, int hMax,
         Brush vBrush, Brush hBrush)
     {
-        double w = canvas.ActualWidth;
-        double h = canvas.ActualHeight;
-        if (w < 5 || h < 5 || vMax <= 0 || hMax <= 0) return;
+        var rect = GetDisplayedSliceRect(canvas, viewType);
+        if (rect.Width < 5 || rect.Height < 5 || vMax <= 0 || hMax <= 0) return;
 
-        double vx = (vIdx / (double)vMax) * w;
-        double hy = (hIdx / (double)hMax) * h;
+        double vx = rect.Left + (vIdx / (double)vMax) * rect.Width;
+        double hy = rect.Top + (hIdx / (double)hMax) * rect.Height;
 
-        canvas.Children.Add(new Line { X1 = vx, Y1 = 0, X2 = vx, Y2 = h, Stroke = vBrush, StrokeThickness = 1 });
-        canvas.Children.Add(new Line { X1 = 0, Y1 = hy, X2 = w, Y2 = hy, Stroke = hBrush, StrokeThickness = 1 });
+        canvas.Children.Add(new Line { X1 = vx, Y1 = rect.Top, X2 = vx, Y2 = rect.Bottom, Stroke = vBrush, StrokeThickness = 1 });
+        canvas.Children.Add(new Line { X1 = rect.Left, Y1 = hy, X2 = rect.Right, Y2 = hy, Stroke = hBrush, StrokeThickness = 1 });
+    }
+
+    private Rect GetDisplayedSliceRect(FrameworkElement host, int viewType)
+    {
+        double hostWidth = host.ActualWidth;
+        double hostHeight = host.ActualHeight;
+        if (hostWidth <= 0 || hostHeight <= 0)
+            return new Rect(0, 0, Math.Max(hostWidth, 1), Math.Max(hostHeight, 1));
+
+        var (sliceWidth, sliceHeight) = GetSlicePhysicalSize(viewType);
+        if (sliceWidth <= 0 || sliceHeight <= 0)
+            return new Rect(0, 0, hostWidth, hostHeight);
+
+        double scale = Math.Min(hostWidth / sliceWidth, hostHeight / sliceHeight);
+        double displayWidth = sliceWidth * scale;
+        double displayHeight = sliceHeight * scale;
+
+        return new Rect(
+            (hostWidth - displayWidth) / 2.0,
+            (hostHeight - displayHeight) / 2.0,
+            displayWidth,
+            displayHeight);
+    }
+
+    private (double Width, double Height) GetSlicePhysicalSize(int viewType)
+    {
+        if (VM?.Volume == null) return (0, 0);
+
+        double sx = GetSpacing(0);
+        double sy = GetSpacing(1);
+        double sz = GetSpacing(2);
+
+        return viewType switch
+        {
+            1 => (VM.Volume.Width * sx, VM.Volume.Height * sy),
+            2 => (VM.Volume.Width * sx, VM.Volume.Depth * sz),
+            3 => (VM.Volume.Height * sy, VM.Volume.Depth * sz),
+            _ => (0, 0)
+        };
+    }
+
+    private double GetSpacing(int index)
+    {
+        if (VM?.Volume == null || VM.Volume.Spacing.Length <= index)
+            return 1.0;
+
+        double spacing = VM.Volume.Spacing[index];
+        return spacing > 0 ? spacing : 1.0;
     }
 
     // ═══ MPR: Enlarge ═══
