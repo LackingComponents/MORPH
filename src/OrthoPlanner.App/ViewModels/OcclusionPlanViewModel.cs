@@ -11,6 +11,7 @@ public partial class OcclusionPlanViewModel : ObservableObject
     // ── Surgery mode ──────────────────────────────────────
     public bool IsMaxillaBasedSurgery  { get; set; }
     public bool IsMandibleBasedSurgery { get; set; }
+    public bool IsManualOcclusionSurgery { get; set; }
     public bool IsKeepOcclusionSurgery { get; set; }
 
     // ── Maxilla movements ─────────────────────────────────
