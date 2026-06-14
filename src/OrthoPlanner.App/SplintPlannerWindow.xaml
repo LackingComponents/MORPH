@@ -116,20 +116,27 @@
             <StackPanel>
                 <TextBlock Text="Parameters" FontSize="14" FontWeight="Bold" Foreground="White" Margin="0,0,0,16"/>
 
+                <!-- Surgical sequence -->
+                <TextBlock Text="SEQUENCE" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,0,0,6"/>
+                <RadioButton x:Name="MaxillaFirstRadio" Content="Maxilla-first splint" IsChecked="True" GroupName="SplintSequence"
+                             Foreground="#AABBCC" FontSize="10" Margin="0,0,0,2"/>
+                <RadioButton x:Name="MandibleFirstRadio" Content="Mandible-first splint" GroupName="SplintSequence"
+                             Foreground="#AABBCC" FontSize="10" Margin="0,0,0,12"/>
+
                 <!-- Upper controls -->
                 <TextBlock Text="UPPER ARCH" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,0,0,6"/>
-                <TextBlock Text="Upper penetration:" FontSize="11" Foreground="#AABBCC"/>
+                <TextBlock Text="Upper crown envelope:" FontSize="11" Foreground="#AABBCC" ToolTip="How far the wafer wraps up around the maxillary crowns (tooth-socket depth on the top face)."/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,20">
-                    <Slider x:Name="UpperPenetrationSlider" Minimum="-5" Maximum="10" Value="0" Width="170" SmallChange="0.5" ValueChanged="UpperPenetrationSlider_ValueChanged"/>
-                    <TextBlock x:Name="UpperPenetrationLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                    <Slider x:Name="UpperPenetrationSlider" Minimum="-5" Maximum="10" Value="2" Width="170" SmallChange="0.5" ValueChanged="UpperPenetrationSlider_ValueChanged"/>
+                    <TextBlock x:Name="UpperPenetrationLabel" Text="2.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
 
                 <!-- Lower controls -->
                 <TextBlock Text="LOWER ARCH" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,0,0,6"/>
-                <TextBlock Text="Lower penetration:" FontSize="11" Foreground="#AABBCC"/>
+                <TextBlock Text="Lower crown envelope:" FontSize="11" Foreground="#AABBCC" ToolTip="How far the wafer wraps down around the mandibular crowns (tooth-socket depth on the bottom face)."/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,20">
-                    <Slider x:Name="LowerPenetrationSlider" Minimum="-5" Maximum="10" Value="0" Width="170" SmallChange="0.5" ValueChanged="LowerPenetrationSlider_ValueChanged"/>
-                    <TextBlock x:Name="LowerPenetrationLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                    <Slider x:Name="LowerPenetrationSlider" Minimum="-5" Maximum="10" Value="2" Width="170" SmallChange="0.5" ValueChanged="LowerPenetrationSlider_ValueChanged"/>
+                    <TextBlock x:Name="LowerPenetrationLabel" Text="2.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
 
                 <!-- General controls -->

@@ -72,17 +72,61 @@ public partial class MainViewModel
                 if (choice != MessageBoxResult.OK) return;
             }
 
+            if ((LeftCondyleCenter == null || RightCondyleCenter == null) && !EnsureCondyleFulcrum())
+                return;
+
             // Step 2: clinical pose/labelling is carried as config, not hard-coded.
             // (Geometry sliders are merged into this inside the window.)
+            OrthoPlanner.Core.Geometry.CondyleBox? leftCondyleBox = null;
+            OrthoPlanner.Core.Geometry.CondyleBox? rightCondyleBox = null;
+            if (LeftCondyleCenter is { } lc && LeftCondyleHalfExtents is { } lhe)
+            {
+                leftCondyleBox = new OrthoPlanner.Core.Geometry.CondyleBox(
+                    (float)lc.X, (float)lc.Y, (float)lc.Z,
+                    (float)lhe.X, (float)lhe.Y, (float)lhe.Z);
+            }
+            if (RightCondyleCenter is { } rc && RightCondyleHalfExtents is { } rhe)
+            {
+                rightCondyleBox = new OrthoPlanner.Core.Geometry.CondyleBox(
+                    (float)rc.X, (float)rc.Y, (float)rc.Z,
+                    (float)rhe.X, (float)rhe.Y, (float)rhe.Z);
+            }
+
+            // ── Step 0: mandibular autorotation (open the bite about the condylar axis) ──
+            // The mandible is opened about the condyle-center hinge in BOTH maxilla-first
+            // and mandible-first plans (clearance is what the wafer needs); the surgical
+            // labelling is chosen separately in the splint planner.
+            float[] lowerForSplint = lower;
+            double manualOpenDegrees = 0;
+            if (LeftCondyleCenter is { } lcC && RightCondyleCenter is { } rcC)
+            {
+                var autoWin = new MandibleAutorotationWindow(upper, lower, lcC, rcC)
+                {
+                    Owner = Application.Current.MainWindow
+                };
+                autoWin.ShowDialog();
+                if (!autoWin.Accepted)
+                    return; // surgeon backed out of the whole splint flow
+                if (autoWin.RotatedMandible != null && autoWin.RotatedMandible.Length >= 9)
+                    lowerForSplint = autoWin.RotatedMandible;
+                manualOpenDegrees = autoWin.OpenDegrees;
+            }
+            bool manualOpenApplied = Math.Abs(manualOpenDegrees) > 0.01;
+
             var config = new OrthoPlanner.Core.Geometry.SplintConfig
             {
                 Type               = OrthoPlanner.Core.Geometry.SplintType.Final,
                 FirstOperated      = OrthoPlanner.Core.Geometry.MobileJaw.Maxilla,
                 Scope              = OrthoPlanner.Core.Geometry.JawScope.Bimaxillary,
                 FromIntraoralScans = fromScans,
+                LeftCondyleBox     = leftCondyleBox,
+                RightCondyleBox    = rightCondyleBox,
+                // If the surgeon already opened the bite manually, respect that pose and
+                // skip the engine's automatic opening; otherwise keep it as a safety net.
+                EnableAutorotation = !manualOpenApplied,
             };
 
-            var win = new SplintPlannerWindow(upper, lower, this, config);
+            var win = new SplintPlannerWindow(upper, lowerForSplint, this, config);
             win.Owner = Application.Current.MainWindow;
 
             // Use Closed event so result is read after the window fully shuts down
@@ -94,11 +138,12 @@ public partial class MainViewModel
                         return;
 
                     var verts = win.SplintVertices;
+                    var labelledConfig = config with { FirstOperated = win.ChosenFirstOperated };
                     Application.Current.Dispatcher.Invoke(() =>
                     {
                         var splintMesh = new MeshViewModel
                         {
-                            Name      = config.DisplayName,
+                            Name      = labelledConfig.DisplayName,
                             Vertices  = verts,
                             ColorR    = 200,
                             ColorG    = 230,

@@ -29,6 +29,14 @@ public enum MobileJaw { Maxilla, Mandible }
 /// always seats between both arches regardless of how many jaws are operated).</summary>
 public enum JawScope { Bimaxillary, MaxillaOnly, MandibleOnly }
 
+/// <summary>Bounding box around a condyle in model coordinates.</summary>
+public sealed record CondyleBox(
+    float CenterX, float CenterY, float CenterZ,
+    float HalfExtentX, float HalfExtentY, float HalfExtentZ)
+{
+    public (float x, float y, float z) Center => (CenterX, CenterY, CenterZ);
+}
+
 /// <summary>
 /// A drilled hole the user wants in the splint, as a first-class protected void.
 /// Position is the entry point in model space; the hole is a cylinder of the given
@@ -102,6 +110,18 @@ public sealed record SplintConfig
     public bool  EnforceMinThickness{ get; init; } = true;
     public bool  FlagIncidentalPerforations { get; init; } = true;
 
+    // ── Condylar autorotation ──────────────────────────────────────────────
+    /// <summary>When true, rotate the mandible open around the condylar axis before
+    /// generating the wafer so the inter-arch space can receive the requested splint.</summary>
+    public bool EnableAutorotation { get; init; } = true;
+    /// <summary>Target minimum clearance between sampled upper/lower arch curves.
+    /// Values <= 0 fall back to MinThicknessMm.</summary>
+    public float AutorotationMinClearanceMm { get; init; } = 0f;
+    /// <summary>Safety cap for automatic mandibular opening.</summary>
+    public float AutorotationMaxDegrees { get; init; } = 8f;
+    public CondyleBox? LeftCondyleBox { get; init; }
+    public CondyleBox? RightCondyleBox { get; init; }
+
     // ── Step 6: buccal flange + fixation/protected holes ───────────────────
     /// <summary>Apical depth of the buccal flange skirt; 0 = no flange.</summary>
     public float BuccalFlangeDepthMm{ get; init; } = 0f;
@@ -124,7 +144,8 @@ public sealed record SplintConfig
                 JawScope.MandibleOnly => " (Mandible)",
                 _ => string.Empty
             };
-            return $"{kind} Splint{scope}";
+            string seq = FirstOperated == MobileJaw.Maxilla ? " [Maxilla-first]" : " [Mandible-first]";
+            return $"{kind} Splint{scope}{seq}";
         }
     }
 }

@@ -41,6 +41,8 @@ public partial class SplintPlannerWindow : Window
     // ── Splint preview ────────────────────────────────────────────────────
     private MeshGeometryModel3D? _splintUpperPreview;
     private MeshGeometryModel3D? _splintLowerPreview;
+    private MeshGeometryModel3D? _upperBaseModel;
+    private MeshGeometryModel3D? _lowerBaseModel;
 
     // ── Headlamp handler ────────────────────────────────────────────────────
     private EventHandler? _renderingHandler;
@@ -52,6 +54,9 @@ public partial class SplintPlannerWindow : Window
     // ── Result ────────────────────────────────────────────────────────────
     public bool   Accepted       { get; private set; }
     public float[]? SplintVertices { get; private set; }
+    /// <summary>The surgical sequence chosen by the radio buttons at generation time
+    /// (maxilla-first vs mandible-first), so the caller can label the produced wafer.</summary>
+    public MobileJaw ChosenFirstOperated { get; private set; } = MobileJaw.Maxilla;
 
     // ─────────────────────────────────────────────────────────────────────
     public SplintPlannerWindow(float[] upperMesh, float[] lowerMesh, MainViewModel _,
@@ -62,6 +67,8 @@ public partial class SplintPlannerWindow : Window
         _upperMesh = upperMesh;
         _lowerMesh = lowerMesh;
         _config    = config ?? new SplintConfig();
+        MaxillaFirstRadio.IsChecked = _config.FirstOperated == MobileJaw.Maxilla;
+        MandibleFirstRadio.IsChecked = _config.FirstOperated == MobileJaw.Mandible;
 
         // Drive the title from the clinical config (no hard-coded "Final Occlusion").
         Title = $"Splint Planner — {_config.DisplayName}";
@@ -107,8 +114,10 @@ public partial class SplintPlannerWindow : Window
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         // Load meshes into viewports
-        UpperGroup.Children.Add(MeshHelper.BuildModel3D(_upperMesh, 240, 230, 210));
-        LowerGroup.Children.Add(MeshHelper.BuildModel3D(_lowerMesh, 240, 230, 210));
+        _upperBaseModel = MeshHelper.BuildModel3D(_upperMesh, 240, 230, 210);
+        _lowerBaseModel = MeshHelper.BuildModel3D(_lowerMesh, 240, 230, 210);
+        UpperGroup.Children.Add(_upperBaseModel);
+        LowerGroup.Children.Add(_lowerBaseModel);
 
         // Camera: upper arch is viewed from BELOW (camera on -Z side, looking +Z)
         // i.e. the occlusal face of the maxilla faces downward; we look up at it.
@@ -187,8 +196,11 @@ public partial class SplintPlannerWindow : Window
         // Clicked on an existing marker? → start drag
         foreach (var hit in hits)
         {
-            int idx = _upperMarkers.IndexOf(hit.ModelHit as MeshGeometryModel3D);
-            if (idx >= 0) { _draggingUpper = true; _dragIdxUpper = idx; e.Handled = true; return; }
+            if (hit.ModelHit is MeshGeometryModel3D marker)
+            {
+                int idx = _upperMarkers.IndexOf(marker);
+                if (idx >= 0) { _draggingUpper = true; _dragIdxUpper = idx; e.Handled = true; return; }
+            }
         }
 
         // Clicked on the mesh → add new point
@@ -208,8 +220,11 @@ public partial class SplintPlannerWindow : Window
 
         foreach (var hit in hits)
         {
-            int idx = _lowerMarkers.IndexOf(hit.ModelHit as MeshGeometryModel3D);
-            if (idx >= 0) { _draggingLower = true; _dragIdxLower = idx; e.Handled = true; return; }
+            if (hit.ModelHit is MeshGeometryModel3D marker)
+            {
+                int idx = _lowerMarkers.IndexOf(marker);
+                if (idx >= 0) { _draggingLower = true; _dragIdxLower = idx; e.Handled = true; return; }
+            }
         }
 
         var pt = hits[0].PointHit;
@@ -231,7 +246,7 @@ public partial class SplintPlannerWindow : Window
         // Skip hits on markers
         foreach (var hit in hits)
         {
-            if (_upperMarkers.Contains(hit.ModelHit as MeshGeometryModel3D)) continue;
+            if (hit.ModelHit is MeshGeometryModel3D marker && _upperMarkers.Contains(marker)) continue;
             var pt = hit.PointHit;
             _upperArch.UpdatePoint(_dragIdxUpper, (float)pt.X, (float)pt.Y, (float)pt.Z);
             _upperMarkers[_dragIdxUpper].Transform = new TranslateTransform3D(pt.X, pt.Y, pt.Z);
@@ -248,7 +263,7 @@ public partial class SplintPlannerWindow : Window
         if (hits == null) return;
         foreach (var hit in hits)
         {
-            if (_lowerMarkers.Contains(hit.ModelHit as MeshGeometryModel3D)) continue;
+            if (hit.ModelHit is MeshGeometryModel3D marker && _lowerMarkers.Contains(marker)) continue;
             var pt = hit.PointHit;
             _lowerArch.UpdatePoint(_dragIdxLower, (float)pt.X, (float)pt.Y, (float)pt.Z);
             _lowerMarkers[_dragIdxLower].Transform = new TranslateTransform3D(pt.X, pt.Y, pt.Z);
@@ -499,15 +514,29 @@ public partial class SplintPlannerWindow : Window
             LingualBuccalBiasMm = (float)LingualBuccalBiasSlider.Value,
             BridgeThicknessMm   = (float)BridgeThicknessSlider.Value,
             SampleCount         = 160,
+            FirstOperated       = MaxillaFirstRadio.IsChecked == true
+                ? MobileJaw.Maxilla
+                : MobileJaw.Mandible,
+
+            // (sequence is also surfaced to the caller via ChosenFirstOperated)
 
             // Clinical-fit controls (steps 4–6).
             BlockoutUndercuts   = BlockoutCheck.IsChecked == true,
             EngagementDepthMm   = (float)EngagementDepthSlider.Value,
             EnforceMinThickness = MinThicknessCheck.IsChecked == true,
             MinThicknessMm      = (float)MinThicknessSlider.Value,
+            AutorotationMinClearanceMm = (float)MinThicknessSlider.Value,
             BuccalFlangeDepthMm = (float)FlangeDepthSlider.Value,
             FlangeOnUpper       = FlangeUpperRadio.IsChecked == true,
         };
+        ChosenFirstOperated = genConfig.FirstOperated;
+
+        var autorotation = SplintEngine.ApplyMandibularAutorotation(upperSampled, lowerSampled, lMesh, genConfig);
+        lowerSampled = autorotation.LowerCurve;
+        lMesh = autorotation.LowerMesh ?? lMesh;
+        bool lowerWasAutorotated = Math.Abs(autorotation.RotationDegrees) > 0.01f;
+        var preGenerationWarnings = autorotation.Warnings.ToList();
+        genConfig = genConfig with { EnableAutorotation = false };
 
         SplintResult result;
         try
@@ -552,13 +581,22 @@ public partial class SplintPlannerWindow : Window
         AddIfNotNull(UpperGroup, splint, 80, 160, 255, 140, ref _splintUpperPreview);
         AddIfNotNull(LowerGroup, splint, 80, 160, 255, 140, ref _splintLowerPreview);
 
+        if (lowerWasAutorotated && _lowerBaseModel != null)
+        {
+            LowerGroup.Children.Remove(_lowerBaseModel);
+            _lowerBaseModel = MeshHelper.BuildModel3D(lMesh, 240, 230, 210);
+            LowerGroup.Children.Add(_lowerBaseModel);
+        }
+
         // Add opposing arch to each viewport (translucent, grey)
         MeshGeometryModel3D? _lowerInUpper = null, _upperInLower = null;
-        AddIfNotNull(UpperGroup, _lowerMesh, 200, 200, 195, 120, ref _lowerInUpper);
+        AddIfNotNull(UpperGroup, lMesh, 200, 200, 195, 120, ref _lowerInUpper);
         AddIfNotNull(LowerGroup, _upperMesh, 200, 200, 195, 120, ref _upperInLower);
 
         StepTitle.Text = "Step 2: Review Splint";
-        StepInstructions.Text = "Blue solid = splint. Grey = opposing arch. Rotate to inspect. Click Accept.";
+        StepInstructions.Text = lowerWasAutorotated
+            ? $"Blue solid = splint. Mandible autorotated {autorotation.RotationDegrees:F1}°. Rotate to inspect. Click Accept."
+            : "Blue solid = splint. Grey = opposing arch. Rotate to inspect. Click Accept.";
 
         StatusText.Text = $"{splint.Length / 9:N0} triangles";
         if (result.IsManifold)
@@ -567,8 +605,9 @@ public partial class SplintPlannerWindow : Window
             QualityText.Text = $"⚠ Splint: {result.OpenEdgeFraction:P0} open edges — review before printing";
 
         // Surface any clinical/repair warnings (scan fallback, residual open edges, …).
-        if (result.Warnings.Count > 0)
-            MessageBox.Show(string.Join("\n\n", result.Warnings),
+        var allWarnings = preGenerationWarnings.Concat(result.Warnings).ToList();
+        if (allWarnings.Count > 0)
+            MessageBox.Show(string.Join("\n\n", allWarnings),
                 "Splint Warnings", MessageBoxButton.OK, MessageBoxImage.Warning);
 
         AcceptBtn.Visibility  = Visibility.Visible;
@@ -591,6 +630,9 @@ public partial class SplintPlannerWindow : Window
             // Step back: remove preview, let user tweak
             if (_splintUpperPreview != null) { UpperGroup.Children.Remove(_splintUpperPreview); _splintUpperPreview = null; }
             if (_splintLowerPreview != null) { LowerGroup.Children.Remove(_splintLowerPreview); _splintLowerPreview = null; }
+            if (_lowerBaseModel != null) LowerGroup.Children.Remove(_lowerBaseModel);
+            _lowerBaseModel = MeshHelper.BuildModel3D(_lowerMesh, 240, 230, 210);
+            LowerGroup.Children.Add(_lowerBaseModel);
             SplintVertices = null;
             AcceptBtn.Visibility = Visibility.Collapsed;
             StepTitle.Text = "Step 1: Place ≥ 3 points on each arch";
