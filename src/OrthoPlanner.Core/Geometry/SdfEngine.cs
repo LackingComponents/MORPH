@@ -209,11 +209,14 @@ public static class SdfOps
         var tris=new List<float>(1<<20);
         int nx=g.NX,ny=g.NY,nz=g.NZ;
 
+        Span<float> v=stackalloc float[8];
+        Span<(float x,float y,float z)> p=stackalloc (float,float,float)[8];
+        Span<(float x,float y,float z)> e=stackalloc (float,float,float)[12];
+
         for(int iz=0;iz<nz-1;iz++)
         for(int iy=0;iy<ny-1;iy++)
         for(int ix=0;ix<nx-1;ix++)
         {
-            Span<float> v=stackalloc float[8];
             v[0]=g.Solid[g.Idx(ix,  iy,  iz  )]>0?-0.5f:0.5f;
             v[1]=g.Solid[g.Idx(ix+1,iy,  iz  )]>0?-0.5f:0.5f;
             v[2]=g.Solid[g.Idx(ix+1,iy+1,iz  )]>0?-0.5f:0.5f;
@@ -229,11 +232,9 @@ public static class SdfOps
             float wx0=g.WorldX(ix),wx1=g.WorldX(ix+1);
             float wy0=g.WorldY(iy),wy1=g.WorldY(iy+1);
             float wz0=g.WorldZ(iz),wz1=g.WorldZ(iz+1);
-            Span<(float x,float y,float z)> p=stackalloc (float,float,float)[8];
             p[0]=(wx0,wy0,wz0);p[1]=(wx1,wy0,wz0);p[2]=(wx1,wy1,wz0);p[3]=(wx0,wy1,wz0);
             p[4]=(wx0,wy0,wz1);p[5]=(wx1,wy0,wz1);p[6]=(wx1,wy1,wz1);p[7]=(wx0,wy1,wz1);
 
-            Span<(float x,float y,float z)> e=stackalloc (float,float,float)[12];
             int em=MarchingCubesTables.EdgeTable[ci];
             if((em&   1)!=0)e[0] =L(p[0],v[0],p[1],v[1],isoValue);
             if((em&   2)!=0)e[1] =L(p[1],v[1],p[2],v[2],isoValue);

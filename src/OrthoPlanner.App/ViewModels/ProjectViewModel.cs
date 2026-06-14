@@ -33,13 +33,23 @@ public partial class MainViewModel
                         m.M21, m.M22, m.M23, m.M24,
                         m.M31, m.M32, m.M33, m.M34,
                         m.OffsetX, m.OffsetY, m.OffsetZ, m.M44 };
+            static double[]? PointToArray((double X, double Y, double Z)? p) =>
+                p.HasValue ? new[] { p.Value.X, p.Value.Y, p.Value.Z } : null;
 
             // 1. project.json — metadata
             var meta = new
             {
-                Version = "2.1",
+                Version = "2.2",
                 PatientName,
                 StudyDate,
+                CondyleFulcrums = new
+                {
+                    LeftCondyleCenter = PointToArray(LeftCondyleCenter),
+                    RightCondyleCenter = PointToArray(RightCondyleCenter),
+                    LeftCondyleHalfExtents = PointToArray(LeftCondyleHalfExtents),
+                    RightCondyleHalfExtents = PointToArray(RightCondyleHalfExtents),
+                    DentalMidlinePoint = PointToArray(DentalMidlinePoint)
+                },
                 Segmentation = new
                 {
                     BoneMinHU, BoneMaxHU,
@@ -48,13 +58,23 @@ public partial class MainViewModel
                     CustomMinHU, CustomMaxHU,
                     Segments = Segments.Select(s => new { s.Name, s.IsVisible, s.ColorR, s.ColorG, s.ColorB }).ToArray()
                 },
-                ImportedMeshes = ImportedMeshes.Select(m => new { m.Name, m.IsVisible, m.ColorR, m.ColorG, m.ColorB }).ToArray(),
+                ImportedMeshes = ImportedMeshes.Select(m => new { m.Name, m.IsVisible, m.ColorR, m.ColorG, m.ColorB, ScanType = m.ScanType.ToString() }).ToArray(),
                 // Issue 11: occlusion meshes with their alignment transforms
                 OcclusionMeshes = LoadedOcclusions.Select(o => new
                 {
                     o.Name, o.IsVisible, o.ColorR, o.ColorG, o.ColorB,
                     MaxillaOcclusionTransform = MatrixToArray(o.MaxillaOcclusionTransform),
                     MandibleOcclusionTransform = MatrixToArray(o.MandibleOcclusionTransform)
+                }).ToArray(),
+                CurrentSurgeryPlan = SnapshotCurrentPlan("Current"),
+                ActiveOcclusionIndex = _activeOcclusionNode != null ? LoadedOcclusions.IndexOf(_activeOcclusionNode.Occlusion) : -1,
+                OcclusionPlanNodes = OcclusionNodes.Select(n => new
+                {
+                    n.Name,
+                    n.IsExpanded,
+                    n.IsActive,
+                    OcclusionIndex = LoadedOcclusions.IndexOf(n.Occlusion),
+                    Plans = n.Plans.ToArray()
                 }).ToArray(),
                 Volume = Volume != null ? new { Volume.Width, Volume.Height, Volume.Depth, Volume.Spacing } : null,
                 WindowCenter,
@@ -174,6 +194,38 @@ public partial class MainViewModel
             StudyDate = FormatStudyDate(root.GetProperty("StudyDate").GetString() ?? "");
             WindowCenter = root.GetProperty("WindowCenter").GetDouble();
             WindowWidth = root.GetProperty("WindowWidth").GetDouble();
+            static (double X, double Y, double Z)? ReadPoint(System.Text.Json.JsonElement parent, string name)
+            {
+                if (!parent.TryGetProperty(name, out var point) || point.ValueKind == System.Text.Json.JsonValueKind.Null)
+                    return null;
+
+                if (point.ValueKind == System.Text.Json.JsonValueKind.Array && point.GetArrayLength() >= 3)
+                    return (point[0].GetDouble(), point[1].GetDouble(), point[2].GetDouble());
+
+                if (point.TryGetProperty("X", out var x)
+                    && point.TryGetProperty("Y", out var y)
+                    && point.TryGetProperty("Z", out var z))
+                    return (x.GetDouble(), y.GetDouble(), z.GetDouble());
+
+                return null;
+            }
+
+            if (root.TryGetProperty("CondyleFulcrums", out var condyleNode))
+            {
+                LeftCondyleCenter = ReadPoint(condyleNode, nameof(LeftCondyleCenter));
+                RightCondyleCenter = ReadPoint(condyleNode, nameof(RightCondyleCenter));
+                LeftCondyleHalfExtents = ReadPoint(condyleNode, nameof(LeftCondyleHalfExtents));
+                RightCondyleHalfExtents = ReadPoint(condyleNode, nameof(RightCondyleHalfExtents));
+                DentalMidlinePoint = ReadPoint(condyleNode, nameof(DentalMidlinePoint));
+            }
+            else
+            {
+                LeftCondyleCenter = null;
+                RightCondyleCenter = null;
+                LeftCondyleHalfExtents = null;
+                RightCondyleHalfExtents = null;
+                DentalMidlinePoint = null;
+            }
             var segNode = root.GetProperty("Segmentation");
 
             // Backwards compatibility for older project files
@@ -246,6 +298,93 @@ public partial class MainViewModel
                 }
             }
 
+            static DentalScanType ReadScanType(System.Text.Json.JsonElement meshMeta, string name)
+            {
+                if (meshMeta.TryGetProperty("ScanType", out var scanTypeProp)
+                    && Enum.TryParse<DentalScanType>(scanTypeProp.GetString(), ignoreCase: true, out var scanType))
+                {
+                    return scanType;
+                }
+
+                // Older project files did not persist ScanType; infer from the default import names.
+                if (name.Contains("Maxillary", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("Upper", StringComparison.OrdinalIgnoreCase))
+                    return DentalScanType.Upper;
+
+                if (name.Contains("Mandibular", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("Lower", StringComparison.OrdinalIgnoreCase))
+                    return DentalScanType.Lower;
+
+                return DentalScanType.Other;
+            }
+
+            static bool ReadBool(System.Text.Json.JsonElement parent, string name, bool defaultValue = false) =>
+                parent.TryGetProperty(name, out var value) && (value.ValueKind == System.Text.Json.JsonValueKind.True || value.ValueKind == System.Text.Json.JsonValueKind.False)
+                    ? value.GetBoolean()
+                    : defaultValue;
+
+            static double ReadDouble(System.Text.Json.JsonElement parent, string name) =>
+                parent.TryGetProperty(name, out var value) && value.ValueKind == System.Text.Json.JsonValueKind.Number
+                    ? value.GetDouble()
+                    : 0;
+
+            static string ReadString(System.Text.Json.JsonElement parent, string name, string defaultValue) =>
+                parent.TryGetProperty(name, out var value) && value.ValueKind == System.Text.Json.JsonValueKind.String
+                    ? value.GetString() ?? defaultValue
+                    : defaultValue;
+
+            static OcclusionPlanViewModel ReadPlan(System.Text.Json.JsonElement planMeta, string defaultName) => new()
+            {
+                Name = ReadString(planMeta, nameof(OcclusionPlanViewModel.Name), defaultName),
+                IsSelected = ReadBool(planMeta, nameof(OcclusionPlanViewModel.IsSelected)),
+                IsMaxillaBasedSurgery = ReadBool(planMeta, nameof(OcclusionPlanViewModel.IsMaxillaBasedSurgery), true),
+                IsMandibleBasedSurgery = ReadBool(planMeta, nameof(OcclusionPlanViewModel.IsMandibleBasedSurgery)),
+                IsManualOcclusionSurgery = ReadBool(planMeta, nameof(OcclusionPlanViewModel.IsManualOcclusionSurgery)),
+                IsKeepOcclusionSurgery = ReadBool(planMeta, nameof(OcclusionPlanViewModel.IsKeepOcclusionSurgery)),
+                MaxillaLat = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.MaxillaLat)),
+                MaxillaAnt = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.MaxillaAnt)),
+                MaxillaVert = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.MaxillaVert)),
+                MaxillaRoll = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.MaxillaRoll)),
+                MaxillaPitch = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.MaxillaPitch)),
+                MaxillaYaw = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.MaxillaYaw)),
+                MandibleLat = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.MandibleLat)),
+                MandibleAnt = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.MandibleAnt)),
+                MandibleVert = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.MandibleVert)),
+                MandibleRoll = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.MandibleRoll)),
+                MandiblePitch = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.MandiblePitch)),
+                MandibleYaw = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.MandibleYaw)),
+                RightRamusLat = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.RightRamusLat)),
+                RightRamusAnt = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.RightRamusAnt)),
+                RightRamusVert = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.RightRamusVert)),
+                RightRamusRoll = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.RightRamusRoll)),
+                RightRamusPitch = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.RightRamusPitch)),
+                RightRamusYaw = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.RightRamusYaw)),
+                LeftRamusLat = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.LeftRamusLat)),
+                LeftRamusAnt = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.LeftRamusAnt)),
+                LeftRamusVert = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.LeftRamusVert)),
+                LeftRamusRoll = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.LeftRamusRoll)),
+                LeftRamusPitch = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.LeftRamusPitch)),
+                LeftRamusYaw = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.LeftRamusYaw)),
+                ChinLat = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.ChinLat)),
+                ChinAnt = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.ChinAnt)),
+                ChinVert = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.ChinVert)),
+                ChinRoll = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.ChinRoll)),
+                ChinPitch = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.ChinPitch)),
+                ChinYaw = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.ChinYaw)),
+                SavedMaxillaLat = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMaxillaLat)),
+                SavedMaxillaAnt = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMaxillaAnt)),
+                SavedMaxillaVert = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMaxillaVert)),
+                SavedMaxillaRoll = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMaxillaRoll)),
+                SavedMaxillaPitch = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMaxillaPitch)),
+                SavedMaxillaYaw = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMaxillaYaw)),
+                SavedMandibleLat = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMandibleLat)),
+                SavedMandibleAnt = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMandibleAnt)),
+                SavedMandibleVert = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMandibleVert)),
+                SavedMandibleRoll = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMandibleRoll)),
+                SavedMandiblePitch = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMandiblePitch)),
+                SavedMandibleYaw = ReadDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMandibleYaw)),
+            };
+
             // 3. Read imported meshes
             ImportedMeshes.Clear();
             var meshesArr = root.GetProperty("ImportedMeshes");
@@ -270,6 +409,7 @@ public partial class MainViewModel
                         ColorR = meshMeta.TryGetProperty("ColorR", out var cr) ? cr.GetByte() : (byte)245,
                         ColorG = meshMeta.TryGetProperty("ColorG", out var cg) ? cg.GetByte() : (byte)245,
                         ColorB = meshMeta.TryGetProperty("ColorB", out var cb) ? cb.GetByte() : (byte)230,
+                        ScanType = ReadScanType(meshMeta, name),
                         IsVisible = meshMeta.GetProperty("IsVisible").GetBoolean()
                     };
                     meshVm.OnVisibilityChanged = RefreshCombinedModel;
@@ -370,6 +510,86 @@ public partial class MainViewModel
                 }
             }
 
+            OcclusionNodeViewModel? activeNode = null;
+            OcclusionNodeViewModel? selectedNode = null;
+            OcclusionPlanViewModel? selectedPlan = null;
+            int activeOcclusionIndex = root.TryGetProperty("ActiveOcclusionIndex", out var activeIndexProp)
+                && activeIndexProp.ValueKind == System.Text.Json.JsonValueKind.Number
+                    ? activeIndexProp.GetInt32()
+                    : -1;
+
+            if (root.TryGetProperty("OcclusionPlanNodes", out var nodeArr))
+            {
+                int nodeIdx = 0;
+                foreach (var nodeMeta in nodeArr.EnumerateArray())
+                {
+                    int occlusionIndex = nodeMeta.TryGetProperty("OcclusionIndex", out var oi)
+                        && oi.ValueKind == System.Text.Json.JsonValueKind.Number
+                            ? oi.GetInt32()
+                            : nodeIdx;
+                    if (occlusionIndex < 0 || occlusionIndex >= LoadedOcclusions.Count)
+                    {
+                        nodeIdx++;
+                        continue;
+                    }
+
+                    var node = new OcclusionNodeViewModel
+                    {
+                        Name = ReadString(nodeMeta, nameof(OcclusionNodeViewModel.Name), $"Occlusion {nodeIdx + 1}"),
+                        IsExpanded = ReadBool(nodeMeta, nameof(OcclusionNodeViewModel.IsExpanded), true),
+                        Occlusion = LoadedOcclusions[occlusionIndex]
+                    };
+
+                    if (nodeMeta.TryGetProperty("Plans", out var plansArr))
+                    {
+                        int planIdx = 0;
+                        foreach (var planMeta in plansArr.EnumerateArray())
+                        {
+                            var plan = ReadPlan(planMeta, $"Plan {planIdx + 1}");
+                            node.Plans.Add(plan);
+                            if (plan.IsSelected)
+                            {
+                                selectedPlan = plan;
+                                selectedNode = node;
+                            }
+                            planIdx++;
+                        }
+                    }
+
+                    OcclusionNodes.Add(node);
+                    if (ReadBool(nodeMeta, nameof(OcclusionNodeViewModel.IsActive)) || occlusionIndex == activeOcclusionIndex)
+                        activeNode = node;
+                    nodeIdx++;
+                }
+            }
+
+            if (OcclusionNodes.Count == 0)
+            {
+                for (int i = 0; i < LoadedOcclusions.Count; i++)
+                {
+                    var node = new OcclusionNodeViewModel
+                    {
+                        Name = $"Occlusion {i + 1}",
+                        Occlusion = LoadedOcclusions[i],
+                        IsExpanded = true
+                    };
+                    OcclusionNodes.Add(node);
+                    if (i == activeOcclusionIndex)
+                        activeNode = node;
+                }
+            }
+
+            RefreshCombinedModel();
+            SetActiveOcclusionNode(selectedNode ?? activeNode ?? OcclusionNodes.FirstOrDefault());
+            if (selectedPlan != null)
+            {
+                ApplyPlan(selectedPlan);
+            }
+            else if (root.TryGetProperty("CurrentSurgeryPlan", out var currentPlanMeta))
+            {
+                ApplyPlan(ReadPlan(currentPlanMeta, "Current"));
+            }
+
             // 6. (Issue 10) Read cephalometry landmarks into SavedCephLandmarks
             SavedCephLandmarks = new List<CephLandmarkSave>();
             if (root.TryGetProperty("CephLandmarks", out var cephArr))
@@ -388,6 +608,7 @@ public partial class MainViewModel
             }
 
             RefreshCombinedModel();
+            OnPropertyChanged(nameof(HasUpperAndLowerScans));
             StatusText = $"Project loaded: {Path.GetFileName(dialog.FileName)}";
         }
         catch (Exception ex)

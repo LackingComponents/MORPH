@@ -362,6 +362,8 @@ public partial class MainViewModel
                 // Store condylar axis data & midline
                 LeftCondyleCenter  = wizard.LeftCondyleCenter;
                 RightCondyleCenter = wizard.RightCondyleCenter;
+                LeftCondyleHalfExtents = wizard.LeftCondyleHalfExtents;
+                RightCondyleHalfExtents = wizard.RightCondyleHalfExtents;
                 DentalMidlinePoint = wizard.DentalMidlinePoint;
 
                 // Create Cranium segment
