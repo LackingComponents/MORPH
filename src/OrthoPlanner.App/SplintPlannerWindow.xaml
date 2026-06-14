@@ -116,20 +116,27 @@
             <StackPanel>
                 <TextBlock Text="Parameters" FontSize="14" FontWeight="Bold" Foreground="White" Margin="0,0,0,16"/>
 
+                <!-- Surgical sequence -->
+                <TextBlock Text="SEQUENCE" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,0,0,6"/>
+                <RadioButton x:Name="MaxillaFirstRadio" Content="Maxilla-first splint" IsChecked="True" GroupName="SplintSequence"
+                             Foreground="#AABBCC" FontSize="10" Margin="0,0,0,2"/>
+                <RadioButton x:Name="MandibleFirstRadio" Content="Mandible-first splint" GroupName="SplintSequence"
+                             Foreground="#AABBCC" FontSize="10" Margin="0,0,0,12"/>
+
                 <!-- Upper controls -->
                 <TextBlock Text="UPPER ARCH" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,0,0,6"/>
-                <TextBlock Text="Upper penetration:" FontSize="11" Foreground="#AABBCC"/>
+                <TextBlock Text="Upper crown envelope:" FontSize="11" Foreground="#AABBCC" ToolTip="How far the wafer wraps up around the maxillary crowns (tooth-socket depth on the top face)."/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,20">
-                    <Slider x:Name="UpperPenetrationSlider" Minimum="-5" Maximum="10" Value="0" Width="170" SmallChange="0.5" ValueChanged="UpperPenetrationSlider_ValueChanged"/>
-                    <TextBlock x:Name="UpperPenetrationLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                    <Slider x:Name="UpperPenetrationSlider" Minimum="-5" Maximum="10" Value="2" Width="170" SmallChange="0.5" ValueChanged="UpperPenetrationSlider_ValueChanged"/>
+                    <TextBlock x:Name="UpperPenetrationLabel" Text="2.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
 
                 <!-- Lower controls -->
                 <TextBlock Text="LOWER ARCH" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,0,0,6"/>
-                <TextBlock Text="Lower penetration:" FontSize="11" Foreground="#AABBCC"/>
+                <TextBlock Text="Lower crown envelope:" FontSize="11" Foreground="#AABBCC" ToolTip="How far the wafer wraps down around the mandibular crowns (tooth-socket depth on the bottom face)."/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,20">
-                    <Slider x:Name="LowerPenetrationSlider" Minimum="-5" Maximum="10" Value="0" Width="170" SmallChange="0.5" ValueChanged="LowerPenetrationSlider_ValueChanged"/>
-                    <TextBlock x:Name="LowerPenetrationLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                    <Slider x:Name="LowerPenetrationSlider" Minimum="-5" Maximum="10" Value="2" Width="170" SmallChange="0.5" ValueChanged="LowerPenetrationSlider_ValueChanged"/>
+                    <TextBlock x:Name="LowerPenetrationLabel" Text="2.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
 
                 <!-- General controls -->
@@ -152,6 +159,39 @@
                     <Slider x:Name="BridgeThicknessSlider" Minimum="0" Maximum="10" Value="0" Width="170" SmallChange="0.5" ValueChanged="BridgeThicknessSlider_ValueChanged"/>
                     <TextBlock x:Name="BridgeThicknessLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
+
+                <!-- Clinical fit & printability -->
+                <TextBlock Text="CLINICAL FIT" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,8,0,6"/>
+
+                <CheckBox x:Name="BlockoutCheck" Content="Block out undercuts (seatability)" IsChecked="True"
+                          Foreground="#AABBCC" Margin="0,0,0,8"
+                          ToolTip="Straightens each tooth pocket into a vertical pull-out path so the splint can seat and release."/>
+
+                <TextBlock Text="Engagement depth:" FontSize="11" Foreground="#AABBCC" ToolTip="How far past the height of contour each pocket may engage before it is blocked out."/>
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
+                    <Slider x:Name="EngagementDepthSlider" Minimum="0" Maximum="5" Value="1.5" Width="170" SmallChange="0.25" ValueChanged="EngagementDepthSlider_ValueChanged"/>
+                    <TextBlock x:Name="EngagementDepthLabel" Text="1.5 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <CheckBox x:Name="MinThicknessCheck" Content="Enforce minimum thickness" IsChecked="True"
+                          Foreground="#AABBCC" Margin="0,0,0,8"
+                          ToolTip="Thickens any part of the connecting body that is thinner than the minimum; otherwise thin spots are flagged as possible perforations."/>
+
+                <TextBlock Text="Minimum thickness:" FontSize="11" Foreground="#AABBCC"/>
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
+                    <Slider x:Name="MinThicknessSlider" Minimum="0.5" Maximum="5" Value="2" Width="170" SmallChange="0.25" ValueChanged="MinThicknessSlider_ValueChanged"/>
+                    <TextBlock x:Name="MinThicknessLabel" Text="2.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <TextBlock Text="Buccal flange depth:" FontSize="11" Foreground="#AABBCC" ToolTip="Apical fixation skirt down the buccal wall (0 = none). Screw holes can be carved through it."/>
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,4">
+                    <Slider x:Name="FlangeDepthSlider" Minimum="0" Maximum="15" Value="0" Width="170" SmallChange="0.5" ValueChanged="FlangeDepthSlider_ValueChanged"/>
+                    <TextBlock x:Name="FlangeDepthLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+                <RadioButton x:Name="FlangeUpperRadio" Content="on upper" IsChecked="True" GroupName="FlangeArch"
+                             Foreground="#AABBCC" FontSize="10" Margin="0,0,0,2"/>
+                <RadioButton x:Name="FlangeLowerRadio" Content="on lower" GroupName="FlangeArch"
+                             Foreground="#AABBCC" FontSize="10" Margin="0,0,0,4"/>
             </StackPanel>
         </Border>
 

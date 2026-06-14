@@ -1,3 +1,0 @@
-Visual3D: ModelVisual3D
-  Model3D: Model3DGroup
-Visual3D: ModelVisual3D

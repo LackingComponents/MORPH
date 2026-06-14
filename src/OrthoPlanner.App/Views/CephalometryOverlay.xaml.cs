@@ -133,22 +133,13 @@ public partial class CephalometryOverlay : UserControl
         // Default tool highlight
         UpdateToolButtonHighlights();
 
-        // 3D click detection: in navigation mode the central overlay becomes
-        // mouse-transparent so HelixToolkit receives its native controls. In
-        // placement mode, ViewportGrid is re-enabled and clicks are ray-cast into
-        // the shared viewport to place landmarks/measurements.
-        ViewportGrid.PreviewMouseLeftButtonUp += OnViewport3DMouseLeftButtonUp;
-        ViewportGrid.PreviewMouseLeftButtonDown += Viewport3D_PreviewMouseLeftButtonDown;
-
-        // Forward navigation gestures (right/middle/wheel) to the shared MainViewport
-        // while ViewportGrid is hit-testable (placement mode), so the user can still
-        // rotate/pan/zoom without first leaving placement mode.
-        ViewportGrid.PreviewMouseRightButtonDown += ViewportGrid_PreviewMouseRightButtonDown;
-        ViewportGrid.PreviewMouseRightButtonUp   += ViewportGrid_PreviewMouseRightButtonUp;
-        ViewportGrid.PreviewMouseDown            += ViewportGrid_PreviewMouseDown;
-        ViewportGrid.PreviewMouseUp              += ViewportGrid_PreviewMouseUp;
-        ViewportGrid.PreviewMouseWheel           += ViewportGrid_PreviewMouseWheel;
-        ViewportGrid.MouseEnter                  += (_, _) => UpdateViewportGridHitTest();
+        // 3D click detection: in 3D mode the central overlay is always
+        // mouse-transparent so HelixToolkit receives every button natively
+        // (rotate/pan/zoom). Placement clicks are intercepted via Preview
+        // handlers attached directly to the shared viewport (see
+        // AttachViewportPlacementHandlers), which consume the left click only
+        // when actually placing a landmark/measurement.
+        ViewportGrid.MouseEnter += (_, _) => UpdateViewportGridHitTest();
 
         IsVisibleChanged += OnCephVisibilityChanged;
 
@@ -642,11 +633,11 @@ public partial class CephalometryOverlay : UserControl
         (Application.Current.MainWindow as MainWindow)?.MainViewport;
 
     // ─── 3D viewport pass-through / placement routing ────────────────────────
-    // In 3D Select mode (no Shift), the central ViewportGrid is not hit-testable:
-    // the real Helix viewport underneath receives mouse input directly, preserving
-    // its native rotate / pan / zoom controls.
-    // In 3D placement mode (non-Select tool, or Shift held), ViewportGrid becomes
-    // hit-testable again so clicks can be ray-cast onto the 3D surface.
+    // In 3D mode the central ViewportGrid is never hit-testable: the real Helix
+    // viewport receives ALL mouse input directly (rotate / pan / zoom for every
+    // button). Placement is handled by Preview handlers attached straight to the
+    // shared viewport, which consume the left click only when a tool/landmark is
+    // actually being placed. No synthetic event forwarding (RaiseEvent) is used.
     // In 2D mode, the DRR canvas remains fully interactive.
 
     private bool ShouldCaptureLeftClickForPlacement()
@@ -660,10 +651,31 @@ public partial class CephalometryOverlay : UserControl
 
     private void UpdateViewportGridHitTest()
     {
-        bool shouldCapture = !_is3DMode || ShouldCaptureLeftClickForPlacement();
+        bool shouldCapture = !_is3DMode;
 
         ViewportGrid.IsHitTestVisible = shouldCapture;
         ViewportGrid.Background = shouldCapture ? Brushes.Transparent : null;
+    }
+
+    private HelixToolkit.Wpf.SharpDX.Viewport3DX? _hookedViewport;
+
+    private void AttachViewportPlacementHandlers()
+    {
+        var vp = SharedViewport3D;
+        if (vp == null || _hookedViewport == vp) return;
+        DetachViewportPlacementHandlers();
+
+        _hookedViewport = vp;
+        vp.PreviewMouseLeftButtonDown += Viewport3D_PreviewMouseLeftButtonDown;
+        vp.PreviewMouseLeftButtonUp   += OnViewport3DMouseLeftButtonUp;
+    }
+
+    private void DetachViewportPlacementHandlers()
+    {
+        if (_hookedViewport == null) return;
+        _hookedViewport.PreviewMouseLeftButtonDown -= Viewport3D_PreviewMouseLeftButtonDown;
+        _hookedViewport.PreviewMouseLeftButtonUp   -= OnViewport3DMouseLeftButtonUp;
+        _hookedViewport = null;
     }
 
     private void AttachHostKeyboardHandlers()
@@ -709,72 +721,6 @@ public partial class CephalometryOverlay : UserControl
         }
     }
 
-    // Forwarders. These fire only when ViewportGrid is hit-test-visible (i.e. 2D
-    // mode, or 3D placement mode). In 2D mode they no-op so the DRR handlers run.
-    // In 3D placement mode we forward to the shared viewport so navigation still
-    // works without exiting placement.
-
-    private void ViewportGrid_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
-    {
-        if (!_is3DMode) return;
-        var vp = SharedViewport3D;
-        if (vp == null) return;
-        var args = new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta)
-        {
-            RoutedEvent = Mouse.MouseWheelEvent,
-            Source = vp
-        };
-        vp.RaiseEvent(args);
-        e.Handled = true;
-    }
-
-    private void ViewportGrid_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (!_is3DMode) return;
-        ForwardMouseButton(e, MouseButton.Right, isDown: true);
-    }
-
-    private void ViewportGrid_PreviewMouseRightButtonUp(object sender, MouseButtonEventArgs e)
-    {
-        if (!_is3DMode) return;
-        ForwardMouseButton(e, MouseButton.Right, isDown: false);
-    }
-
-    private void ViewportGrid_PreviewMouseDown(object sender, MouseButtonEventArgs e)
-    {
-        if (!_is3DMode) return;
-        if (e.ChangedButton != MouseButton.Middle) return;
-        ForwardMouseButton(e, MouseButton.Middle, isDown: true);
-    }
-
-    private void ViewportGrid_PreviewMouseUp(object sender, MouseButtonEventArgs e)
-    {
-        if (!_is3DMode) return;
-        if (e.ChangedButton != MouseButton.Middle) return;
-        ForwardMouseButton(e, MouseButton.Middle, isDown: false);
-    }
-
-    private void ForwardMouseButton(MouseButtonEventArgs original, MouseButton button, bool isDown)
-    {
-        var vp = SharedViewport3D;
-        if (vp == null) return;
-        RoutedEvent routed = (button, isDown) switch
-        {
-            (MouseButton.Left, true)   => UIElement.MouseLeftButtonDownEvent,
-            (MouseButton.Left, false)  => UIElement.MouseLeftButtonUpEvent,
-            (MouseButton.Right, true)  => UIElement.MouseRightButtonDownEvent,
-            (MouseButton.Right, false) => UIElement.MouseRightButtonUpEvent,
-            _                          => isDown ? Mouse.MouseDownEvent : Mouse.MouseUpEvent
-        };
-        var args = new MouseButtonEventArgs(original.MouseDevice, original.Timestamp, button)
-        {
-            RoutedEvent = routed,
-            Source = vp
-        };
-        vp.RaiseEvent(args);
-        original.Handled = true;
-    }
-
     // ─── Ceph overlay visibility: refresh spheres on enter, hide on exit ────
 
     private void OnCephVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
@@ -782,6 +728,7 @@ public partial class CephalometryOverlay : UserControl
         if ((bool)e.NewValue)
         {
             AttachHostKeyboardHandlers();
+            AttachViewportPlacementHandlers();
             // Became visible: rebuild landmark spheres on the shared viewport
             if (_initialized) Refresh3DLandmarks();
             UpdateViewportGridHitTest();
@@ -789,6 +736,7 @@ public partial class CephalometryOverlay : UserControl
         else
         {
             DetachHostKeyboardHandlers();
+            DetachViewportPlacementHandlers();
             // Became hidden: respect the global "show in 3D" toggle on MainWindow's
             // Measurements tab — landmark data stays in the ViewModel but visuals
             // disappear from the 3D viewport unless explicitly kept visible.
@@ -819,15 +767,10 @@ public partial class CephalometryOverlay : UserControl
     private void Viewport3D_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         // Only intercept the left click when we are about to place something.
-        // Otherwise let it fall through to HelixToolkit (camera rotation).
-        if (!ShouldCaptureLeftClickForPlacement())
-        {
-            if (_is3DMode)
-            {
-                ForwardMouseButton(e, MouseButton.Left, isDown: true);
-            }
-            return;
-        }
+        // Otherwise let it fall through to HelixToolkit (camera rotation) —
+        // this handler sits on the real viewport, so not handling the event
+        // is all that's needed.
+        if (!ShouldCaptureLeftClickForPlacement()) return;
         var vp = SharedViewport3D;
         if (vp == null) return;
         var hit = vp.FindHits(e.GetPosition(vp)).FirstOrDefault();
