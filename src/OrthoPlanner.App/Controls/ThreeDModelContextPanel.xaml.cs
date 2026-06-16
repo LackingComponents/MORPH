@@ -22,40 +22,39 @@ public partial class ThreeDModelContextPanel : UserControl
         if (_paletteBuilt) return;
         _paletteBuilt = true;
 
-        ColorPaletteMenu.Items.Clear();
+        ColorGrid.Children.Clear();
         foreach (var color in StandardColorPalette.Colors)
         {
-            var swatch = new MenuItem
+            var swatch = new Border
             {
-                Header = new Border
-                {
-                    Width = 18, Height = 18, Margin = new Thickness(1),
-                    Background = new SolidColorBrush(color),
-                    BorderBrush = new SolidColorBrush(Color.FromRgb(0x50, 0x58, 0x60)),
-                    BorderThickness = new Thickness(1),
-                    ToolTip = $"#{color.R:X2}{color.G:X2}{color.B:X2}"
-                },
-                Padding = new Thickness(2),
-                StaysOpenOnClick = false
+                Margin = new Thickness(1),
+                Background = new SolidColorBrush(color),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0x50, 0x58, 0x60)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(1),
+                Cursor = Cursors.Hand,
+                ToolTip = $"#{color.R:X2}{color.G:X2}{color.B:X2}"
             };
 
             var picked = color;
-            swatch.Click += (_, _) => ApplyColor(picked);
-            ColorPaletteMenu.Items.Add(swatch);
+            swatch.MouseLeftButtonUp += (_, _) =>
+            {
+                ApplyColor(picked);
+                ColorPopup.IsOpen = false;
+            };
+            ColorGrid.Children.Add(swatch);
         }
     }
 
-    private void ColorSquare_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
+    private void ColorSquare_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         e.Handled = true;
         BuildColorPalette();
-        ColorSquare.ContextMenu!.PlacementTarget = ColorSquare;
-        ColorSquare.ContextMenu.IsOpen = true;
+        ColorPopup.IsOpen = true;
     }
 
     private void OpacitySlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        // Keep the parent context menu open while dragging transparency.
         e.Handled = false;
         var menu = FindParentContextMenu(this);
         if (menu != null)
@@ -74,7 +73,6 @@ public partial class ThreeDModelContextPanel : UserControl
         var mainVm = GetMainViewModel();
         if (mainVm == null) return;
 
-        // Close menus so the save dialog is not blocked.
         CloseAllContextMenus(this);
 
         if (mainVm.ExportSingleModelCommand.CanExecute(model))

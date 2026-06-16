@@ -38,6 +38,9 @@ public partial class SeedSplitWindow : Window, INotifyPropertyChanged
     private double _seedTolerance;
     private double _maskMinHu;
     private double _maskMaxHu;
+    private double _isoMin = -1000;
+    private double _isoMax = 3071;
+    private BitmapSource? _maskHistogramImage;
     private int _coronalIndex;
     private double _progress;
     private string _statusText = "Place cranium, mandible, and optional exclude seeds.";
@@ -84,8 +87,9 @@ public partial class SeedSplitWindow : Window, INotifyPropertyChanged
         get => _maskMinHu;
         set
         {
-            double clamped = Math.Clamp(value, -1024, 3071);
+            double clamped = Math.Clamp(value, IsoMin, IsoMax);
             if (!SetField(ref _maskMinHu, Math.Min(clamped, MaskMaxHu))) return;
+            UpdateMaskHistogram();
             SchedulePreview();
         }
     }
@@ -95,10 +99,29 @@ public partial class SeedSplitWindow : Window, INotifyPropertyChanged
         get => _maskMaxHu;
         set
         {
-            double clamped = Math.Clamp(value, -1024, 3071);
+            double clamped = Math.Clamp(value, IsoMin, IsoMax);
             if (!SetField(ref _maskMaxHu, Math.Max(clamped, MaskMinHu))) return;
+            UpdateMaskHistogram();
             SchedulePreview();
         }
+    }
+
+    public double IsoMin
+    {
+        get => _isoMin;
+        private set => SetField(ref _isoMin, value);
+    }
+
+    public double IsoMax
+    {
+        get => _isoMax;
+        private set => SetField(ref _isoMax, value);
+    }
+
+    public BitmapSource? MaskHistogramImage
+    {
+        get => _maskHistogramImage;
+        private set => SetField(ref _maskHistogramImage, value);
     }
 
     public int CoronalIndex
@@ -154,9 +177,11 @@ public partial class SeedSplitWindow : Window, INotifyPropertyChanged
         _previewSeg = CreateSegmentationVolume(_volume);
         _windowCenter = windowCenter;
         _windowWidth = windowWidth;
-        _seedTolerance = seedTolerance;
-        _maskMinHu = maskMinHu;
-        _maskMaxHu = maskMaxHu;
+        _seedTolerance = 200;
+        IsoMin = -1000;
+        IsoMax = volume.MaxValue;
+        _maskMinHu = Math.Clamp(maskMinHu, IsoMin, IsoMax);
+        _maskMaxHu = Math.Clamp(maskMaxHu, IsoMin, IsoMax);
         _boneSmoothingAmount = boneSmoothingAmount;
         _boneSmoothingPasses = boneSmoothingPasses;
         _boneKeepAllParts = boneKeepAllParts;
@@ -172,6 +197,7 @@ public partial class SeedSplitWindow : Window, INotifyPropertyChanged
         };
 
         RenderCoronalSlice();
+        UpdateMaskHistogram();
     }
 
     private readonly double _windowCenter;
@@ -566,6 +592,76 @@ public partial class SeedSplitWindow : Window, INotifyPropertyChanged
         ComputeBtn.IsEnabled = !busy;
         if (message != null) StatusText = message;
         if (busy) Progress = 0;
+    }
+
+    private void UpdateMaskHistogram()
+    {
+        if (_volume.Histogram.Length == 0) return;
+
+        double range = _volume.MaxValue - _volume.MinValue;
+        if (range <= 0) return;
+
+        int localMax = 1;
+        int limitAirBin = (int)((-800 - _volume.MinValue) / range * 512);
+        limitAirBin = Math.Clamp(limitAirBin, 0, 511);
+        for (int i = limitAirBin; i < 512; i++)
+            if (_volume.Histogram[i] > localMax) localMax = _volume.Histogram[i];
+
+        const int histW = 512;
+        const int histH = 48;
+        var pixels = new byte[histW * histH * 4];
+        double uiRange = IsoMax - IsoMin;
+        if (uiRange <= 0) return;
+
+        for (int x = 0; x < histW; x++)
+        {
+            double hu = IsoMin + (x * uiRange / (histW - 1));
+            bool inRange = hu >= MaskMinHu && hu <= MaskMaxHu;
+
+            int originalBin = (int)((hu - _volume.MinValue) / range * 511);
+            int binVal = 0;
+            if (originalBin >= 0 && originalBin < 512)
+                binVal = _volume.Histogram[originalBin];
+
+            int barHeight = binVal > 0
+                ? (int)(Math.Log(1 + binVal) / Math.Log(1 + localMax) * (histH - 2))
+                : 0;
+            if (barHeight > histH - 2) barHeight = histH - 2;
+
+            for (int y = 0; y < histH; y++)
+            {
+                int row = histH - 1 - y;
+                int idx = (row * histW + x) * 4;
+                if (y < barHeight)
+                {
+                    if (inRange)
+                    {
+                        pixels[idx] = 170;
+                        pixels[idx + 1] = 130;
+                        pixels[idx + 2] = 90;
+                        pixels[idx + 3] = 0xFF;
+                    }
+                    else
+                    {
+                        pixels[idx] = 42;
+                        pixels[idx + 1] = 32;
+                        pixels[idx + 2] = 22;
+                        pixels[idx + 3] = 0xFF;
+                    }
+                }
+                else
+                {
+                    pixels[idx] = 0x0D;
+                    pixels[idx + 1] = 0x10;
+                    pixels[idx + 2] = 0x14;
+                    pixels[idx + 3] = 0xFF;
+                }
+            }
+        }
+
+        var bmp = new WriteableBitmap(histW, histH, 96, 96, PixelFormats.Bgra32, null);
+        bmp.WritePixels(new Int32Rect(0, 0, histW, histH), pixels, histW * 4, 0);
+        MaskHistogramImage = bmp;
     }
 
     private void RenumberSeeds()

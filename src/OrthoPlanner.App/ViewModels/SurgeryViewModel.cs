@@ -231,7 +231,7 @@ public partial class MainViewModel
         if (res != System.Windows.MessageBoxResult.OK)
             return false;
 
-        var referenceVerts = ResolveCondyleReferenceVertices();
+        var (referenceVerts, referenceGeometry) = ResolveCondyleReference();
         if (referenceVerts.Count < 100)
         {
             System.Windows.MessageBox.Show(
@@ -242,7 +242,7 @@ public partial class MainViewModel
             return false;
         }
 
-        var wizard = new CondyleSplitWindow(referenceVerts, landmarkOnlyMode: true)
+        var wizard = new CondyleSplitWindow(referenceVerts, boneGeometry: referenceGeometry, landmarkOnlyMode: true)
         {
             Owner = System.Windows.Application.Current.MainWindow,
             Title = "Select Mandible Rotation Fulcrums"
@@ -264,28 +264,59 @@ public partial class MainViewModel
         return LeftCondyleCenter != null && RightCondyleCenter != null;
     }
 
-    private List<float[]> ResolveCondyleReferenceVertices()
+    private (List<float[]> vertices, HelixToolkit.SharpDX.Geometry3D? geometry) ResolveCondyleReference()
     {
-        if (HardTissueModel?.Vertices is { Length: >= 300 } hardVerts)
-            return MeshHelper.ToVertexList(hardVerts);
+        var source = ResolveCondyleReferenceSegment();
+        if (source?.Vertices is not { Length: >= 300 } verts)
+            return (new List<float[]>(), null);
 
-        var boneSegments = Segments
-            .Where(s => s.Vertices is { Length: >= 300 }
-                && s.Name != null
-                && (s.Name.Contains("Cranium", StringComparison.OrdinalIgnoreCase)
-                    || s.Name.Contains("Mandible", StringComparison.OrdinalIgnoreCase)
-                    || s.Name.Contains("Ramus", StringComparison.OrdinalIgnoreCase)
-                    || s.Name.Contains("Bone", StringComparison.OrdinalIgnoreCase)))
-            .ToList();
+        // Always rebuild so secondary viewports get validated indexed geometry.
+        source.BuildModel();
 
-        var merged = new List<float[]>();
-        foreach (var seg in boneSegments)
-        {
-            if (seg.Vertices != null)
-                merged.AddRange(MeshHelper.ToVertexList(seg.Vertices));
-        }
+        return (MeshHelper.ToVertexList(verts), source.Geometry);
+    }
 
-        return merged;
+    private SegmentViewModel? ResolveCondyleReferenceSegment()
+    {
+        static bool HasVertices(SegmentViewModel s) => s.Vertices is { Length: >= 300 };
+
+        static bool IsSeedSplitMandible(SegmentViewModel s) =>
+            HasVertices(s)
+            && s.Name != null
+            && s.Name.Contains("Seed Split", StringComparison.OrdinalIgnoreCase)
+            && s.Name.Contains("Mandible", StringComparison.OrdinalIgnoreCase)
+            && !s.Name.Contains("Cranium", StringComparison.OrdinalIgnoreCase);
+
+        static bool IsBoneSegment(SegmentViewModel s) =>
+            s.IsVisible
+            && HasVertices(s)
+            && s.Name != null
+            && (s.Name.Contains("Cranium", StringComparison.OrdinalIgnoreCase)
+                || s.Name.Contains("Mandible", StringComparison.OrdinalIgnoreCase)
+                || s.Name.Contains("Ramus", StringComparison.OrdinalIgnoreCase)
+                || s.Name.Contains("Bone", StringComparison.OrdinalIgnoreCase));
+
+        static bool IsMandibleSegment(SegmentViewModel s) =>
+            IsBoneSegment(s)
+            && s.Name!.Contains("Mandible", StringComparison.OrdinalIgnoreCase)
+            && !s.Name.Contains("Cranium", StringComparison.OrdinalIgnoreCase);
+
+        // Splint / ramus rotation fulcrums must use the seed-split mandible when present.
+        var seedSplitMandible = Segments.LastOrDefault(IsSeedSplitMandible);
+        if (seedSplitMandible != null)
+            return seedSplitMandible;
+
+        var mandible = Segments.LastOrDefault(IsMandibleSegment);
+        if (mandible != null)
+            return mandible;
+
+        if (HardTissueModel?.Vertices is { Length: >= 300 })
+            return HardTissueModel;
+
+        return Segments
+            .Where(IsBoneSegment)
+            .OrderByDescending(s => s.Vertices!.Length)
+            .FirstOrDefault();
     }
 
     private System.Windows.Media.Media3D.Transform3D BuildSurgeryTransform(

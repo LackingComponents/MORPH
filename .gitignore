@@ -10,6 +10,7 @@
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/
+.buildcheck/
 x64/
 x86/
 [Aa]rm/

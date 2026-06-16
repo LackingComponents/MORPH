@@ -18,6 +18,7 @@ public partial class CondyleSplitWindow : Window
 {
     // Input
     private readonly List<float[]> _boneVerts;
+    private readonly HelixToolkit.SharpDX.Geometry3D? _boneGeometry;
     private readonly VolumeData? _ctVolume;
     private readonly SegmentationVolume? _segVolume;
     private readonly byte _boneLabel;
@@ -116,7 +117,8 @@ public partial class CondyleSplitWindow : Window
     public CondyleSplitWindow(
         List<float[]> boneVerts,
         VolumeData? ctVolume = null, SegmentationVolume? segVolume = null, byte boneLabel = 1, double boneMinHu = 400.0,
-        bool landmarkOnlyMode = false)
+        bool landmarkOnlyMode = false,
+        HelixToolkit.SharpDX.Geometry3D? boneGeometry = null)
     {
         InitializeComponent();
         
@@ -131,6 +133,7 @@ public partial class CondyleSplitWindow : Window
         System.Windows.Media.CompositionTarget.Rendering += _renderingHandler;
 
         _boneVerts = boneVerts.Select(v => new float[] { v[0], v[1], v[2] }).ToList();
+        _boneGeometry = boneGeometry;
         _ctVolume = ctVolume;
         _segVolume = segVolume;
         _boneLabel = boneLabel;
@@ -185,8 +188,22 @@ public partial class CondyleSplitWindow : Window
 
         MainGroup.Children.Clear();
 
-        // Build bone model with 255 alpha (fully opaque) and exact MainViewport default color 245,245,230
-        var boneModel = MeshHelper.BuildModel3D(_boneVerts, 245, 245, 230, 255);
+        // Prefer the already-validated viewport geometry from the main scene when available.
+        MeshGeometryModel3D boneModel;
+        if (_boneGeometry is HelixToolkit.SharpDX.MeshGeometry3D prefab
+            && prefab.Positions != null && prefab.Positions.Count > 0
+            && prefab.Indices != null && prefab.Indices.Count >= 3)
+        {
+            boneModel = new MeshGeometryModel3D
+            {
+                Geometry = prefab,
+                Material = MeshHelper.CreatePhongMaterial(245, 245, 230, 255)
+            };
+        }
+        else
+        {
+            boneModel = MeshHelper.BuildModel3D(_boneVerts, 245, 245, 230, 255);
+        }
         MainGroup.Children.Add(boneModel);
 
         // Start: look from right profile (Vector3D(1, 0, 0))

@@ -341,24 +341,69 @@ public static class MeshHelper
         };
     }
 
-    public static void BuildModel3D(float[] vertices, byte r, byte g, byte b, out object geometry, out HelixToolkit.Wpf.SharpDX.Material material, byte a = 255)
+    /// <summary>
+    /// Build indexed SharpDX geometry from flat triangle soup (stride 9).
+    /// Uses vertex deduplication and normal recomputation so large clinical meshes
+    /// render reliably in secondary viewports.
+    /// </summary>
+    public static HelixToolkit.SharpDX.MeshGeometry3D BuildGeometry3D(float[] vertices)
     {
-        var builder = new HelixToolkit.Geometry.MeshBuilder();
+        var positions = new List<System.Numerics.Vector3>();
+        var indices = new List<int>();
+        var dict = new Dictionary<(int, int, int), int>();
+
+        int AddCorner(float x, float y, float z)
+        {
+            if (!float.IsFinite(x) || !float.IsFinite(y) || !float.IsFinite(z))
+                return -1;
+
+            var key = ((int)Math.Round(x * 100), (int)Math.Round(y * 100), (int)Math.Round(z * 100));
+            if (!dict.TryGetValue(key, out int idx))
+            {
+                idx = positions.Count;
+                positions.Add(new System.Numerics.Vector3(x, y, z));
+                dict[key] = idx;
+            }
+            return idx;
+        }
+
         for (int i = 0; i + 8 < vertices.Length; i += 9)
         {
-            builder.AddTriangle(
-                new System.Numerics.Vector3(vertices[i],     vertices[i + 1], vertices[i + 2]),
-                new System.Numerics.Vector3(vertices[i + 3], vertices[i + 4], vertices[i + 5]),
-                new System.Numerics.Vector3(vertices[i + 6], vertices[i + 7], vertices[i + 8]));
+            int a = AddCorner(vertices[i],     vertices[i + 1], vertices[i + 2]);
+            int b = AddCorner(vertices[i + 3], vertices[i + 4], vertices[i + 5]);
+            int c = AddCorner(vertices[i + 6], vertices[i + 7], vertices[i + 8]);
+            if (a < 0 || b < 0 || c < 0 || a == b || b == c || a == c)
+                continue;
+
+            indices.Add(a);
+            indices.Add(b);
+            indices.Add(c);
         }
-        geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh());
-        
-        material = new HelixToolkit.Wpf.SharpDX.PhongMaterial()
+
+        if (positions.Count == 0 || indices.Count < 3)
+            return new HelixToolkit.SharpDX.MeshGeometry3D();
+
+        var builder = new HelixToolkit.Geometry.MeshBuilder(false, false);
+        foreach (var p in positions) builder.Positions.Add(p);
+        foreach (var idx in indices) builder.TriangleIndices.Add(idx);
+
+        var mesh = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh());
+        mesh.UpdateNormals();
+        return mesh;
+    }
+
+    public static HelixToolkit.Wpf.SharpDX.PhongMaterial CreatePhongMaterial(byte r, byte g, byte b, byte a = 255)
+        => new()
         {
             DiffuseColor = new HelixToolkit.Maths.Color4(r / 255f, g / 255f, b / 255f, a / 255f),
             SpecularColor = new HelixToolkit.Maths.Color4(0.1f, 0.1f, 0.1f, 1f),
             SpecularShininess = 1f
         };
+
+    public static void BuildModel3D(float[] vertices, byte r, byte g, byte b, out object geometry, out HelixToolkit.Wpf.SharpDX.Material material, byte a = 255)
+    {
+        geometry = BuildGeometry3D(vertices);
+        material = CreatePhongMaterial(r, g, b, a);
     }
 }
 

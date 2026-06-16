@@ -99,7 +99,7 @@ public partial class MainViewModel
 
     // ÔöÇÔöÇÔöÇ Region Growing ÔöÇÔöÇÔöÇ
     [ObservableProperty] private bool _isRegionGrowMode;
-    [ObservableProperty] private short _regionGrowTolerance = 500; // Generous guiding mask tolerance
+    [ObservableProperty] private short _regionGrowTolerance = 200;
     [ObservableProperty] private double _splitterMinHU = 200; // Step 2 Strict Bounds
     [ObservableProperty] private double _splitterMaxHU = 3000;
 

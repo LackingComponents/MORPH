@@ -494,8 +494,11 @@ public static class SplintEngine
             const double VS_MC   = 0.2;   // MC sampling resolution
             const double CrownMm = 10.0;
             const double Dil1    = 1.0;
+            float engagementDepthMm = config.EngagementDepthMm;
+            bool blockoutUndercuts  = config.BlockoutUndercuts;
 
-            System.Diagnostics.Debug.WriteLine($"[Splint] upperPen={upperPenetrationMm:F1} lowerPen={lowerPenetrationMm:F1} bias={lingualBuccalBiasMm:F1}");
+            SplintTrace($"carve params: engagement={engagementDepthMm:F2} blockout={blockoutUndercuts} occlusalBand={OcclusalBandMm:F2}");
+            System.Diagnostics.Debug.WriteLine($"[Splint] upperPen={upperPenetrationMm:F1} lowerPen={lowerPenetrationMm:F1} bias={lingualBuccalBiasMm:F1} engagement={engagementDepthMm:F1} blockout={blockoutUndercuts}");
 
             // Convert flat triangle soup to indexed DMesh3
             DMesh3 ToMesh(float[] s)
@@ -578,13 +581,6 @@ public static class SplintEngine
                 return Result(horseshoeFlat, "Unable to build dental signed-distance fields; emitted the flat horseshoe blank.");
             }
 
-            // Carve implicits: iso=0 sits exactly on the tooth surface, so each crown
-            // imprints a tight socket into the wafer. The vertical reach of those sockets
-            // (how far the wafer envelops the crowns) is set by the penetration band in
-            // the per-column slab extent below — NOT by offsetting the carve surface.
-            var upCarve = upBase;
-            var loCarve = loBase;
-
             // ── Footprint centerline (biased) → capsule XY mask with rounded caps ──
             var clX = new float[n]; var clY = new float[n];
             for (int i = 0; i < n; i++)
@@ -659,10 +655,13 @@ public static class SplintEngine
                     if (pz > colTop[cIdx] || pz < colBot[cIdx]) continue;
 
                     double px = gox+ix*VS_MC, py = goy+iy*VS_MC;
-                    var pt = new Vector3d(px, py, pz);
-                    // Carve tooth pockets: remove voxels occupied by either crown row.
-                    if ((float)upCarve.Value(ref pt) < 0f) continue;
-                    if ((float)loCarve.Value(ref pt) < 0f) continue;
+                    float uzArch = NearestUpperZ(px, py);
+                    float lzArch = NearestLowerZ(px, py);
+                    // Region-aware pocket carve: tight occlusal contacts, dilated walls, undercut blockout.
+                    if (ShouldCarveToothPocket(px, py, pz, upBase, uzArch, isUpper: true,
+                            engagementDepthMm, blockoutUndercuts)) continue;
+                    if (ShouldCarveToothPocket(px, py, pz, loBase, lzArch, isUpper: false,
+                            engagementDepthMm, blockoutUndercuts)) continue;
 
                     bakedGrid[vIdx] = -1.0f;
                 }
@@ -854,7 +853,42 @@ public static class SplintEngine
 
     private static float Sq(float v) => v * v;
 
-    // â”€â”€ Isotropic mesh offset via geometry3Sharp â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    private const float OcclusalBandMm = 0.75f;
+
+    /// <summary>
+    /// Returns true when the voxel should be carved out as a tooth pocket (air, not splint material).
+    /// Occlusal band: tight SDF fit on the arch plane. Walls: dilated by engagement depth with optional undercut blockout.
+    /// </summary>
+    private static bool ShouldCarveToothPocket(
+        double px, double py, double pz,
+        BoundedImplicitFunction3d toothSdf,
+        float archZ,
+        bool isUpper,
+        float engagementMm,
+        bool blockoutUndercuts)
+    {
+        var pt = new Vector3d(px, py, pz);
+        float sdfAtVoxel = (float)toothSdf.Value(ref pt);
+
+        if (MathF.Abs((float)pz - archZ) <= OcclusalBandMm)
+        {
+            var onArch = new Vector3d(px, py, archZ);
+            float sdfOnArch = (float)toothSdf.Value(ref onArch);
+            if (sdfOnArch >= 0f) return false;
+            return sdfAtVoxel < 0f;
+        }
+
+        if (sdfAtVoxel >= engagementMm) return false;
+
+        if (blockoutUndercuts && engagementMm > 0f)
+        {
+            if (isUpper && pz < archZ - engagementMm) return false;
+            if (!isUpper && pz > archZ + engagementMm) return false;
+        }
+
+        return true;
+    }
+
     /// <summary>
     /// Offsets every vertex of the triangle soup by <paramref name="offsetMm"/> mm
     /// along its area-weighted vertex normal, using geometry3Sharp for robust
