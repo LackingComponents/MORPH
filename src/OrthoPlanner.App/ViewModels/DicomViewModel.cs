@@ -197,6 +197,13 @@ public partial class MainViewModel
 
             OriginalVolume = null; // Reset starting position for new DICOM
 
+            // Phase 0: Bake the volume pivot from the original DICOM dimensions.
+            // This is the permanent rotation pivot; it never drifts across reslices.
+            VolumePivot = new Point3D(
+                Volume.Width * Volume.Spacing[0] / 2.0,
+                Volume.Height * Volume.Spacing[1] / 2.0,
+                Volume.Depth * Volume.Spacing[2] / 2.0);
+
             // Update UI state
             PatientName = Volume.PatientName?.Replace("^", " ") ?? "";
             PatientDOB = Volume.PatientDOB;
@@ -642,19 +649,22 @@ public partial class MainViewModel
             _redoStack.Clear();
 
             // CRITICAL: sync BoneOnlyBounds to the new resliced volume NOW.
-            // Without this, the first visibility toggle after commit would find
-            // newBounds != BoneOnlyBounds (old dims) and snap ModelCenter to the
-            // new padded-volume center, causing a visible caudal translation.
-            BoneOnlyBounds = new Rect3D(0, 0, 0,
-                Volume.Width  * Volume.Spacing[0],
+            // Phase 0: Center the new bounds around the baked VolumePivot.
+            // This ensures the camera rotation pivot never drifts, even when
+            // the padded volume dimensions change after NHP commit.
+            IsNhpCommitInProgress = true;
+            var halfW = Volume.Width * Volume.Spacing[0] / 2.0;
+            var halfH = Volume.Height * Volume.Spacing[1] / 2.0;
+            var halfD = Volume.Depth * Volume.Spacing[2] / 2.0;
+            BoneOnlyBounds = new Rect3D(
+                VolumePivot.X - halfW, VolumePivot.Y - halfH, VolumePivot.Z - halfD,
+                Volume.Width * Volume.Spacing[0],
                 Volume.Height * Volume.Spacing[1],
-                Volume.Depth  * Volume.Spacing[2]);
-            ModelCenter = new Point3D(
-                BoneOnlyBounds.X + BoneOnlyBounds.SizeX / 2,
-                BoneOnlyBounds.Y + BoneOnlyBounds.SizeY / 2,
-                BoneOnlyBounds.Z + BoneOnlyBounds.SizeZ / 2);
+                Volume.Depth * Volume.Spacing[2]);
+            ModelCenter = VolumePivot;
             OnPropertyChanged(nameof(BoneOnlyBounds));
             OnPropertyChanged(nameof(ModelCenter));
+            IsNhpCommitInProgress = false;
 
             // Refresh 2D Slices
             AxialMax = Volume.Depth - 1;

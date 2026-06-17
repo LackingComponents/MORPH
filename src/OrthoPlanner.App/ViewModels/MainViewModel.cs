@@ -92,9 +92,11 @@ public partial class MainViewModel : ObservableObject
     // Populated by CephalometryOverlay whenever landmarks change; consumed by ProjectViewModel.
     public List<CephLandmarkSave> SavedCephLandmarks { get; set; } = new();
 
-    // ÔöÇÔöÇÔöÇ Partial handlers for DICOM slices/windowing/overlays ÔåÆ DicomViewModel.cs ÔöÇÔöÇÔöÇ
+    // ─── Volume Pivot (set once on DICOM load, persists across reslices) ───
+    [ObservableProperty] private System.Windows.Media.Media3D.Point3D _volumePivot = new System.Windows.Media.Media3D.Point3D(0, 0, 0);
+    [ObservableProperty] private bool _isNhpCommitInProgress = false;
 
-    // ÔöÇÔöÇÔöÇ Segmentation flags ÔåÆ SegmentationViewModel.cs ÔöÇÔöÇÔöÇ
+    // ─── Segmentation flags → SegmentationViewModel.cs ───
 
     // ÔöÇÔöÇÔöÇ SaveProject, OpenProjectAsync ÔåÆ ProjectViewModel.cs ÔöÇÔöÇÔöÇ
 
@@ -136,10 +138,18 @@ public partial class MainViewModel : ObservableObject
         // Keep ModelCenter in sync with the bone bounds so camera can orbit around it
         if (!BoneOnlyBounds.IsEmpty)
         {
-            ModelCenter = new Point3D(
-                BoneOnlyBounds.X + BoneOnlyBounds.SizeX / 2,
-                BoneOnlyBounds.Y + BoneOnlyBounds.SizeY / 2,
-                BoneOnlyBounds.Z + BoneOnlyBounds.SizeZ / 2);
+            // Phase 0: Use baked VolumePivot when available (stable across reslices)
+            if (VolumePivot == new Point3D(0, 0, 0))
+            {
+                ModelCenter = new Point3D(
+                    BoneOnlyBounds.X + BoneOnlyBounds.SizeX / 2,
+                    BoneOnlyBounds.Y + BoneOnlyBounds.SizeY / 2,
+                    BoneOnlyBounds.Z + BoneOnlyBounds.SizeZ / 2);
+            }
+            else
+            {
+                ModelCenter = VolumePivot;
+            }
             OnPropertyChanged(nameof(ModelCenter));
         }
 

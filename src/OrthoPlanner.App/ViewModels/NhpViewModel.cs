@@ -101,9 +101,13 @@ public partial class MainViewModel
     {
         if (BoneOnlyBounds.IsEmpty) return;
 
-        // Use bone-only bounds for camera centering (ignore imported STL meshes)
-        var bounds = BoneOnlyBounds;
-        var center = new Point3D(bounds.X + bounds.SizeX/2, bounds.Y + bounds.SizeY/2, bounds.Z + bounds.SizeZ/2);
+        // Phase 0: Use the baked VolumePivot for rotation center (stable across reslices).
+        // Fallback to bounds-derived center when VolumePivot has not been set yet.
+        var center = VolumePivot == new Point3D(0, 0, 0)
+            ? new Point3D(BoneOnlyBounds.X + BoneOnlyBounds.SizeX / 2,
+                          BoneOnlyBounds.Y + BoneOnlyBounds.SizeY / 2,
+                          BoneOnlyBounds.Z + BoneOnlyBounds.SizeZ / 2)
+            : VolumePivot;
 
         // DELTA MATH: Only visually rotate/translate by the *difference* between the current UI values
         // and the physically baked (committed) values. This prevents compounding geometry.
