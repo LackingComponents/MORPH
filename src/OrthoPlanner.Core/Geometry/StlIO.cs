@@ -125,14 +125,14 @@ public static class StlIO
         var newPos = new float[vertices.Length];
         for (int iter = 0; iter < iterations; iter++)
         {
-            for (int i = 0; i < vertCount; i++)
+            System.Threading.Tasks.Parallel.For(0, vertCount, i =>
             {
                 if (neighbors[i].Count == 0)
                 {
                     newPos[i * 3]     = vertices[i * 3];
                     newPos[i * 3 + 1] = vertices[i * 3 + 1];
                     newPos[i * 3 + 2] = vertices[i * 3 + 2];
-                    continue;
+                    return;
                 }
                 float avgX = 0, avgY = 0, avgZ = 0;
                 foreach (int n in neighbors[i])
@@ -147,7 +147,7 @@ public static class StlIO
                 newPos[i * 3]     = vertices[i * 3]     + lambda * (avgX - vertices[i * 3]);
                 newPos[i * 3 + 1] = vertices[i * 3 + 1] + lambda * (avgY - vertices[i * 3 + 1]);
                 newPos[i * 3 + 2] = vertices[i * 3 + 2] + lambda * (avgZ - vertices[i * 3 + 2]);
-            }
+            });
             Array.Copy(newPos, vertices, vertices.Length);
         }
     }
