@@ -370,6 +370,7 @@ public static class SplintEngine
         float lowerPenetrationMm  = config.LowerPenetrationMm;
         float lingualBuccalBiasMm = config.LingualBuccalBiasMm;
         float bridgeThicknessMm   = config.BridgeThicknessMm;
+        float posteriorTrimMm     = Math.Max(0f, config.PosteriorTrimMm);
         int sampleCount           = Math.Max(2, config.SampleCount);
         var generationWarnings    = new List<string>();
 
@@ -399,6 +400,30 @@ public static class SplintEngine
         var lower = ResampleByArcLength(lowerCurve, sampleCount);
         int n = upper.Count;
         if (n < 2) return SplintResult.Empty("Unable to resample enough points from the arch curves.");
+
+        // ── Posterior trim: shorten both posterior ends by arc length so the wafer
+        //    footprint shrinks toward a commercial-style outline (eases seating of an
+        //    over-retentive splint). Resampling is arc-length-uniform, so drop a fixed
+        //    number of samples from each end of BOTH curves to keep them index-aligned.
+        if (posteriorTrimMm > 0f && n >= 12)
+        {
+            float totalLen = 0f;
+            for (int i = 1; i < n; i++)
+            {
+                float dx = upper[i].x - upper[i-1].x, dy = upper[i].y - upper[i-1].y, dz = upper[i].z - upper[i-1].z;
+                totalLen += MathF.Sqrt(dx*dx + dy*dy + dz*dz);
+            }
+            float spacing = totalLen / Math.Max(1, n - 1);
+            int trim = spacing > 1e-4f ? (int)MathF.Round(posteriorTrimMm / spacing) : 0;
+            trim = Math.Clamp(trim, 0, (n - 8) / 2);
+            if (trim > 0)
+            {
+                upper = upper.GetRange(trim, n - 2 * trim);
+                lower = lower.GetRange(trim, n - 2 * trim);
+                n = upper.Count;
+                SplintTrace($"posterior trim: removed {trim} samples/end ({posteriorTrimMm:F1}mm), n={n}");
+            }
+        }
 
         // Align direction
         AlignLowerDirection(upper, lower);
@@ -490,14 +515,18 @@ public static class SplintEngine
 
         try
         {
-            const double VS_SDF  = 0.2;   // SDF grid resolution
-            const double VS_MC   = 0.2;   // MC sampling resolution
+            double VS_SDF  = Math.Clamp(config.VoxelSizeMm <= 0 ? 0.2 : config.VoxelSizeMm, 0.08, 0.5);  // SDF grid resolution
+            double VS_MC   = VS_SDF;      // MC sampling resolution (same grid)
             const double CrownMm = 10.0;
             const double Dil1    = 1.0;
             float engagementDepthMm = config.EngagementDepthMm;
             bool blockoutUndercuts  = config.BlockoutUndercuts;
+            float intaglioOffsetMm  = Math.Max(0f, config.IntaglioOffsetMm);
+            int   smoothingPasses   = Math.Max(0, config.SmoothingPasses);
+            bool  preserveIntaglio  = config.PreserveIntaglioDetail;
+            float decimateEdgeMm    = Math.Max(0f, config.ExportDecimateEdgeMm);
 
-            SplintTrace($"carve params: engagement={engagementDepthMm:F2} blockout={blockoutUndercuts} occlusalBand={OcclusalBandMm:F2}");
+            SplintTrace($"carve params: offset={intaglioOffsetMm:F2} engagement={engagementDepthMm:F2} blockout={blockoutUndercuts} voxel={VS_SDF:F2} smooth={smoothingPasses} preserveIntaglio={preserveIntaglio}");
             System.Diagnostics.Debug.WriteLine($"[Splint] upperPen={upperPenetrationMm:F1} lowerPen={lowerPenetrationMm:F1} bias={lingualBuccalBiasMm:F1} engagement={engagementDepthMm:F1} blockout={blockoutUndercuts}");
 
             // Convert flat triangle soup to indexed DMesh3
@@ -643,6 +672,11 @@ public static class SplintEngine
                 return Result(horseshoeFlat, "No inter-arch space was found inside the arch footprint (try opening the bite / autorotation); emitted the flat horseshoe blank.");
             }
 
+            // carvedByTooth[v] = this voxel is air *because* it sits inside a tooth
+            // pocket (intaglio), as opposed to being outside the footprint/slab. Used
+            // to keep the impression crisp when PreserveIntaglioDetail smoothing runs.
+            var carvedByTooth = preserveIntaglio ? new bool[gnx*gny*gnz] : null;
+
             // ── PHASE 1: bake the solid inter-arch slab, carving out the tooth volumes ──
             System.Threading.Tasks.Parallel.For(0, gnz, iz => {
                 for(int iy=0;iy<gny;iy++) for(int ix=0;ix<gnx;ix++) {
@@ -657,21 +691,49 @@ public static class SplintEngine
                     double px = gox+ix*VS_MC, py = goy+iy*VS_MC;
                     float uzArch = NearestUpperZ(px, py);
                     float lzArch = NearestLowerZ(px, py);
-                    // Region-aware pocket carve: tight occlusal contacts, dilated walls, undercut blockout.
+                    // Uniform-offset pocket carve: same clearance on occlusal + walls, undercut blockout.
                     if (ShouldCarveToothPocket(px, py, pz, upBase, uzArch, isUpper: true,
-                            engagementDepthMm, blockoutUndercuts)) continue;
+                            intaglioOffsetMm, engagementDepthMm, blockoutUndercuts))
+                    { if (carvedByTooth != null) carvedByTooth[vIdx] = true; continue; }
                     if (ShouldCarveToothPocket(px, py, pz, loBase, lzArch, isUpper: false,
-                            engagementDepthMm, blockoutUndercuts)) continue;
+                            intaglioOffsetMm, engagementDepthMm, blockoutUndercuts))
+                    { if (carvedByTooth != null) carvedByTooth[vIdx] = true; continue; }
 
                     bakedGrid[vIdx] = -1.0f;
                 }
             });
 
             // ── PHASE 2: light SDF smoothing (separable box blur) ──
-            // Softens the voxelised slab + pocket walls so marching cubes yields a
-            // smooth printable surface. Kept mild so the tooth pockets stay defined.
+            // Softens the voxelised slab so marching cubes yields a smooth printable
+            // outer surface. When PreserveIntaglioDetail is set, the tooth-pocket
+            // (intaglio) voxels are restored to their crisp pre-blur values afterward
+            // so cusp tips / fissures keep their detail.
+            if (smoothingPasses > 0)
             {
-                int blurR = 1, blurPasses = 2;
+                // Snapshot + intaglio mask for detail preservation.
+                float[]? preBlur = null;
+                bool[]? restoreMask = null;
+                if (preserveIntaglio && carvedByTooth != null)
+                {
+                    preBlur = (float[])bakedGrid.Clone();
+                    restoreMask = new bool[bakedGrid.Length];
+                    System.Threading.Tasks.Parallel.For(1, gnz - 1, iz => {
+                        for (int iy = 1; iy < gny - 1; iy++)
+                            for (int ix = 1; ix < gnx - 1; ix++) {
+                                int v = iz*gnx*gny + iy*gnx + ix;
+                                // Keep crisp at the intaglio surface: pocket voxels and
+                                // any material voxel touching a pocket voxel.
+                                if (carvedByTooth[v]) { restoreMask[v] = true; continue; }
+                                if (bakedGrid[v] >= 0f) continue;
+                                if (carvedByTooth[v-1] || carvedByTooth[v+1] ||
+                                    carvedByTooth[v-gnx] || carvedByTooth[v+gnx] ||
+                                    carvedByTooth[v-gnx*gny] || carvedByTooth[v+gnx*gny])
+                                    restoreMask[v] = true;
+                            }
+                    });
+                }
+
+                int blurR = 1, blurPasses = smoothingPasses;
                 var temp = new float[bakedGrid.Length];
                 for (int pass = 0; pass < blurPasses; pass++) {
                     System.Threading.Tasks.Parallel.For(0, gnz, iz => {
@@ -706,6 +768,14 @@ public static class SplintEngine
                         }
                     });
                     Array.Copy(temp, bakedGrid, bakedGrid.Length);
+                }
+
+                // Restore crisp intaglio voxels (skip blur on the tooth pockets).
+                if (preBlur != null && restoreMask != null)
+                {
+                    System.Threading.Tasks.Parallel.For(0, bakedGrid.Length, i => {
+                        if (restoreMask[i]) bakedGrid[i] = preBlur[i];
+                    });
                 }
             }
 
@@ -757,6 +827,28 @@ public static class SplintEngine
                     }
                     dm.CompactInPlace();
                     System.Diagnostics.Debug.WriteLine($"[Splint] PHASE5b Removed {removedTris} floater triangles ({cc.Count-1} small components), kept {dm.TriangleCount} tris");
+                }
+            }
+
+            // ── PHASE 5c: quadric export decimation ──
+            // Reduce triangle count to a target edge length. Quadric error collapse
+            // keeps detail where curvature is high (cusps, fissures) and simplifies
+            // flat regions, so STL files shrink without losing the intaglio detail.
+            if (decimateEdgeMm > 0f && dm.TriangleCount > 0)
+            {
+                try
+                {
+                    int before = dm.TriangleCount;
+                    var reducer = new Reducer(dm);
+                    reducer.ReduceToEdgeLength(decimateEdgeMm);
+                    dm.CompactInPlace();
+                    SplintTrace($"PHASE5c decimate edge={decimateEdgeMm:F2}mm: {before} → {dm.TriangleCount} tris");
+                    System.Diagnostics.Debug.WriteLine($"[Splint] PHASE5c decimated {before} → {dm.TriangleCount} tris @ edge {decimateEdgeMm:F2}mm");
+                }
+                catch (Exception decEx)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[Splint] PHASE5c decimation skipped: {decEx.Message}");
+                    SplintTrace($"PHASE5c decimation skipped: {decEx.Message}");
                 }
             }
 
@@ -853,33 +945,30 @@ public static class SplintEngine
 
     private static float Sq(float v) => v * v;
 
-    private const float OcclusalBandMm = 0.75f;
-
     /// <summary>
     /// Returns true when the voxel should be carved out as a tooth pocket (air, not splint material).
-    /// Occlusal band: tight SDF fit on the arch plane. Walls: dilated by engagement depth with optional undercut blockout.
+    /// Uniform offset model: a voxel is carved when it lies within <paramref name="offsetMm"/> of the
+    /// tooth surface, producing an identical intaglio clearance on occlusal contacts and walls (a CAD
+    /// "offset shell"). <paramref name="engagementMm"/> only limits how far the pocket may wrap past the
+    /// arch plane (crown-wrap depth / undercut blockout) so the wafer still seats and releases.
     /// </summary>
     private static bool ShouldCarveToothPocket(
         double px, double py, double pz,
         BoundedImplicitFunction3d toothSdf,
         float archZ,
         bool isUpper,
+        float offsetMm,
         float engagementMm,
         bool blockoutUndercuts)
     {
         var pt = new Vector3d(px, py, pz);
         float sdfAtVoxel = (float)toothSdf.Value(ref pt);
 
-        if (MathF.Abs((float)pz - archZ) <= OcclusalBandMm)
-        {
-            var onArch = new Vector3d(px, py, archZ);
-            float sdfOnArch = (float)toothSdf.Value(ref onArch);
-            if (sdfOnArch >= 0f) return false;
-            return sdfAtVoxel < 0f;
-        }
+        // Uniform clearance: carve everything within offsetMm of the tooth surface.
+        if (sdfAtVoxel >= offsetMm) return false;
 
-        if (sdfAtVoxel >= engagementMm) return false;
-
+        // Crown-wrap / undercut blockout: stop the pocket from running past the
+        // engagement depth beyond the arch plane so there is a straight draw path.
         if (blockoutUndercuts && engagementMm > 0f)
         {
             if (isUpper && pz < archZ - engagementMm) return false;

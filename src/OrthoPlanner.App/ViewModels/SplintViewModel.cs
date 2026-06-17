@@ -1,7 +1,9 @@
 using System;
 using System.Linq;
 using System.Windows;
+using System.Windows.Media.Media3D;
 using CommunityToolkit.Mvvm.Input;
+using OrthoPlanner.Core.Geometry;
 
 namespace OrthoPlanner.App.ViewModels;
 
@@ -30,6 +32,32 @@ public partial class MainViewModel
             ?? Segments.FirstOrDefault(s => s.IsVisible && s.Name.Contains("Mandible"))?.Vertices;
 
         return (upper, lower, upperScan != null, lowerScan != null);
+    }
+
+    /// <summary>
+    /// Copy upper/lower dental meshes and apply the active final-occlusion transforms so
+    /// splint generation starts from the planned therapeutic bite, not pre-treatment registration.
+    /// </summary>
+    private (float[] upper, float[] lower, bool applied, string? occlusionName) PoseDentalMeshesForFinalOcclusion(
+        float[] upper, float[] lower)
+    {
+        var occ = _activeOcclusionNode?.Occlusion ?? LoadedOcclusions.FirstOrDefault(o => o.IsVisible);
+        if (occ == null)
+            return (upper, lower, false, null);
+
+        var maxTx = occ.MaxillaOcclusionTransform;
+        var manTx = occ.MandibleOcclusionTransform;
+        if (maxTx == Matrix3D.Identity && manTx == Matrix3D.Identity)
+            return (upper, lower, false, occ.Name);
+
+        var posedUpper = (float[])upper.Clone();
+        var posedLower = (float[])lower.Clone();
+        if (maxTx != Matrix3D.Identity)
+            IcpAligner.TransformVertices(posedUpper, ToDoubleMatrix(maxTx));
+        if (manTx != Matrix3D.Identity)
+            IcpAligner.TransformVertices(posedLower, ToDoubleMatrix(manTx));
+
+        return (posedUpper, posedLower, true, occ.Name);
     }
 
     [RelayCommand]
@@ -72,6 +100,26 @@ public partial class MainViewModel
                 if (choice != MessageBoxResult.OK) return;
             }
 
+            var (upperPose, lowerPose, occlusionApplied, occlusionName) =
+                PoseDentalMeshesForFinalOcclusion(upper, lower);
+            if (!occlusionApplied)
+            {
+                var reason = occlusionName != null
+                    ? $"'{occlusionName}' is loaded but not yet aligned to the jaws."
+                    : "No final occlusion STL is loaded or active.";
+                var choice = MessageBox.Show(
+                    $"{reason}\n\nThe splint will be generated from the pre-treatment bite instead of the planned final occlusion.\n\nContinue anyway?",
+                    "Final Occlusion Not Available",
+                    MessageBoxButton.OKCancel,
+                    MessageBoxImage.Warning);
+                if (choice != MessageBoxResult.OK)
+                    return;
+            }
+            else
+            {
+                StatusText = $"Splint planner: using final occlusion '{occlusionName}'.";
+            }
+
             if ((LeftCondyleCenter == null || RightCondyleCenter == null) && !EnsureCondyleFulcrum())
                 return;
 
@@ -96,14 +144,16 @@ public partial class MainViewModel
             // The mandible is opened about the condyle-center hinge in BOTH maxilla-first
             // and mandible-first plans (clearance is what the wafer needs); the surgical
             // labelling is chosen separately in the splint planner.
-            float[] lowerForSplint = lower;
+            float[] lowerForSplint = lowerPose;
             double manualOpenDegrees = 0;
             if (LeftCondyleCenter is { } lcC && RightCondyleCenter is { } rcC)
             {
-                var autoWin = new MandibleAutorotationWindow(upper, lower, lcC, rcC)
+                var autoWin = new MandibleAutorotationWindow(upperPose, lowerPose, lcC, rcC)
                 {
                     Owner = Application.Current.MainWindow
                 };
+                if (occlusionApplied)
+                    autoWin.UseFinalOcclusionPose(occlusionName!);
                 autoWin.ShowDialog();
                 if (!autoWin.Accepted)
                     return; // surgeon backed out of the whole splint flow
@@ -126,7 +176,7 @@ public partial class MainViewModel
                 EnableAutorotation = !manualOpenApplied,
             };
 
-            var win = new SplintPlannerWindow(upper, lowerForSplint, this, config);
+            var win = new SplintPlannerWindow(upperPose, lowerForSplint, this, config);
             win.Owner = Application.Current.MainWindow;
 
             // Use Closed event so result is read after the window fully shuts down

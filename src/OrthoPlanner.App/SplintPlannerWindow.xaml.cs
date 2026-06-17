@@ -458,6 +458,21 @@ public partial class SplintPlannerWindow : Window
     private void EngagementDepthSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
     { if (EngagementDepthLabel != null) EngagementDepthLabel.Text = $"{e.NewValue:F1} mm"; }
 
+    private void IntaglioOffsetSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
+    { if (IntaglioOffsetLabel != null) IntaglioOffsetLabel.Text = $"{e.NewValue:F2} mm"; }
+
+    private void PosteriorTrimSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
+    { if (PosteriorTrimLabel != null) PosteriorTrimLabel.Text = $"{e.NewValue:F1} mm"; }
+
+    private void VoxelSizeSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
+    { if (VoxelSizeLabel != null) VoxelSizeLabel.Text = $"{e.NewValue:F2} mm"; }
+
+    private void SmoothingSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
+    { if (SmoothingLabel != null) SmoothingLabel.Text = $"{(int)Math.Round(e.NewValue)}"; }
+
+    private void DecimateSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
+    { if (DecimateLabel != null) DecimateLabel.Text = e.NewValue <= 0.0001 ? "off" : $"{e.NewValue:F2} mm"; }
+
     private void FlangeDepthSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
     { if (FlangeDepthLabel != null) FlangeDepthLabel.Text = $"{e.NewValue:F1} mm"; }
 
@@ -539,11 +554,19 @@ public partial class SplintPlannerWindow : Window
             // Clinical-fit controls (steps 4–6).
             BlockoutUndercuts   = BlockoutCheck.IsChecked == true,
             EngagementDepthMm   = (float)EngagementDepthSlider.Value,
+            IntaglioOffsetMm    = (float)IntaglioOffsetSlider.Value,
+            PosteriorTrimMm     = (float)PosteriorTrimSlider.Value,
             EnforceMinThickness = false,
             MinThicknessMm      = 0f,
             AutorotationMinClearanceMm = 0f,
             BuccalFlangeDepthMm = (float)FlangeDepthSlider.Value,
             FlangeOnUpper       = FlangeUpperRadio.IsChecked == true,
+
+            // Mesh / print quality controls.
+            VoxelSizeMm            = (float)VoxelSizeSlider.Value,
+            SmoothingPasses        = (int)Math.Round(SmoothingSlider.Value),
+            PreserveIntaglioDetail = PreserveIntaglioCheck.IsChecked == true,
+            ExportDecimateEdgeMm   = (float)DecimateSlider.Value,
         };
         ChosenFirstOperated = genConfig.FirstOperated;
 

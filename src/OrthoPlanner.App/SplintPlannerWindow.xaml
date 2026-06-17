@@ -7,6 +7,51 @@
         Background="#FF0C1018" Foreground="White"
         FontFamily="Segoe UI" FontSize="12">
 
+    <Window.Resources>
+        <!-- Dark-theme expander: visible chevron + header -->
+        <Style TargetType="Expander">
+            <Setter Property="Foreground" Value="#AABBCC"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Margin" Value="0,0,0,6"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Expander">
+                        <DockPanel>
+                            <ToggleButton DockPanel.Dock="Top" IsChecked="{Binding IsExpanded, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                          Background="Transparent" BorderThickness="0" Padding="0,4" HorizontalContentAlignment="Stretch">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="16"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Path x:Name="Chevron" Grid.Column="0" Data="M 2,1 L 8,7 L 2,13" Stroke="#8CF" StrokeThickness="2"
+                                          VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
+                                        <Path.RenderTransform>
+                                            <RotateTransform Angle="0"/>
+                                        </Path.RenderTransform>
+                                    </Path>
+                                    <ContentPresenter Grid.Column="1" ContentSource="Header" VerticalAlignment="Center"/>
+                                </Grid>
+                            </ToggleButton>
+                            <ContentPresenter x:Name="ExpanderContent" DockPanel.Dock="Top" Margin="16,4,0,0" Visibility="Collapsed"/>
+                        </DockPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsExpanded" Value="True">
+                                <Setter TargetName="ExpanderContent" Property="Visibility" Value="Visible"/>
+                                <Setter TargetName="Chevron" Property="RenderTransform">
+                                    <Setter.Value>
+                                        <RotateTransform Angle="90"/>
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
     <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -140,65 +185,121 @@
                 <RadioButton x:Name="MandibleFirstRadio" Content="Mandible-first splint" GroupName="SplintSequence"
                              Foreground="#AABBCC" FontSize="10" Margin="0,0,0,12"/>
 
-                <!-- Upper controls -->
-                <TextBlock Text="UPPER ARCH" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,0,0,6"/>
-                <TextBlock Text="Upper crown envelope:" FontSize="11" Foreground="#AABBCC" ToolTip="How far the wafer wraps up around the maxillary crowns (tooth-socket depth on the top face)."/>
-                <StackPanel Orientation="Horizontal" Margin="0,4,0,20">
-                    <Slider x:Name="UpperPenetrationSlider" Minimum="-5" Maximum="10" Value="2" Width="170" SmallChange="0.5" ValueChanged="UpperPenetrationSlider_ValueChanged"/>
-                    <TextBlock x:Name="UpperPenetrationLabel" Text="2.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
-                </StackPanel>
+                <!-- Crown envelope -->
+                <Expander IsExpanded="False">
+                    <Expander.Header>
+                        <TextBlock Text="Crown envelope" FontSize="11" FontWeight="Bold" Foreground="#8CF"/>
+                    </Expander.Header>
+                    <StackPanel Margin="0,6,0,0">
+                        <TextBlock Text="Upper crown:" FontSize="11" Foreground="#AABBCC"
+                                   ToolTip="How far the wafer wraps up around the maxillary crowns (tooth-socket depth on the top face)."/>
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
+                            <Slider x:Name="UpperPenetrationSlider" Minimum="-5" Maximum="10" Value="1.5" Width="170" SmallChange="0.5" ValueChanged="UpperPenetrationSlider_ValueChanged"/>
+                            <TextBlock x:Name="UpperPenetrationLabel" Text="1.5 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
 
-                <!-- Lower controls -->
-                <TextBlock Text="LOWER ARCH" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,0,0,6"/>
-                <TextBlock Text="Lower crown envelope:" FontSize="11" Foreground="#AABBCC" ToolTip="How far the wafer wraps down around the mandibular crowns (tooth-socket depth on the bottom face)."/>
-                <StackPanel Orientation="Horizontal" Margin="0,4,0,20">
-                    <Slider x:Name="LowerPenetrationSlider" Minimum="-5" Maximum="10" Value="2" Width="170" SmallChange="0.5" ValueChanged="LowerPenetrationSlider_ValueChanged"/>
-                    <TextBlock x:Name="LowerPenetrationLabel" Text="2.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
-                </StackPanel>
+                        <TextBlock Text="Lower crown:" FontSize="11" Foreground="#AABBCC"
+                                   ToolTip="How far the wafer wraps down around the mandibular crowns (tooth-socket depth on the bottom face)."/>
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,4">
+                            <Slider x:Name="LowerPenetrationSlider" Minimum="-5" Maximum="10" Value="1.5" Width="170" SmallChange="0.5" ValueChanged="LowerPenetrationSlider_ValueChanged"/>
+                            <TextBlock x:Name="LowerPenetrationLabel" Text="1.5 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Expander>
 
-                <!-- General controls -->
-                <TextBlock Text="GENERAL" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,0,0,6"/>
-                
-                <TextBlock Text="Labio-lingual width:" FontSize="11" Foreground="#AABBCC"/>
-                <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
-                    <Slider x:Name="ThicknessSlider" Minimum="2" Maximum="20" Value="8" Width="170" SmallChange="0.5" ValueChanged="ThicknessSlider_ValueChanged"/>
-                    <TextBlock x:Name="ThicknessLabel" Text="8.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
-                </StackPanel>
+                <!-- General -->
+                <Expander IsExpanded="False">
+                    <Expander.Header>
+                        <TextBlock Text="General" FontSize="11" FontWeight="Bold" Foreground="#8CF"/>
+                    </Expander.Header>
+                    <StackPanel Margin="0,6,0,0">
+                        <TextBlock Text="Labio-lingual width:" FontSize="11" Foreground="#AABBCC"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
+                            <Slider x:Name="ThicknessSlider" Minimum="2" Maximum="20" Value="7.5" Width="170" SmallChange="0.5" ValueChanged="ThicknessSlider_ValueChanged"/>
+                            <TextBlock x:Name="ThicknessLabel" Text="7.5 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
 
-                <TextBlock Text="Lingual-Buccal bias:" FontSize="11" Foreground="#AABBCC" ToolTip="Shifts the splint center buccally (+) or lingually (−)"/>
-                <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
-                    <Slider x:Name="LingualBuccalBiasSlider" Minimum="-5" Maximum="5" Value="0" Width="170" SmallChange="0.25" ValueChanged="LingualBuccalBiasSlider_ValueChanged"/>
-                    <TextBlock x:Name="LingualBuccalBiasLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
-                </StackPanel>
+                        <TextBlock Text="Lingual-Buccal bias:" FontSize="11" Foreground="#AABBCC" ToolTip="Shifts the splint center buccally (+) or lingually (−)"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,4">
+                            <Slider x:Name="LingualBuccalBiasSlider" Minimum="-5" Maximum="5" Value="1" Width="170" SmallChange="0.25" ValueChanged="LingualBuccalBiasSlider_ValueChanged"/>
+                            <TextBlock x:Name="LingualBuccalBiasLabel" Text="1.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Expander>
 
-                <TextBlock Text="Extra bridge thickness:" FontSize="11" Foreground="#AABBCC" ToolTip="Adds extra vertical padding to the connection between upper and lower arches"/>
-                <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
-                    <Slider x:Name="BridgeThicknessSlider" Minimum="0" Maximum="10" Value="0" Width="170" SmallChange="0.5" ValueChanged="BridgeThicknessSlider_ValueChanged"/>
-                    <TextBlock x:Name="BridgeThicknessLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
-                </StackPanel>
+                <!-- Clinical fit (+ print / mesh) -->
+                <Expander IsExpanded="True">
+                    <Expander.Header>
+                        <TextBlock Text="Clinical fit" FontSize="11" FontWeight="Bold" Foreground="#8CF"/>
+                    </Expander.Header>
+                    <StackPanel Margin="0,6,0,0">
+                        <CheckBox x:Name="BlockoutCheck" Content="Block out undercuts (seatability)" IsChecked="True"
+                                  Foreground="#AABBCC" Margin="0,0,0,8"
+                                  ToolTip="Straightens each tooth pocket into a vertical pull-out path so the splint can seat and release."/>
 
-                <!-- Clinical fit & printability -->
-                <TextBlock Text="CLINICAL FIT" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,8,0,6"/>
+                        <TextBlock Text="Intaglio offset (fit clearance):" FontSize="11" Foreground="#AABBCC" ToolTip="Uniform gap between the splint impression and the teeth (CAD offset shell). 0 = tight; ~0.15–0.3 mm mimics commercial milled/printed wafers."/>
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
+                            <Slider x:Name="IntaglioOffsetSlider" Minimum="0" Maximum="1" Value="0.2" Width="170" SmallChange="0.05" ValueChanged="IntaglioOffsetSlider_ValueChanged"/>
+                            <TextBlock x:Name="IntaglioOffsetLabel" Text="0.20 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
 
-                <CheckBox x:Name="BlockoutCheck" Content="Block out undercuts (seatability)" IsChecked="True"
-                          Foreground="#AABBCC" Margin="0,0,0,8"
-                          ToolTip="Straightens each tooth pocket into a vertical pull-out path so the splint can seat and release."/>
+                        <TextBlock Text="Engagement depth (crown wrap):" FontSize="11" Foreground="#AABBCC" ToolTip="How far each pocket wraps past the height of contour (retention) before it is blocked out. Fit clearance is set separately by Intaglio offset."/>
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
+                            <Slider x:Name="EngagementDepthSlider" Minimum="0" Maximum="5" Value="1.5" Width="170" SmallChange="0.25" ValueChanged="EngagementDepthSlider_ValueChanged"/>
+                            <TextBlock x:Name="EngagementDepthLabel" Text="1.5 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
 
-                <TextBlock Text="Engagement depth:" FontSize="11" Foreground="#AABBCC" ToolTip="How far past the height of contour each pocket may engage before it is blocked out."/>
-                <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
-                    <Slider x:Name="EngagementDepthSlider" Minimum="0" Maximum="5" Value="1.5" Width="170" SmallChange="0.25" ValueChanged="EngagementDepthSlider_ValueChanged"/>
-                    <TextBlock x:Name="EngagementDepthLabel" Text="1.5 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
-                </StackPanel>
+                        <TextBlock Text="Posterior trim:" FontSize="11" Foreground="#AABBCC" ToolTip="Shortens both posterior ends of the wafer toward a commercial-style footprint so an over-retentive splint is easier to seat/remove. 0 = no trim."/>
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
+                            <Slider x:Name="PosteriorTrimSlider" Minimum="0" Maximum="10" Value="0" Width="170" SmallChange="0.5" ValueChanged="PosteriorTrimSlider_ValueChanged"/>
+                            <TextBlock x:Name="PosteriorTrimLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
 
-                <TextBlock Text="Buccal flange depth:" FontSize="11" Foreground="#AABBCC" ToolTip="Apical fixation skirt down the buccal wall (0 = none). Screw holes can be carved through it."/>
-                <StackPanel Orientation="Horizontal" Margin="0,4,0,4">
-                    <Slider x:Name="FlangeDepthSlider" Minimum="0" Maximum="15" Value="0" Width="170" SmallChange="0.5" ValueChanged="FlangeDepthSlider_ValueChanged"/>
-                    <TextBlock x:Name="FlangeDepthLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
-                </StackPanel>
-                <RadioButton x:Name="FlangeUpperRadio" Content="on upper" IsChecked="True" GroupName="FlangeArch"
-                             Foreground="#AABBCC" FontSize="10" Margin="0,0,0,2"/>
-                <RadioButton x:Name="FlangeLowerRadio" Content="on lower" GroupName="FlangeArch"
-                             Foreground="#AABBCC" FontSize="10" Margin="0,0,0,4"/>
+                        <TextBlock Text="Extra bridge thickness:" FontSize="11" Foreground="#AABBCC" ToolTip="Adds extra vertical padding to the connection between upper and lower arches"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
+                            <Slider x:Name="BridgeThicknessSlider" Minimum="0" Maximum="10" Value="0" Width="170" SmallChange="0.5" ValueChanged="BridgeThicknessSlider_ValueChanged"/>
+                            <TextBlock x:Name="BridgeThicknessLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <TextBlock Text="Buccal flange depth:" FontSize="11" Foreground="#AABBCC" ToolTip="Apical fixation skirt down the buccal wall (0 = none). Screw holes can be carved through it."/>
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,4">
+                            <Slider x:Name="FlangeDepthSlider" Minimum="0" Maximum="15" Value="0" Width="170" SmallChange="0.5" ValueChanged="FlangeDepthSlider_ValueChanged"/>
+                            <TextBlock x:Name="FlangeDepthLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <RadioButton x:Name="FlangeUpperRadio" Content="on upper" IsChecked="True" GroupName="FlangeArch"
+                                     Foreground="#AABBCC" FontSize="10" Margin="0,0,0,2"/>
+                        <RadioButton x:Name="FlangeLowerRadio" Content="on lower" GroupName="FlangeArch"
+                                     Foreground="#AABBCC" FontSize="10" Margin="0,0,0,12"/>
+
+                        <TextBlock Text="PRINT / MESH" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,4,0,6"/>
+
+                        <TextBlock Text="Voxel size (detail):" FontSize="11" Foreground="#AABBCC" ToolTip="Resolution of the impression. Smaller = finer cusp detail but more memory/time. 0.2 mm balanced, 0.1 mm high detail."/>
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
+                            <Slider x:Name="VoxelSizeSlider" Minimum="0.1" Maximum="0.4" Value="0.2" Width="170" SmallChange="0.05" ValueChanged="VoxelSizeSlider_ValueChanged"/>
+                            <TextBlock x:Name="VoxelSizeLabel" Text="0.20 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <TextBlock Text="Surface smoothing passes:" FontSize="11" Foreground="#AABBCC" ToolTip="Box-blur passes on the outer wafer surface. 0 = none. Tooth pockets stay crisp when 'preserve intaglio detail' is on."/>
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
+                            <Slider x:Name="SmoothingSlider" Minimum="0" Maximum="4" Value="2" Width="170" SmallChange="1" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SmoothingSlider_ValueChanged"/>
+                            <TextBlock x:Name="SmoothingLabel" Text="2" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <CheckBox x:Name="PreserveIntaglioCheck" Content="Preserve intaglio detail" IsChecked="True"
+                                  Foreground="#AABBCC" Margin="0,0,0,12"
+                                  ToolTip="Skip the smoothing pass on the tooth pockets so cusp tips / fissures stay crisp while the outer wafer is still smoothed."/>
+
+                        <TextBlock Text="Export decimation (edge):" FontSize="11" Foreground="#AABBCC" ToolTip="Quadric mesh reduction target edge length for sane STL file sizes. Keeps detail at cusps, simplifies flat areas. 0 = off (full density)."/>
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
+                            <Slider x:Name="DecimateSlider" Minimum="0" Maximum="0.6" Value="0.3" Width="170" SmallChange="0.05" ValueChanged="DecimateSlider_ValueChanged"/>
+                            <TextBlock x:Name="DecimateLabel" Text="0.30 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <TextBlock x:Name="PrintMaterialLabel" TextWrapping="Wrap" FontSize="10" Foreground="#88AABB" Margin="0,2,0,4"
+                                   Text="Print: Class IIa biocompatible photopolymer (e.g. NextDent / Dental LT clear)"
+                                   ToolTip="Recommended validated print material for the surgical wafer."/>
+                    </StackPanel>
+                </Expander>
             </StackPanel>
             </ScrollViewer>
         </Border>

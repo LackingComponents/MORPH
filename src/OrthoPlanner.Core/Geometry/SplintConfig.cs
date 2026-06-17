@@ -92,18 +92,56 @@ public sealed record SplintConfig
     public bool FromIntraoralScans { get; init; } = true;
 
     // ── Core wafer geometry (previously loose parameters) ──────────────────
-    public float LabiolingualMm     { get; init; } = 8f;
-    public float UpperPenetrationMm { get; init; } = 0f;   // + = deeper into upper teeth
-    public float LowerPenetrationMm { get; init; } = 0f;   // + = deeper into lower teeth
-    public float LingualBuccalBiasMm{ get; init; } = 0f;   // + buccal, − lingual
+    public float LabiolingualMm     { get; init; } = 7.5f;
+    public float UpperPenetrationMm { get; init; } = 1.5f;   // + = deeper into upper teeth
+    public float LowerPenetrationMm { get; init; } = 1.5f;   // + = deeper into lower teeth
+    public float LingualBuccalBiasMm{ get; init; } = 1f;   // + buccal, − lingual
     public float BridgeThicknessMm  { get; init; } = 0f;
     public int   SampleCount        { get; init; } = 160;
 
     // ── Step 4: engagement depth / undercut blockout ───────────────────────
     /// <summary>How far past each tooth's height of contour the pocket is allowed to
-    /// engage. The pocket below this is blocked out so the wafer can seat.</summary>
+    /// engage (i.e. how deep the wafer wraps over the crowns for retention). The
+    /// pocket below this is blocked out so the wafer can seat. This controls CROWN
+    /// WRAP / retention only — the fit clearance is set by <see cref="IntaglioOffsetMm"/>.</summary>
     public float EngagementDepthMm  { get; init; } = 1.5f;
     public bool  BlockoutUndercuts  { get; init; } = true;
+
+    /// <summary>Explicit uniform clearance (gap) between the intaglio (impression)
+    /// surface and the teeth, applied identically on occlusal contacts and walls —
+    /// equivalent to a CAD "offset shell". 0 = zero-gap tight contact; ~0.15–0.3 mm
+    /// mimics commercial milled/printed wafers (KLS-style). Replaces the old
+    /// relief-via-engagement behaviour.</summary>
+    public float IntaglioOffsetMm   { get; init; } = 0.2f;
+
+    // ── Mesh resolution / surface treatment ────────────────────────────────
+    /// <summary>Voxel size (mm) for the signed-distance field and marching-cubes
+    /// grids. Smaller = finer cusp detail but more memory/time. 0.2 mm is the
+    /// balanced default; 0.1 mm is high detail.</summary>
+    public float VoxelSizeMm        { get; init; } = 0.2f;
+    /// <summary>Number of box-blur passes applied to the voxel field before meshing
+    /// (smooths facets). 0 = none.</summary>
+    public int   SmoothingPasses    { get; init; } = 2;
+    /// <summary>When true, the smoothing pass is skipped on the tooth-pocket
+    /// (intaglio) voxels so cusp tips and fissures stay crisp while the outer wafer
+    /// surface is still smoothed.</summary>
+    public bool  PreserveIntaglioDetail { get; init; } = true;
+
+    /// <summary>Trim this many millimetres of arc length off each posterior end of
+    /// the wafer, shortening the footprint toward a commercial-style outline so an
+    /// over-retentive splint is easier to seat/remove. 0 = no trim.</summary>
+    public float PosteriorTrimMm    { get; init; } = 0f;
+
+    /// <summary>Target edge length (mm) for quadric decimation of the exported mesh.
+    /// Quadric reduction keeps triangles where curvature is high (cusps) and
+    /// simplifies flat regions, giving sane STL file sizes without losing detail.
+    /// 0 = no decimation (full marching-cubes density).</summary>
+    public float ExportDecimateEdgeMm { get; init; } = 0.3f;
+
+    /// <summary>Recommended validated print material for the produced wafer
+    /// (informational; STL carries no material metadata).</summary>
+    public string RecommendedPrintMaterial { get; init; } =
+        "Class IIa biocompatible photopolymer (e.g. NextDent / Dental LT clear, light-cured acrylate)";
 
     // ── Incidental-perforation policy ──────────────────────────────────────
     // Splints may intentionally include holes/windows, so thickness is not

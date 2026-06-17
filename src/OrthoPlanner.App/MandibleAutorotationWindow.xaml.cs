@@ -78,6 +78,15 @@ public partial class MandibleAutorotationWindow : Window
             Loaded += (_, _) => AngleSlider.Value = Math.Min(suggestedOpenDegrees, AngleSlider.Maximum);
     }
 
+    /// <summary>Update header copy when casts are shown in the planned final-occlusion pose.</summary>
+    public void UseFinalOcclusionPose(string occlusionName)
+    {
+        StepInstructions.Text =
+            $"Dental casts are positioned in the planned final occlusion ({occlusionName}). "
+            + "The mandible hinges open around the condylar axis (fulcrum at the condyle centers). "
+            + "Set the opening angle in tenths of a degree, then click Apply to proceed to splint generation.";
+    }
+
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         // Build maxilla (static) + mandible (rotatable) models.
