@@ -30,7 +30,7 @@
             <!-- CT dental model -->
             <Border Grid.Column="0" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4">
                     <Grid>
-                        <hx:Viewport3DX x:Name="CtViewport" BackgroundColor="#FF0E1420"
+                        <hx:Viewport3DX ShowCameraTarget="False" x:Name="CtViewport" BackgroundColor="#FF0E1420"
                                                ShowCoordinateSystem="True" CoordinateSystemLabelForeground="#00000000"
                                                ZoomExtentsWhenLoaded="False"
                                                IsRotationEnabled="True" IsPanEnabled="True" IsZoomEnabled="True"
@@ -64,7 +64,7 @@
             <!-- STL scan -->
             <Border Grid.Column="2" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4">
                     <Grid>
-                        <hx:Viewport3DX x:Name="StlViewport" BackgroundColor="#FF0E1420"
+                        <hx:Viewport3DX ShowCameraTarget="False" x:Name="StlViewport" BackgroundColor="#FF0E1420"
                                                ShowCoordinateSystem="True" CoordinateSystemLabelForeground="#00000000"
                                                ZoomExtentsWhenLoaded="False"
                                                IsRotationEnabled="True" IsPanEnabled="True" IsZoomEnabled="True"

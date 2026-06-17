@@ -1032,7 +1032,7 @@
                     <!-- 3D Viewport. ShowViewCube="False" = custom NavCube active.
                          To revert to built-in: change ShowViewCube to True and set NavCube Visibility=Collapsed below. -->
                     <Border x:Name="ViewportHostBorder" Grid.Row="1">
-                        <hx:Viewport3DX x:Name="Viewport3D"
+                        <hx:Viewport3DX ShowCameraTarget="False" x:Name="Viewport3D"
                                     BackgroundColor="#FF0C1018"
                                     ShowCoordinateSystem="True"
                                     CoordinateSystemLabelForeground="#00000000"

@@ -31,7 +31,7 @@
             <!-- Left: Bone Viewport -->
             <Border Grid.Column="0" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4">
                 <Grid>
-                    <hx:Viewport3DX x:Name="BoneViewport" BackgroundColor="#FF0E1420"
+                    <hx:Viewport3DX ShowCameraTarget="False" x:Name="BoneViewport" BackgroundColor="#FF0E1420"
                                     ShowCoordinateSystem="True" CoordinateSystemLabelForeground="#00000000"
                                     ZoomExtentsWhenLoaded="False"
                                     IsRotationEnabled="True" IsPanEnabled="True" IsZoomEnabled="True"
@@ -64,7 +64,7 @@
             <!-- Right: Occlusion Viewport -->
             <Border Grid.Column="2" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4">
                 <Grid>
-                    <hx:Viewport3DX x:Name="OccViewport" BackgroundColor="#FF0E1420"
+                    <hx:Viewport3DX ShowCameraTarget="False" x:Name="OccViewport" BackgroundColor="#FF0E1420"
                                     ShowCoordinateSystem="True" CoordinateSystemLabelForeground="#00000000"
                                     ZoomExtentsWhenLoaded="False"
                                     IsRotationEnabled="True" IsPanEnabled="True" IsZoomEnabled="True"
