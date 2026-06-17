@@ -869,26 +869,33 @@ public static class SegmentationEngine
         }
 
         // Iterate from -1 to Width to allow the zero-padded bounds to act as solid sealing mesh walls
+        var threadBags = new System.Collections.Concurrent.ConcurrentBag<float[]>();
+
         int maxX = w, maxY = h, maxZ = d;
-        for (int z = -1; z < maxZ; z += stepSize)
+        System.Threading.Tasks.Parallel.For(-1, maxZ, z =>
         {
+            // Only process iterations that match the stepSize
+            if ((z + 1) % stepSize != 0) return;
+
+            var localVerts = new List<float>(8192);
+            int[] ox = [0, stepSize, stepSize, 0, 0, stepSize, stepSize, 0];
+            int[] oy = [0, 0, stepSize, stepSize, 0, 0, stepSize, stepSize];
+            int[] oz = [0, 0, 0, 0, stepSize, stepSize, stepSize, stepSize];
+            int[] edgePairs = [0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7];
+            double[] val = new double[8];
+            float[][] edgeVerts = new float[12][];
+            double[][] pos = new double[8][];
+            for (int i = 0; i < 8; i++) pos[i] = new double[3];
+
             for (int y = -1; y < maxY; y += stepSize)
             for (int x = -1; x < maxX; x += stepSize)
             {
-                int[] ox = [0, stepSize, stepSize, 0, 0, stepSize, stepSize, 0];
-                int[] oy = [0, 0, stepSize, stepSize, 0, 0, stepSize, stepSize];
-                int[] oz = [0, 0, 0, 0, stepSize, stepSize, stepSize, stepSize];
-
-                double[] val = new double[8];
                 for (int i = 0; i < 8; i++)
                 {
                     int px = x + ox[i];
                     int py = y + oy[i];
                     int pz = z + oz[i];
                     
-                    // If out of bounds of the actual volume, explicitly return 0.0 probability.
-                    // This forces Marching Cubes to abruptly jump across the 45.0 IsoLevel threshold
-                    // right at the boundary box edges, drawing completely flat sealing caps across the gap!
                     if (px < 0 || px >= w || py < 0 || py >= h || pz < 0 || pz >= d)
                     {
                          val[i] = 0.0;
@@ -908,21 +915,15 @@ public static class SegmentationEngine
                     if (val[i] >= isoLevel) cubeIndex |= (1 << i);
                 if (cubeIndex == 0 || cubeIndex == 255) continue;
 
-                // Corner positions in world coordinates
-                double[][] pos =
-                [
-                    [x*sx, y*sy, z*sz],
-                    [(x+stepSize)*sx, y*sy, z*sz],
-                    [(x+stepSize)*sx, (y+stepSize)*sy, z*sz],
-                    [x*sx, (y+stepSize)*sy, z*sz],
-                    [x*sx, y*sy, (z+stepSize)*sz],
-                    [(x+stepSize)*sx, y*sy, (z+stepSize)*sz],
-                    [(x+stepSize)*sx, (y+stepSize)*sy, (z+stepSize)*sz],
-                    [x*sx, (y+stepSize)*sy, (z+stepSize)*sz]
-                ];
+                pos[0][0] = x*sx;           pos[0][1] = y*sy;           pos[0][2] = z*sz;
+                pos[1][0] = (x+stepSize)*sx; pos[1][1] = y*sy;           pos[1][2] = z*sz;
+                pos[2][0] = (x+stepSize)*sx; pos[2][1] = (y+stepSize)*sy; pos[2][2] = z*sz;
+                pos[3][0] = x*sx;           pos[3][1] = (y+stepSize)*sy; pos[3][2] = z*sz;
+                pos[4][0] = x*sx;           pos[4][1] = y*sy;           pos[4][2] = (z+stepSize)*sz;
+                pos[5][0] = (x+stepSize)*sx; pos[5][1] = y*sy;           pos[5][2] = (z+stepSize)*sz;
+                pos[6][0] = (x+stepSize)*sx; pos[6][1] = (y+stepSize)*sy; pos[6][2] = (z+stepSize)*sz;
+                pos[7][0] = x*sx;           pos[7][1] = (y+stepSize)*sy; pos[7][2] = (z+stepSize)*sz;
 
-                float[][] edgeVerts = new float[12][];
-                int[] edgePairs = [0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7];
                 int edgeFlags = MarchingCubes.GetEdgeFlags(cubeIndex);
 
                 for (int i = 0; i < 12; i++)
@@ -930,7 +931,6 @@ public static class SegmentationEngine
                     if ((edgeFlags & (1 << i)) == 0) continue;
                     int a = edgePairs[i * 2], b = edgePairs[i * 2 + 1];
 
-                    // Linear interpolation based on actual values
                     double diff = val[b] - val[a];
                     double t = Math.Abs(diff) > 0.001 ? (isoLevel - val[a]) / diff : 0.5;
                     t = Math.Clamp(t, 0, 1);
@@ -949,14 +949,22 @@ public static class SegmentationEngine
                     var ev0 = edgeVerts[triIndices[i]];
                     var ev1 = edgeVerts[triIndices[i + 1]];
                     var ev2 = edgeVerts[triIndices[i + 2]];
-                    vertices.Add(ev0[0]); vertices.Add(ev0[1]); vertices.Add(ev0[2]);
-                    vertices.Add(ev1[0]); vertices.Add(ev1[1]); vertices.Add(ev1[2]);
-                    vertices.Add(ev2[0]); vertices.Add(ev2[1]); vertices.Add(ev2[2]);
+                    localVerts.Add(ev0[0]); localVerts.Add(ev0[1]); localVerts.Add(ev0[2]);
+                    localVerts.Add(ev1[0]); localVerts.Add(ev1[1]); localVerts.Add(ev1[2]);
+                    localVerts.Add(ev2[0]); localVerts.Add(ev2[1]); localVerts.Add(ev2[2]);
                 }
             }
+            if (localVerts.Count > 0) threadBags.Add(localVerts.ToArray());
             progress?.Invoke((double)(z + 1) / d);
-        }
-        return vertices.ToArray();
+        });
+
+        int totalCount = 0;
+        foreach (var bag in threadBags) totalCount += bag.Length;
+        var merged = new float[totalCount];
+        int offset = 0;
+        foreach (var bag in threadBags) { Array.Copy(bag, 0, merged, offset, bag.Length); offset += bag.Length; }
+        
+        return merged;
     }
 
     /// <summary>
@@ -966,7 +974,7 @@ public static class SegmentationEngine
     public static float[] ExtractLivePreviewMesh(
         VolumeData volume, short minHU, short maxHU, int stepSize = 4)
     {
-        var vertices = new List<float>();
+        var threadBags = new System.Collections.Concurrent.ConcurrentBag<float[]>();
         int w = volume.Width, h = volume.Height, d = volume.Depth;
         double sx = volume.Spacing[0], sy = volume.Spacing[1], sz = volume.Spacing[2];
 
@@ -976,86 +984,97 @@ public static class SegmentationEngine
 
         int maxX = w - stepSize, maxY = h - stepSize, maxZ = d - stepSize;
         
-        for (int z = 0; z < maxZ; z += stepSize)
-        for (int y = 0; y < maxY; y += stepSize)
-        for (int x = 0; x < maxX; x += stepSize)
+        System.Threading.Tasks.Parallel.For(0, maxZ, z =>
         {
+            if (z % stepSize != 0) return;
+
+            var localVerts = new List<float>(4096);
             int[] ox = [0, stepSize, stepSize, 0, 0, stepSize, stepSize, 0];
             int[] oy = [0, 0, stepSize, stepSize, 0, 0, stepSize, stepSize];
             int[] oz = [0, 0, 0, 0, stepSize, stepSize, stepSize, stepSize];
-
-            double[] val = new double[8];
-            for (int i = 0; i < 8; i++)
-            {
-                int px = x + ox[i], py = y + oy[i], pz = z + oz[i];
-                short hu = volume.Voxels[px + py * w + pz * w * h];
-                if (hu >= minHU && hu <= maxHU)
-                {
-                    val[i] = Math.Min(hu - minHU, maxHU - hu);
-                    if (val[i] == 0) val[i] = 0.001; // ensure strict inclusion for boundaries
-                }
-                else if (hu < minHU)
-                {
-                    val[i] = hu - minHU;
-                }
-                else
-                {
-                    val[i] = maxHU - hu;
-                }
-            }
-
-            int cubeIndex = 0;
-            for (int i = 0; i < 8; i++)
-                if (val[i] >= isoLevel) cubeIndex |= (1 << i);
-            
-            if (cubeIndex == 0 || cubeIndex == 255) continue;
-
-            double[][] pos =
-            [
-                [x*sx, y*sy, z*sz],
-                [(x+stepSize)*sx, y*sy, z*sz],
-                [(x+stepSize)*sx, (y+stepSize)*sy, z*sz],
-                [x*sx, (y+stepSize)*sy, z*sz],
-                [x*sx, y*sy, (z+stepSize)*sz],
-                [(x+stepSize)*sx, y*sy, (z+stepSize)*sz],
-                [(x+stepSize)*sx, (y+stepSize)*sy, (z+stepSize)*sz],
-                [x*sx, (y+stepSize)*sy, (z+stepSize)*sz]
-            ];
-
-            float[][] edgeVerts = new float[12][];
             int[] edgePairs = [0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7];
-            int edgeFlags = MarchingCubes.GetEdgeFlags(cubeIndex);
+            double[] val = new double[8];
+            float[][] edgeVerts = new float[12][];
+            double[][] pos = new double[8][];
+            for (int i = 0; i < 8; i++) pos[i] = new double[3];
 
-            for (int i = 0; i < 12; i++)
+            for (int y = 0; y < maxY; y += stepSize)
+            for (int x = 0; x < maxX; x += stepSize)
             {
-                if ((edgeFlags & (1 << i)) == 0) continue;
-                int a = edgePairs[i * 2], b = edgePairs[i * 2 + 1];
+                for (int i = 0; i < 8; i++)
+                {
+                    int px = x + ox[i], py = y + oy[i], pz = z + oz[i];
+                    short hu = volume.Voxels[px + py * w + pz * w * h];
+                    if (hu >= minHU && hu <= maxHU)
+                    {
+                        val[i] = Math.Min(hu - minHU, maxHU - hu);
+                        if (val[i] == 0) val[i] = 0.001; // ensure strict inclusion for boundaries
+                    }
+                    else if (hu < minHU)
+                    {
+                        val[i] = hu - minHU;
+                    }
+                    else
+                    {
+                        val[i] = maxHU - hu;
+                    }
+                }
 
-                double diff = val[b] - val[a];
-                double t = Math.Abs(diff) > 0.001 ? (isoLevel - val[a]) / diff : 0.5;
-                t = Math.Clamp(t, 0, 1);
+                int cubeIndex = 0;
+                for (int i = 0; i < 8; i++)
+                    if (val[i] >= isoLevel) cubeIndex |= (1 << i);
+                
+                if (cubeIndex == 0 || cubeIndex == 255) continue;
 
-                edgeVerts[i] =
-                [
-                    (float)(pos[a][0] + t * (pos[b][0] - pos[a][0])),
-                    (float)(pos[a][1] + t * (pos[b][1] - pos[a][1])),
-                    (float)(pos[a][2] + t * (pos[b][2] - pos[a][2]))
-                ];
+                pos[0][0] = x*sx;           pos[0][1] = y*sy;           pos[0][2] = z*sz;
+                pos[1][0] = (x+stepSize)*sx; pos[1][1] = y*sy;           pos[1][2] = z*sz;
+                pos[2][0] = (x+stepSize)*sx; pos[2][1] = (y+stepSize)*sy; pos[2][2] = z*sz;
+                pos[3][0] = x*sx;           pos[3][1] = (y+stepSize)*sy; pos[3][2] = z*sz;
+                pos[4][0] = x*sx;           pos[4][1] = y*sy;           pos[4][2] = (z+stepSize)*sz;
+                pos[5][0] = (x+stepSize)*sx; pos[5][1] = y*sy;           pos[5][2] = (z+stepSize)*sz;
+                pos[6][0] = (x+stepSize)*sx; pos[6][1] = (y+stepSize)*sy; pos[6][2] = (z+stepSize)*sz;
+                pos[7][0] = x*sx;           pos[7][1] = (y+stepSize)*sy; pos[7][2] = (z+stepSize)*sz;
+
+                int edgeFlags = MarchingCubes.GetEdgeFlags(cubeIndex);
+
+                for (int i = 0; i < 12; i++)
+                {
+                    if ((edgeFlags & (1 << i)) == 0) continue;
+                    int a = edgePairs[i * 2], b = edgePairs[i * 2 + 1];
+
+                    double diff = val[b] - val[a];
+                    double t = Math.Abs(diff) > 0.001 ? (isoLevel - val[a]) / diff : 0.5;
+                    t = Math.Clamp(t, 0, 1);
+
+                    edgeVerts[i] =
+                    [
+                        (float)(pos[a][0] + t * (pos[b][0] - pos[a][0])),
+                        (float)(pos[a][1] + t * (pos[b][1] - pos[a][1])),
+                        (float)(pos[a][2] + t * (pos[b][2] - pos[a][2]))
+                    ];
+                }
+
+                var triIndices = MarchingCubes.GetTriangles(cubeIndex);
+                for (int i = 0; i < triIndices.Length && triIndices[i] != -1; i += 3)
+                {
+                    var ev0 = edgeVerts[triIndices[i]];
+                    var ev1 = edgeVerts[triIndices[i + 1]];
+                    var ev2 = edgeVerts[triIndices[i + 2]];
+                    localVerts.Add(ev0[0]); localVerts.Add(ev0[1]); localVerts.Add(ev0[2]);
+                    localVerts.Add(ev1[0]); localVerts.Add(ev1[1]); localVerts.Add(ev1[2]);
+                    localVerts.Add(ev2[0]); localVerts.Add(ev2[1]); localVerts.Add(ev2[2]);
+                }
             }
+            if (localVerts.Count > 0) threadBags.Add(localVerts.ToArray());
+        });
 
-            var triIndices = MarchingCubes.GetTriangles(cubeIndex);
-            for (int i = 0; i < triIndices.Length && triIndices[i] != -1; i += 3)
-            {
-                var ev0 = edgeVerts[triIndices[i]];
-                var ev1 = edgeVerts[triIndices[i + 1]];
-                var ev2 = edgeVerts[triIndices[i + 2]];
-                vertices.Add(ev0[0]); vertices.Add(ev0[1]); vertices.Add(ev0[2]);
-                vertices.Add(ev1[0]); vertices.Add(ev1[1]); vertices.Add(ev1[2]);
-                vertices.Add(ev2[0]); vertices.Add(ev2[1]); vertices.Add(ev2[2]);
-            }
-        }
+        int totalCount = 0;
+        foreach (var bag in threadBags) totalCount += bag.Length;
+        var merged = new float[totalCount];
+        int offset = 0;
+        foreach (var bag in threadBags) { Array.Copy(bag, 0, merged, offset, bag.Length); offset += bag.Length; }
         
-        return vertices.ToArray();
+        return merged;
     }
 
     /// <summary>
