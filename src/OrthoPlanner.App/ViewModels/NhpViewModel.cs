@@ -1,4 +1,4 @@
-﻿using System.Windows.Media.Media3D;
+using System.Windows.Media.Media3D;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -57,6 +57,29 @@ public partial class MainViewModel
     [RelayCommand]
     private async Task CommitNhpAsync()
     {
+        // ── Guard: warn if surgical state exists that will be reset ──
+        bool hasAnySurgicalSliders =
+            SurgMaxillaLat != 0 || SurgMaxillaAnt != 0 || SurgMaxillaVert != 0 ||
+            SurgMaxillaRoll != 0 || SurgMaxillaPitch != 0 || SurgMaxillaYaw != 0 ||
+            SurgMandibleLat != 0 || SurgMandibleAnt != 0 || SurgMandibleVert != 0 ||
+            SurgMandibleRoll != 0 || SurgMandiblePitch != 0 || SurgMandibleYaw != 0 ||
+            SurgRightRamusLat != 0 || SurgRightRamusAnt != 0 || SurgRightRamusVert != 0 ||
+            SurgRightRamusRoll != 0 || SurgRightRamusPitch != 0 || SurgRightRamusYaw != 0 ||
+            SurgLeftRamusLat != 0 || SurgLeftRamusAnt != 0 || SurgLeftRamusVert != 0 ||
+            SurgLeftRamusRoll != 0 || SurgLeftRamusPitch != 0 || SurgLeftRamusYaw != 0 ||
+            SurgChinLat != 0 || SurgChinAnt != 0 || SurgChinVert != 0 ||
+            SurgChinRoll != 0 || SurgChinPitch != 0 || SurgChinYaw != 0;
+
+        if (hasAnySurgicalSliders)
+        {
+            var result = System.Windows.MessageBox.Show(
+                "Active surgical movements will be reset when committing NHP.\n\nContinue?",
+                "Reset Surgical Movements",
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Warning);
+            if (result != System.Windows.MessageBoxResult.Yes) return;
+        }
+
         // Capture the uncommitted delta BEFORE locking it in as the new baseline
         double dPitch = NhpPitch - _cPitch;
         double dRoll  = NhpRoll  - _cRoll;
@@ -107,6 +130,7 @@ public partial class MainViewModel
         if (DentalModel != null)     DentalModel.Transform     = _nhpTransform;
         foreach (var seg  in Segments)      seg.Transform  = ComposeTransforms(_nhpTransform, seg.SurgicalTransform);
         foreach (var mesh in ImportedMeshes) mesh.Transform = _nhpTransform;
+        foreach (var occ  in LoadedOcclusions) occ.Transform = _nhpTransform;
 
         // Dynamically enforce the freehand rotation pivot point!
         ModelCenter = nhp.Transform(center);

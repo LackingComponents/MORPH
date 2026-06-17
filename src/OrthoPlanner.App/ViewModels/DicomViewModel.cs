@@ -538,6 +538,55 @@ public partial class MainViewModel
                 }
             }
         }
+        // NHP-FIX: Transform Occlusion STL meshes by the same delta so they stay aligned with bone
+        foreach (var occ in LoadedOcclusions)
+        {
+            if (occ.Vertices != null)
+            {
+                var p = new Point3D();
+                for (int i = 0; i < occ.Vertices.Length; i += 3)
+                {
+                    p.X = occ.Vertices[i]; p.Y = occ.Vertices[i + 1]; p.Z = occ.Vertices[i + 2];
+                    var t = m.Transform(p);
+                    occ.Vertices[i] = (float)t.X; occ.Vertices[i + 1] = (float)t.Y; occ.Vertices[i + 2] = (float)t.Z;
+                }
+            }
+        }
+        // NHP-FIX: Transform condylar axis pivot points and dental midline so surgical pivots remain correct
+        if (LeftCondyleCenter.HasValue)
+        {
+            var lc = m.Transform(new Point3D(LeftCondyleCenter.Value.X, LeftCondyleCenter.Value.Y, LeftCondyleCenter.Value.Z));
+            LeftCondyleCenter = (lc.X, lc.Y, lc.Z);
+        }
+        if (RightCondyleCenter.HasValue)
+        {
+            var rc = m.Transform(new Point3D(RightCondyleCenter.Value.X, RightCondyleCenter.Value.Y, RightCondyleCenter.Value.Z));
+            RightCondyleCenter = (rc.X, rc.Y, rc.Z);
+        }
+        if (DentalMidlinePoint.HasValue)
+        {
+            var dm = m.Transform(new Point3D(DentalMidlinePoint.Value.X, DentalMidlinePoint.Value.Y, DentalMidlinePoint.Value.Z));
+            DentalMidlinePoint = (dm.X, dm.Y, dm.Z);
+        }
+        // NHP-FIX: Transform cephalometric 3D landmark positions (2D coords are invalidated)
+        if (SavedCephLandmarks.Count > 0)
+        {
+            var updatedLandmarks = new List<CephLandmarkSave>();
+            foreach (var lm in SavedCephLandmarks)
+            {
+                if (lm.X3D.HasValue && lm.Y3D.HasValue && lm.Z3D.HasValue)
+                {
+                    var tp = m.Transform(new Point3D(lm.X3D.Value, lm.Y3D.Value, lm.Z3D.Value));
+                    // Invalidate 2D DRR coords (null) — must be re-projected from the new volume
+                    updatedLandmarks.Add(new CephLandmarkSave(lm.Name, null, null, tp.X, tp.Y, tp.Z));
+                }
+                else
+                {
+                    updatedLandmarks.Add(lm);
+                }
+            }
+            SavedCephLandmarks = updatedLandmarks;
+        }
 
         await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => {
             Volume = resliced;
@@ -545,11 +594,16 @@ public partial class MainViewModel
             // Re-initialize segmentation volume for the new dimensions (Air Padded array)
             _segVolume = new SegmentationVolume(Volume);
 
+            // NHP-FIX: Explicitly invalidate _boneOnlySegVolume — its dimensions no longer match
+            // the resliced volume. SplitCraniumMandibleAsync will auto-regenerate it when needed.
+            _boneOnlySegVolume = null;
+
             // Rebuild models since we mutated their vertices physically
             foreach (var seg in allSegmentModels) seg.BuildModel();
             foreach (var mesh in ImportedMeshes) mesh.BuildModel();
+            foreach (var occ in LoadedOcclusions) occ.BuildModel();
 
-            // Reset all transforms to identity ÔÇö vertices are now physically at the correct NHP position
+            // Reset all transforms to identity — vertices are now physically at the correct NHP position
             _nhpTransform = System.Windows.Media.Media3D.Transform3D.Identity;
             foreach (var seg in allSegmentModels)
             {
@@ -558,9 +612,34 @@ public partial class MainViewModel
             }
             foreach (var mesh in ImportedMeshes)
                 mesh.Transform = System.Windows.Media.Media3D.Transform3D.Identity;
+            foreach (var occ in LoadedOcclusions)
+                occ.Transform = System.Windows.Media.Media3D.Transform3D.Identity;
             if (HardTissueModel != null) HardTissueModel.Transform = System.Windows.Media.Media3D.Transform3D.Identity;
             if (SoftTissueModel != null) SoftTissueModel.Transform = System.Windows.Media.Media3D.Transform3D.Identity;
             if (DentalModel != null)     DentalModel.Transform     = System.Windows.Media.Media3D.Transform3D.Identity;
+
+            // NHP-FIX: Reset all surgical movement sliders to zero.
+            // The SurgicalTransform on each segment is already reset to Identity above,
+            // but the UI slider values must also be zeroed to prevent them from being
+            // re-applied on the next UpdateSurgeryTransform() call.
+            SurgMaxillaLat = SurgMaxillaAnt = SurgMaxillaVert = 0;
+            SurgMaxillaRoll = SurgMaxillaPitch = SurgMaxillaYaw = 0;
+            SurgMandibleLat = SurgMandibleAnt = SurgMandibleVert = 0;
+            SurgMandibleRoll = SurgMandiblePitch = SurgMandibleYaw = 0;
+            SurgRightRamusLat = SurgRightRamusAnt = SurgRightRamusVert = 0;
+            SurgRightRamusRoll = SurgRightRamusPitch = SurgRightRamusYaw = 0;
+            SurgLeftRamusLat = SurgLeftRamusAnt = SurgLeftRamusVert = 0;
+            SurgLeftRamusRoll = SurgLeftRamusPitch = SurgLeftRamusYaw = 0;
+            SurgChinLat = SurgChinAnt = SurgChinVert = 0;
+            SurgChinRoll = SurgChinPitch = SurgChinYaw = 0;
+            _savedMaxilla = (0, 0, 0, 0, 0, 0);
+            _savedMandible = (0, 0, 0, 0, 0, 0);
+
+            // NHP-FIX: Clear undo/redo stacks. Snapshots hold references to the same
+            // SegmentViewModel objects whose Vertices arrays were just mutated in-place,
+            // so the snapshot data is silently corrupted. Undo after NHP commit is not supported.
+            _undoStack.Clear();
+            _redoStack.Clear();
 
             // CRITICAL: sync BoneOnlyBounds to the new resliced volume NOW.
             // Without this, the first visibility toggle after commit would find
