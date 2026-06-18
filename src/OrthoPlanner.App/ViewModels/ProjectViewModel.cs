@@ -37,7 +37,7 @@ public partial class MainViewModel
             // 1. project.json — metadata
             var meta = new
             {
-                Version = "2.1",
+                Version = "2.2",
                 PatientName,
                 StudyDate,
                 Segmentation = new
@@ -63,7 +63,19 @@ public partial class MainViewModel
                 CephLandmarks = SavedCephLandmarks.Select(c => new
                 {
                     c.Name, c.X2D, c.Y2D, c.X3D, c.Y3D, c.Z3D
-                }).ToArray()
+                }).ToArray(),
+                // Phase 1: Persist committed NHP baseline (cumulative, relative to original DICOM)
+                NhpBaseline = new
+                {
+                    Lat   = _cLat,
+                    Ant   = _cAnt,
+                    Vert  = _cVert,
+                    Roll  = _cRoll,
+                    Pitch = _cPitch,
+                    Yaw   = _cYaw
+                },
+                // Phase 1: Persist baked VolumePivot (stable rotation center across reslices)
+                VolumePivot = new { X = VolumePivot.X, Y = VolumePivot.Y, Z = VolumePivot.Z }
             };
             var jsonEntry = zip.CreateEntry("project.json");
             using (var sw = new StreamWriter(jsonEntry.Open()))
@@ -243,6 +255,52 @@ public partial class MainViewModel
 
                     UpdateHistograms();
                     UpdateAllSlices();
+
+                    // Phase 1: Restore baked VolumePivot (stable across reslices)
+                    if (root.TryGetProperty("VolumePivot", out var vpNode))
+                    {
+                        double vpx = vpNode.GetProperty("X").GetDouble();
+                        double vpy = vpNode.GetProperty("Y").GetDouble();
+                        double vpz = vpNode.GetProperty("Z").GetDouble();
+                        VolumePivot = new System.Windows.Media.Media3D.Point3D(vpx, vpy, vpz);
+                    }
+                    else
+                    {
+                        // Fallback: compute from loaded volume dimensions
+                        VolumePivot = new System.Windows.Media.Media3D.Point3D(
+                            vol.Width * vol.Spacing[0] / 2.0,
+                            vol.Height * vol.Spacing[1] / 2.0,
+                            vol.Depth * vol.Spacing[2] / 2.0);
+                    }
+
+                    // Phase 1: Restore committed NHP baseline (cumulative, relative to original DICOM)
+                    if (root.TryGetProperty("NhpBaseline", out var nhpNode))
+                    {
+                        _cLat  = nhpNode.GetProperty("Lat").GetDouble();
+                        _cAnt  = nhpNode.GetProperty("Ant").GetDouble();
+                        _cVert = nhpNode.GetProperty("Vert").GetDouble();
+                        _cRoll = nhpNode.GetProperty("Roll").GetDouble();
+                        _cPitch = nhpNode.GetProperty("Pitch").GetDouble();
+                        _cYaw  = nhpNode.GetProperty("Yaw").GetDouble();
+
+                        // Sync live sliders to the committed baseline so IsNhpDirty = false
+#pragma warning disable MVVMTK0034 // Direct field access during bulk restore (avoid 6x UpdateNhpTransform)
+                        _nhpLateral         = _cLat;
+                        _nhpAnteroposterior = _cAnt;
+                        _nhpVertical        = _cVert;
+                        _nhpRoll            = _cRoll;
+                        _nhpPitch           = _cPitch;
+                        _nhpYaw             = _cYaw;
+#pragma warning restore MVVMTK0034
+
+                        OnPropertyChanged(nameof(NhpLateral));
+                        OnPropertyChanged(nameof(NhpAnteroposterior));
+                        OnPropertyChanged(nameof(NhpVertical));
+                        OnPropertyChanged(nameof(NhpRoll));
+                        OnPropertyChanged(nameof(NhpPitch));
+                        OnPropertyChanged(nameof(NhpYaw));
+                        OnPropertyChanged(nameof(IsNhpDirty));
+                    }
                 }
             }
 
