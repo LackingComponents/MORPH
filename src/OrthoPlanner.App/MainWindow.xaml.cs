@@ -85,9 +85,9 @@ public partial class MainWindow : Window
                             Viewport3D.FixedRotationPointEnabled = true;
                             Viewport3D.FixedRotationPoint = centroid;
 
-                            // Phase 0: Do not auto-snap the camera during NHP commit.
-                            // Only update FixedRotationPoint; leave the camera exactly where it is.
-                            if (VM.IsNhpCommitInProgress) break;
+                            // V-0.4: Removed dead IsNhpCommitInProgress guard.
+                            // Visual-only NHP never changes BoneOnlyBounds, so this PropertyChanged
+                            // only fires on DICOM load or project open — camera snap is always correct.
 
                             // Robust centering: wait briefly for HelixScene mapping, then snap to Anterior View
                             Dispatcher.InvokeAsync(async () =>

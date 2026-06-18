@@ -283,6 +283,27 @@ public partial class MainViewModel
                         _cPitch = nhpNode.GetProperty("Pitch").GetDouble();
                         _cYaw  = nhpNode.GetProperty("Yaw").GetDouble();
 
+                        // V-0.1: Clamp restored NHP values to safe limits (±200mm / ±45°)
+                        bool clamped = false;
+                        double ClampAndFlag(ref double val, bool isRotation)
+                        {
+                            double safe = Math.Clamp(val, isRotation ? -45.0 : -200.0, isRotation ? 45.0 : 200.0);
+                            if (safe != val) { clamped = true; val = safe; }
+                            return safe;
+                        }
+                        ClampAndFlag(ref _cLat, false);
+                        ClampAndFlag(ref _cAnt, false);
+                        ClampAndFlag(ref _cVert, false);
+                        ClampAndFlag(ref _cRoll, true);
+                        ClampAndFlag(ref _cPitch, true);
+                        ClampAndFlag(ref _cYaw, true);
+                        if (clamped)
+                        {
+                            System.Windows.MessageBox.Show(
+                                "Some NHP values in the project file exceeded safe limits (±200 mm / ±45°) and have been clamped.",
+                                "NHP Values Clamped", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+                        }
+
                         // Sync live sliders to the committed baseline so IsNhpDirty = false
 #pragma warning disable MVVMTK0034 // Direct field access during bulk restore (avoid 6x UpdateNhpTransform)
                         _nhpLateral         = _cLat;
@@ -300,6 +321,12 @@ public partial class MainViewModel
                         OnPropertyChanged(nameof(NhpPitch));
                         OnPropertyChanged(nameof(NhpYaw));
                         OnPropertyChanged(nameof(IsNhpDirty));
+
+                        // Re-apply the NHP transform and regenerate MPR slices
+                        // (direct field writes above bypass the source-generated setters,
+                        //  so the partial OnChanged methods never fire)
+                        UpdateNhpTransform();
+                        UpdateAllSlices();
                     }
                 }
             }

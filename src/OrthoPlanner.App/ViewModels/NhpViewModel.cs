@@ -6,7 +6,14 @@ namespace OrthoPlanner.App.ViewModels;
 
 public partial class MainViewModel
 {
-    // ÔöÇÔöÇÔöÇ NHP Parameters (Live adjusted) ÔöÇÔöÇÔöÇ
+    // ─── NHP Safety Limits ───
+    private const double MaxNhpTranslation = 200.0;  // mm
+    private const double MaxNhpRotation = 45.0;       // degrees
+
+    private static double ClampNhp(double value, bool isRotation)
+        => Math.Clamp(value, isRotation ? -MaxNhpRotation : -MaxNhpTranslation, isRotation ? MaxNhpRotation : MaxNhpTranslation);
+
+    // ─── NHP Parameters (Live adjusted) ───
     [ObservableProperty] private double _nhpLateral = 0.0;
     [ObservableProperty] private double _nhpAnteroposterior = 0.0;
     [ObservableProperty] private double _nhpVertical = 0.0;
@@ -35,66 +42,34 @@ public partial class MainViewModel
     // Prevent camera jumping during automated splits
     public bool IsSplitting { get; set; }
 
-    partial void OnNhpLateralChanged(double value) { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); }
-    partial void OnNhpAnteroposteriorChanged(double value) { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); }
-    partial void OnNhpVerticalChanged(double value) { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); }
-    partial void OnNhpRollChanged(double value) { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); }
-    partial void OnNhpPitchChanged(double value) { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); }
-    partial void OnNhpYawChanged(double value) { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); }
+    partial void OnNhpLateralChanged(double value) { if (value != ClampNhp(value, false)) NhpLateral = ClampNhp(value, false); else { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); UpdateAllSlices(); } }
+    partial void OnNhpAnteroposteriorChanged(double value) { if (value != ClampNhp(value, false)) NhpAnteroposterior = ClampNhp(value, false); else { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); UpdateAllSlices(); } }
+    partial void OnNhpVerticalChanged(double value) { if (value != ClampNhp(value, false)) NhpVertical = ClampNhp(value, false); else { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); UpdateAllSlices(); } }
+    partial void OnNhpRollChanged(double value) { if (value != ClampNhp(value, true)) NhpRoll = ClampNhp(value, true); else { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); UpdateAllSlices(); } }
+    partial void OnNhpPitchChanged(double value) { if (value != ClampNhp(value, true)) NhpPitch = ClampNhp(value, true); else { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); UpdateAllSlices(); } }
+    partial void OnNhpYawChanged(double value) { if (value != ClampNhp(value, true)) NhpYaw = ClampNhp(value, true); else { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); UpdateAllSlices(); } }
 
     [RelayCommand]
     private void AdjustNhp(string param)
     {
         double step = 0.1;
-        if (param.Contains("Lat")) NhpLateral += param.EndsWith("+") ? step : -step;
-        else if (param.Contains("Ant")) NhpAnteroposterior += param.EndsWith("+") ? step : -step;
-        else if (param.Contains("Vert")) NhpVertical += param.EndsWith("+") ? step : -step;
-        else if (param.Contains("Roll")) NhpRoll += param.EndsWith("+") ? step : -step;
-        else if (param.Contains("Pitch")) NhpPitch += param.EndsWith("+") ? step : -step;
-        else if (param.Contains("Yaw")) NhpYaw += param.EndsWith("+") ? step : -step;
+        if (param.Contains("Lat")) NhpLateral = ClampNhp(NhpLateral + (param.EndsWith("+") ? step : -step), false);
+        else if (param.Contains("Ant")) NhpAnteroposterior = ClampNhp(NhpAnteroposterior + (param.EndsWith("+") ? step : -step), false);
+        else if (param.Contains("Vert")) NhpVertical = ClampNhp(NhpVertical + (param.EndsWith("+") ? step : -step), false);
+        else if (param.Contains("Roll")) NhpRoll = ClampNhp(NhpRoll + (param.EndsWith("+") ? step : -step), true);
+        else if (param.Contains("Pitch")) NhpPitch = ClampNhp(NhpPitch + (param.EndsWith("+") ? step : -step), true);
+        else if (param.Contains("Yaw")) NhpYaw = ClampNhp(NhpYaw + (param.EndsWith("+") ? step : -step), true);
     }
 
     [RelayCommand]
-    private async Task CommitNhpAsync()
+    private void CommitNhp()
     {
-        // ── Guard: warn if surgical state exists that will be reset ──
-        bool hasAnySurgicalSliders =
-            SurgMaxillaLat != 0 || SurgMaxillaAnt != 0 || SurgMaxillaVert != 0 ||
-            SurgMaxillaRoll != 0 || SurgMaxillaPitch != 0 || SurgMaxillaYaw != 0 ||
-            SurgMandibleLat != 0 || SurgMandibleAnt != 0 || SurgMandibleVert != 0 ||
-            SurgMandibleRoll != 0 || SurgMandiblePitch != 0 || SurgMandibleYaw != 0 ||
-            SurgRightRamusLat != 0 || SurgRightRamusAnt != 0 || SurgRightRamusVert != 0 ||
-            SurgRightRamusRoll != 0 || SurgRightRamusPitch != 0 || SurgRightRamusYaw != 0 ||
-            SurgLeftRamusLat != 0 || SurgLeftRamusAnt != 0 || SurgLeftRamusVert != 0 ||
-            SurgLeftRamusRoll != 0 || SurgLeftRamusPitch != 0 || SurgLeftRamusYaw != 0 ||
-            SurgChinLat != 0 || SurgChinAnt != 0 || SurgChinVert != 0 ||
-            SurgChinRoll != 0 || SurgChinPitch != 0 || SurgChinYaw != 0;
-
-        if (hasAnySurgicalSliders)
-        {
-            var result = System.Windows.MessageBox.Show(
-                "Active surgical movements will be reset when committing NHP.\n\nContinue?",
-                "Reset Surgical Movements",
-                System.Windows.MessageBoxButton.YesNo,
-                System.Windows.MessageBoxImage.Warning);
-            if (result != System.Windows.MessageBoxResult.Yes) return;
-        }
-
-        // Capture the uncommitted delta BEFORE locking it in as the new baseline
-        double dPitch = NhpPitch - _cPitch;
-        double dRoll  = NhpRoll  - _cRoll;
-        double dYaw   = NhpYaw   - _cYaw;
-        double dLat   = NhpLateral         - _cLat;
-        double dAnt   = NhpAnteroposterior - _cAnt;
-        double dVert  = NhpVertical        - _cVert;
-
-        // Now lock in as the new committed baseline
+        // Visual-only NHP: simply lock the current slider values as the new baseline.
+        // No physical reslicing, no surgical reset, no undo clear.
         _cLat = NhpLateral; _cAnt = NhpAnteroposterior; _cVert = NhpVertical;
         _cRoll = NhpRoll; _cPitch = NhpPitch; _cYaw = NhpYaw;
         OnPropertyChanged(nameof(IsNhpDirty));
-
-        // Start Reslice Engine, passing the true delta that needs to be baked
-        await PerformPhysicalResliceAsync(dPitch, dRoll, dYaw, dLat, dAnt, dVert);
+        StatusText = "NHP committed.";
     }
 
     private void UpdateNhpTransform()
@@ -109,26 +84,18 @@ public partial class MainViewModel
                           BoneOnlyBounds.Z + BoneOnlyBounds.SizeZ / 2)
             : VolumePivot;
 
-        // DELTA MATH: Only visually rotate/translate by the *difference* between the current UI values
-        // and the physically baked (committed) values. This prevents compounding geometry.
-        var dPitch = NhpPitch - _cPitch;
-        var dRoll  = NhpRoll  - _cRoll;
-        var dYaw   = NhpYaw   - _cYaw;
-        var dLat   = NhpLateral         - _cLat;
-        var dAnt   = NhpAnteroposterior - _cAnt;
-        var dVert  = NhpVertical        - _cVert;
-
+        // TOTAL NHP transform: apply the full current NHP values (not just the delta).
+        // This makes _nhpTransform the definitive orientation of all meshes in world space.
         var nhp = new Transform3DGroup();
         nhp.Children.Add(new TranslateTransform3D(-center.X, -center.Y, -center.Z));
-        nhp.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), dPitch)));
-        nhp.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), dRoll)));
-        nhp.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), dYaw)));
-        nhp.Children.Add(new TranslateTransform3D(center.X + dLat, center.Y + dAnt, center.Z + dVert));
+        nhp.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), NhpPitch)));
+        nhp.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), NhpRoll)));
+        nhp.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), NhpYaw)));
+        nhp.Children.Add(new TranslateTransform3D(center.X + NhpLateral, center.Y + NhpAnteroposterior, center.Z + NhpVertical));
 
-        // Store so surgery transforms can compose on top
         _nhpTransform = nhp;
 
-        // Apply: NHP first, then per-segment surgical offset on top
+        // Apply total NHP transform to all models, then compose with per-segment surgical offset
         if (HardTissueModel != null) HardTissueModel.Transform = _nhpTransform;
         if (SoftTissueModel != null) SoftTissueModel.Transform = _nhpTransform;
         if (DentalModel != null)     DentalModel.Transform     = _nhpTransform;

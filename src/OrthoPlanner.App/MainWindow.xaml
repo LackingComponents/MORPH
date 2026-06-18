@@ -231,7 +231,7 @@
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <TextBlock Text="Lateral (X):" Foreground="White" FontSize="11" VerticalAlignment="Center" />
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                                        <TextBox Width="50" Text="{Binding NhpLateral, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="0,0,4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Lat"/>
+                                        <TextBox Width="50" Text="{Binding NhpLateral, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="0,0,4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Lat" MaxLength="8"/>
                                         <StackPanel Orientation="Vertical" VerticalAlignment="Center">
                                             <RepeatButton Content="▲" Style="{StaticResource VerticalStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Lat+" Margin="0,0,0,1"/>
                                             <RepeatButton Content="▼" Style="{StaticResource VerticalStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Lat-"/>
@@ -243,7 +243,7 @@
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <TextBlock Text="Anterior (Y):" Foreground="White" FontSize="11" VerticalAlignment="Center" />
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                                        <TextBox Width="50" Text="{Binding NhpAnteroposterior, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="0,0,4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Ant"/>
+                                        <TextBox Width="50" Text="{Binding NhpAnteroposterior, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="0,0,4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Ant" MaxLength="8"/>
                                         <StackPanel Orientation="Vertical" VerticalAlignment="Center">
                                             <RepeatButton Content="▲" Style="{StaticResource VerticalStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Ant+" Margin="0,0,0,1"/>
                                             <RepeatButton Content="▼" Style="{StaticResource VerticalStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Ant-"/>
@@ -255,7 +255,7 @@
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <TextBlock Text="Vertical (Z):" Foreground="White" FontSize="11" VerticalAlignment="Center" />
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                                        <TextBox Width="50" Text="{Binding NhpVertical, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="0,0,4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Vert"/>
+                                        <TextBox Width="50" Text="{Binding NhpVertical, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="0,0,4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Vert" MaxLength="8"/>
                                         <StackPanel Orientation="Vertical" VerticalAlignment="Center">
                                             <RepeatButton Content="▲" Style="{StaticResource VerticalStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Vert+" Margin="0,0,0,1"/>
                                             <RepeatButton Content="▼" Style="{StaticResource VerticalStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Vert-"/>
@@ -270,7 +270,7 @@
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <TextBlock Text="Pitch (X):" Foreground="White" FontSize="11" VerticalAlignment="Center" />
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                                        <TextBox Width="50" Text="{Binding NhpPitch, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="0,0,4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Pitch"/>
+                                        <TextBox Width="50" Text="{Binding NhpPitch, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="0,0,4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Pitch" MaxLength="8"/>
                                         <StackPanel Orientation="Vertical" VerticalAlignment="Center">
                                             <RepeatButton Content="▲" Style="{StaticResource VerticalStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Pitch+" Margin="0,0,0,1"/>
                                             <RepeatButton Content="▼" Style="{StaticResource VerticalStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Pitch-"/>
@@ -282,7 +282,7 @@
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <TextBlock Text="Roll (Y):" Foreground="White" FontSize="11" VerticalAlignment="Center" />
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                                        <TextBox Width="50" Text="{Binding NhpRoll, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="0,0,4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Roll"/>
+                                        <TextBox Width="50" Text="{Binding NhpRoll, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="0,0,4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Roll" MaxLength="8"/>
                                         <StackPanel Orientation="Vertical" VerticalAlignment="Center">
                                             <RepeatButton Content="▲" Style="{StaticResource VerticalStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Roll+" Margin="0,0,0,1"/>
                                             <RepeatButton Content="▼" Style="{StaticResource VerticalStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Roll-"/>
@@ -294,7 +294,7 @@
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <TextBlock Text="Yaw (Z):" Foreground="White" FontSize="11" VerticalAlignment="Center" />
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                                        <TextBox Width="50" Text="{Binding NhpYaw, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="0,0,4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Yaw"/>
+                                        <TextBox Width="50" Text="{Binding NhpYaw, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="0,0,4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Yaw" MaxLength="8"/>
                                         <StackPanel Orientation="Vertical" VerticalAlignment="Center">
                                             <RepeatButton Content="▲" Style="{StaticResource VerticalStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Yaw+" Margin="0,0,0,1"/>
                                             <RepeatButton Content="▼" Style="{StaticResource VerticalStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Yaw-"/>
@@ -1248,7 +1248,7 @@
                               MouseRightButtonUp="SlicePanel_RightUp"
                               MouseMove="SlicePanel_MouseMove"
                               Background="Transparent">
-                            <Image Source="{Binding AxialImage}" Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                            <Image Source="{Binding AxialImage}" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor" />
                             <Canvas x:Name="AxialCrosshairCanvas" IsHitTestVisible="False" />
                             <TextBlock Text="AXIAL" Style="{StaticResource PanelHeader}"
                                        HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6" />
@@ -1269,7 +1269,7 @@
                               MouseRightButtonUp="SlicePanel_RightUp"
                               MouseMove="SlicePanel_MouseMove"
                               Background="Transparent">
-                            <Image Source="{Binding CoronalImage}" Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                            <Image Source="{Binding CoronalImage}" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor" />
                             <Canvas x:Name="CoronalCrosshairCanvas" IsHitTestVisible="False" />
                             <TextBlock Text="CORONAL" Style="{StaticResource PanelHeader}"
                                        HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6" />
@@ -1290,7 +1290,7 @@
                               MouseRightButtonUp="SlicePanel_RightUp"
                               MouseMove="SlicePanel_MouseMove"
                               Background="Transparent">
-                            <Image Source="{Binding SagittalImage}" Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                            <Image Source="{Binding SagittalImage}" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor" />
                             <Canvas x:Name="SagittalCrosshairCanvas" IsHitTestVisible="False" />
                             <TextBlock Text="SAGITTAL" Style="{StaticResource PanelHeader}"
                                        HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,6" />

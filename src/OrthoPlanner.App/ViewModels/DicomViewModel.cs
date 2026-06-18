@@ -276,23 +276,67 @@ public partial class MainViewModel
     private void UpdateAxialSlice()
     {
         if (Volume == null) return;
+
+        GetInverseNhpTransform(out var invNhp);
+
+        double zMm = AxialIndex * Volume.Spacing[2];
+        int outW, outH;
+        Point3D originNhp;
+        Vector3D uAxisNhp, vAxisNhp;
+
+        if (invNhp.IsIdentity)
+        {
+            outW = Volume.Width;
+            outH = Volume.Height;
+            originNhp = new Point3D(0, 0, zMm);
+            uAxisNhp  = new Vector3D(Volume.Spacing[0], 0, 0);
+            vAxisNhp  = new Vector3D(0, Volume.Spacing[1], 0);
+        }
+        else
+        {
+            GetNhpVolumeBounds(out double minX, out double maxX, out double minY, out double maxY, out _, out _);
+            outW = Math.Max(1, (int)Math.Ceiling((maxX - minX) / Volume.Spacing[0]));
+            outH = Math.Max(1, (int)Math.Ceiling((maxY - minY) / Volume.Spacing[1]));
+            // V-0.2: Cap MPR output size to prevent OOM from extreme NHP rotations
+            outW = Math.Min(outW, Volume.Width * MaxMprExpansion);
+            outH = Math.Min(outH, Volume.Height * MaxMprExpansion);
+            originNhp = new Point3D(minX, minY, zMm);
+            uAxisNhp  = new Vector3D(Volume.Spacing[0], 0, 0);
+            vAxisNhp  = new Vector3D(0, Volume.Spacing[1], 0);
+        }
+
+        var origin = invNhp.Transform(originNhp);
+        var uAxis  = invNhp.Transform(uAxisNhp);
+        var vAxis  = invNhp.Transform(vAxisNhp);
+
         if (IsRegionGrowMode && _segVolume != null)
         {
-            var data = Volume.GetAxialSliceWithMaskBgra(AxialIndex, WindowCenter, WindowWidth, _segVolume);
-            AxialImage = CreateBgraBitmap(data, Volume.Width, Volume.Height,
+            var data = Volume.GetObliqueSliceWithMaskBgra(outW, outH,
+                origin.X, origin.Y, origin.Z,
+                uAxis.X, uAxis.Y, uAxis.Z,
+                vAxis.X, vAxis.Y, vAxis.Z,
+                WindowCenter, WindowWidth, _segVolume);
+            AxialImage = CreateBgraBitmap(data, outW, outH,
                 Volume.Spacing[0], Volume.Spacing[1]);
         }
         else if (GetActiveThreshold(out double min, out double max))
         {
-            var data = Volume.GetAxialSliceBgra(AxialIndex, WindowCenter, WindowWidth,
-                (short)min, (short)max);
-            AxialImage = CreateBgraBitmap(data, Volume.Width, Volume.Height,
+            var data = Volume.GetObliqueSliceBgra(outW, outH,
+                origin.X, origin.Y, origin.Z,
+                uAxis.X, uAxis.Y, uAxis.Z,
+                vAxis.X, vAxis.Y, vAxis.Z,
+                WindowCenter, WindowWidth, (short)min, (short)max);
+            AxialImage = CreateBgraBitmap(data, outW, outH,
                 Volume.Spacing[0], Volume.Spacing[1]);
         }
         else
         {
-            var data = Volume.GetAxialSlice(AxialIndex, WindowCenter, WindowWidth);
-            AxialImage = CreateGrayscaleBitmap(data, Volume.Width, Volume.Height,
+            var data = Volume.GetObliqueSliceGrayscale(outW, outH,
+                origin.X, origin.Y, origin.Z,
+                uAxis.X, uAxis.Y, uAxis.Z,
+                vAxis.X, vAxis.Y, vAxis.Z,
+                WindowCenter, WindowWidth);
+            AxialImage = CreateGrayscaleBitmap(data, outW, outH,
                 Volume.Spacing[0], Volume.Spacing[1]);
         }
     }
@@ -300,23 +344,68 @@ public partial class MainViewModel
     private void UpdateCoronalSlice()
     {
         if (Volume == null) return;
+
+        GetInverseNhpTransform(out var invNhp);
+
+        double yMm = CoronalIndex * Volume.Spacing[1];
+        int outW, outH;
+        Point3D originNhp;
+        Vector3D uAxisNhp, vAxisNhp;
+
+        if (invNhp.IsIdentity)
+        {
+            outW = Volume.Width;
+            outH = Volume.Depth;
+            // Flipped V (negative Z) so row 0 = top of image matches original GetCoronalSlice display
+            originNhp = new Point3D(0, yMm, (Volume.Depth - 1) * Volume.Spacing[2]);
+            uAxisNhp  = new Vector3D(Volume.Spacing[0], 0, 0);
+            vAxisNhp  = new Vector3D(0, 0, -Volume.Spacing[2]);
+        }
+        else
+        {
+            GetNhpVolumeBounds(out double minX, out double maxX, out _, out _, out double minZ, out double maxZ);
+            outW = Math.Max(1, (int)Math.Ceiling((maxX - minX) / Volume.Spacing[0]));
+            outH = Math.Max(1, (int)Math.Ceiling((maxZ - minZ) / Volume.Spacing[2]));
+            // V-0.2: Cap MPR output size to prevent OOM from extreme NHP rotations
+            outW = Math.Min(outW, Volume.Width * MaxMprExpansion);
+            outH = Math.Min(outH, Volume.Depth * MaxMprExpansion);
+            originNhp = new Point3D(minX, yMm, maxZ);
+            uAxisNhp  = new Vector3D(Volume.Spacing[0], 0, 0);
+            vAxisNhp  = new Vector3D(0, 0, -Volume.Spacing[2]);
+        }
+
+        var origin = invNhp.Transform(originNhp);
+        var uAxis  = invNhp.Transform(uAxisNhp);
+        var vAxis  = invNhp.Transform(vAxisNhp);
+
         if (IsRegionGrowMode && _segVolume != null)
         {
-            var data = Volume.GetCoronalSliceWithMaskBgra(CoronalIndex, WindowCenter, WindowWidth, _segVolume);
-            CoronalImage = CreateBgraBitmap(data, Volume.Width, Volume.Depth,
+            var data = Volume.GetObliqueSliceWithMaskBgra(outW, outH,
+                origin.X, origin.Y, origin.Z,
+                uAxis.X, uAxis.Y, uAxis.Z,
+                vAxis.X, vAxis.Y, vAxis.Z,
+                WindowCenter, WindowWidth, _segVolume);
+            CoronalImage = CreateBgraBitmap(data, outW, outH,
                 Volume.Spacing[0], Volume.Spacing[2]);
         }
         else if (GetActiveThreshold(out double min, out double max))
         {
-            var data = Volume.GetCoronalSliceBgra(CoronalIndex, WindowCenter, WindowWidth,
-                (short)min, (short)max);
-            CoronalImage = CreateBgraBitmap(data, Volume.Width, Volume.Depth,
+            var data = Volume.GetObliqueSliceBgra(outW, outH,
+                origin.X, origin.Y, origin.Z,
+                uAxis.X, uAxis.Y, uAxis.Z,
+                vAxis.X, vAxis.Y, vAxis.Z,
+                WindowCenter, WindowWidth, (short)min, (short)max);
+            CoronalImage = CreateBgraBitmap(data, outW, outH,
                 Volume.Spacing[0], Volume.Spacing[2]);
         }
         else
         {
-            var data = Volume.GetCoronalSlice(CoronalIndex, WindowCenter, WindowWidth);
-            CoronalImage = CreateGrayscaleBitmap(data, Volume.Width, Volume.Depth,
+            var data = Volume.GetObliqueSliceGrayscale(outW, outH,
+                origin.X, origin.Y, origin.Z,
+                uAxis.X, uAxis.Y, uAxis.Z,
+                vAxis.X, vAxis.Y, vAxis.Z,
+                WindowCenter, WindowWidth);
+            CoronalImage = CreateGrayscaleBitmap(data, outW, outH,
                 Volume.Spacing[0], Volume.Spacing[2]);
         }
     }
@@ -324,24 +413,136 @@ public partial class MainViewModel
     private void UpdateSagittalSlice()
     {
         if (Volume == null) return;
+
+        GetInverseNhpTransform(out var invNhp);
+
+        double xMm = SagittalIndex * Volume.Spacing[0];
+        int outW, outH;
+        Point3D originNhp;
+        Vector3D uAxisNhp, vAxisNhp;
+
+        if (invNhp.IsIdentity)
+        {
+            outW = Volume.Height;
+            outH = Volume.Depth;
+            // Flipped V (negative Z) so row 0 = top of image matches original GetSagittalSlice display
+            originNhp = new Point3D(xMm, 0, (Volume.Depth - 1) * Volume.Spacing[2]);
+            uAxisNhp  = new Vector3D(0, Volume.Spacing[1], 0);
+            vAxisNhp  = new Vector3D(0, 0, -Volume.Spacing[2]);
+        }
+        else
+        {
+            GetNhpVolumeBounds(out _, out _, out double minY, out double maxY, out double minZ, out double maxZ);
+            outW = Math.Max(1, (int)Math.Ceiling((maxY - minY) / Volume.Spacing[1]));
+            outH = Math.Max(1, (int)Math.Ceiling((maxZ - minZ) / Volume.Spacing[2]));
+            // V-0.2: Cap MPR output size to prevent OOM from extreme NHP rotations
+            outW = Math.Min(outW, Volume.Height * MaxMprExpansion);
+            outH = Math.Min(outH, Volume.Depth * MaxMprExpansion);
+            originNhp = new Point3D(xMm, minY, maxZ);
+            uAxisNhp  = new Vector3D(0, Volume.Spacing[1], 0);
+            vAxisNhp  = new Vector3D(0, 0, -Volume.Spacing[2]);
+        }
+
+        var origin = invNhp.Transform(originNhp);
+        var uAxis  = invNhp.Transform(uAxisNhp);
+        var vAxis  = invNhp.Transform(vAxisNhp);
+
         if (IsRegionGrowMode && _segVolume != null)
         {
-            var data = Volume.GetSagittalSliceWithMaskBgra(SagittalIndex, WindowCenter, WindowWidth, _segVolume);
-            SagittalImage = CreateBgraBitmap(data, Volume.Height, Volume.Depth,
+            var data = Volume.GetObliqueSliceWithMaskBgra(outW, outH,
+                origin.X, origin.Y, origin.Z,
+                uAxis.X, uAxis.Y, uAxis.Z,
+                vAxis.X, vAxis.Y, vAxis.Z,
+                WindowCenter, WindowWidth, _segVolume);
+            SagittalImage = CreateBgraBitmap(data, outW, outH,
                 Volume.Spacing[1], Volume.Spacing[2]);
         }
         else if (GetActiveThreshold(out double min, out double max))
         {
-            var data = Volume.GetSagittalSliceBgra(SagittalIndex, WindowCenter, WindowWidth,
-                (short)min, (short)max);
-            SagittalImage = CreateBgraBitmap(data, Volume.Height, Volume.Depth,
+            var data = Volume.GetObliqueSliceBgra(outW, outH,
+                origin.X, origin.Y, origin.Z,
+                uAxis.X, uAxis.Y, uAxis.Z,
+                vAxis.X, vAxis.Y, vAxis.Z,
+                WindowCenter, WindowWidth, (short)min, (short)max);
+            SagittalImage = CreateBgraBitmap(data, outW, outH,
                 Volume.Spacing[1], Volume.Spacing[2]);
         }
         else
         {
-            var data = Volume.GetSagittalSlice(SagittalIndex, WindowCenter, WindowWidth);
-            SagittalImage = CreateGrayscaleBitmap(data, Volume.Height, Volume.Depth,
+            var data = Volume.GetObliqueSliceGrayscale(outW, outH,
+                origin.X, origin.Y, origin.Z,
+                uAxis.X, uAxis.Y, uAxis.Z,
+                vAxis.X, vAxis.Y, vAxis.Z,
+                WindowCenter, WindowWidth);
+            SagittalImage = CreateGrayscaleBitmap(data, outW, outH,
                 Volume.Spacing[1], Volume.Spacing[2]);
+        }
+    }
+
+    // ─── NHP Oblique-Slice Helpers ───
+
+    /// <summary>Maximum MPR output expansion factor (prevents OOM from extreme NHP rotations).</summary>
+    private const int MaxMprExpansion = 4;
+
+    /// <summary>
+    /// Inverts the current NHP transform so we can map NHP-space slice geometry
+    /// back into the original DICOM coordinate system for oblique sampling.
+    /// </summary>
+    private void GetInverseNhpTransform(out Matrix3D matrix)
+    {
+        if (_nhpTransform == System.Windows.Media.Media3D.Transform3D.Identity)
+        {
+            matrix = Matrix3D.Identity;
+            return;
+        }
+        matrix = _nhpTransform.Value;
+        if (matrix.HasInverse) matrix.Invert();
+        else { matrix = Matrix3D.Identity; return; }
+
+        // V-0.3: Post-inversion NaN/Infinity safety check
+        if (double.IsNaN(matrix.M11) || double.IsInfinity(matrix.M11) ||
+            double.IsNaN(matrix.OffsetX) || double.IsInfinity(matrix.OffsetX))
+        {
+            matrix = Matrix3D.Identity;
+            StatusText = "⚠ NHP transform near-singular — MPR using identity fallback";
+        }
+    }
+
+
+    /// <summary>
+    /// Computes the axis-aligned bounding box of the volume after NHP rotation.
+    /// Used to size the MPR output bitmaps when NHP is active so nothing clips.
+    /// </summary>
+    private void GetNhpVolumeBounds(out double minX, out double maxX, out double minY, out double maxY, out double minZ, out double maxZ)
+    {
+        if (Volume == null)
+        {
+            minX = maxX = minY = maxY = minZ = maxZ = 0;
+            return;
+        }
+        double w = Volume.Width * Volume.Spacing[0];
+        double h = Volume.Height * Volume.Spacing[1];
+        double d = Volume.Depth * Volume.Spacing[2];
+        var corners = new Point3D[]
+        {
+            new Point3D(0, 0, 0), new Point3D(w, 0, 0), new Point3D(0, h, 0), new Point3D(w, h, 0),
+            new Point3D(0, 0, d), new Point3D(w, 0, d), new Point3D(0, h, d), new Point3D(w, h, d),
+        };
+        if (_nhpTransform == System.Windows.Media.Media3D.Transform3D.Identity)
+        {
+            minX = 0; maxX = w; minY = 0; maxY = h; minZ = 0; maxZ = d;
+            return;
+        }
+        var matrix = _nhpTransform.Value;
+        minX = maxX = minY = maxY = minZ = maxZ = 0;
+        bool first = true;
+        foreach (var p in corners)
+        {
+            var tp = matrix.Transform(p);
+            if (first) { minX = maxX = tp.X; minY = maxY = tp.Y; minZ = maxZ = tp.Z; first = false; continue; }
+            minX = Math.Min(minX, tp.X); maxX = Math.Max(maxX, tp.X);
+            minY = Math.Min(minY, tp.Y); maxY = Math.Max(maxY, tp.Y);
+            minZ = Math.Min(minZ, tp.Z); maxZ = Math.Max(maxZ, tp.Z);
         }
     }
 
@@ -440,249 +641,8 @@ public partial class MainViewModel
         return bmp;
     }
 
-    // ÔöÇÔöÇÔöÇ NHP Physical Reslice (bakes DICOM volume to NHP orientation) ÔöÇÔöÇÔöÇ
-    private async Task PerformPhysicalResliceAsync(
-        double dPitch = 0, double dRoll = 0, double dYaw = 0,
-        double dLat   = 0, double dAnt  = 0, double dVert = 0)
-    {
-        if (OriginalVolume == null) OriginalVolume = Volume; // Initial capture
-        if (OriginalVolume == null || BoneOnlyBounds.IsEmpty) return;
-
-        StatusText = "Calculating exact physical volume bounds...";
-        IsLoading = true;
-
-        // --- 1. Calculate Spatial Centroid Pivot ---
-        // Crucial: Use the bounds of the original bone to pivot from the original space
-        var bounds = BoneOnlyBounds;
-        Point3D center;
-        if (!bounds.IsEmpty)
-            center = new Point3D(bounds.X + bounds.SizeX / 2, bounds.Y + bounds.SizeY / 2, bounds.Z + bounds.SizeZ / 2);
-        else
-        {
-            var dims = OriginalVolume.GetPhysicalDimensions();
-            center = new Point3D(dims.Width / 2, dims.Height / 2, dims.Depth / 2);
-        }
-
-        // --- 2. Build the STRICT SOURCE -> TARGET Matrix (exactly matching visual UpdateNhpTransform) ---
-        var visualGroup = new Transform3DGroup();
-        visualGroup.Children.Add(new TranslateTransform3D(-center.X, -center.Y, -center.Z));
-        visualGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), NhpPitch)));
-        visualGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), NhpRoll)));
-        visualGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), NhpYaw)));
-        visualGroup.Children.Add(new TranslateTransform3D(center.X + NhpLateral, center.Y + NhpAnteroposterior, center.Z + NhpVertical));
-
-        var sourceToTargetMatrix = visualGroup.Value;
-
-        // Target -> Source is exactly the inverse of the above
-        var targetToSourceMatrix = sourceToTargetMatrix;
-        if (targetToSourceMatrix.HasInverse) targetToSourceMatrix.Invert();
-
-        // SegmentationEngine ResliceVolume parameter 2 is 'transform', mathematically mapping Target to Source!
-        var transform = new OrthoPlanner.Core.Imaging.NhpTransform
-        {
-            M11 = targetToSourceMatrix.M11, M12 = targetToSourceMatrix.M12, M13 = targetToSourceMatrix.M13, M14 = targetToSourceMatrix.M14,
-            M21 = targetToSourceMatrix.M21, M22 = targetToSourceMatrix.M22, M23 = targetToSourceMatrix.M23, M24 = targetToSourceMatrix.M24,
-            M31 = targetToSourceMatrix.M31, M32 = targetToSourceMatrix.M32, M33 = targetToSourceMatrix.M33, M34 = targetToSourceMatrix.M34,
-            M41 = targetToSourceMatrix.OffsetX, M42 = targetToSourceMatrix.OffsetY, M43 = targetToSourceMatrix.OffsetZ, M44 = targetToSourceMatrix.M44
-        };
-
-        // SegmentationEngine ResliceVolume parameter 3 is 'inverseTransform', mapping Source to Target to find bounds!
-        var inverseTransform = new OrthoPlanner.Core.Imaging.NhpTransform
-        {
-            M11 = sourceToTargetMatrix.M11, M12 = sourceToTargetMatrix.M12, M13 = sourceToTargetMatrix.M13, M14 = sourceToTargetMatrix.M14,
-            M21 = sourceToTargetMatrix.M21, M22 = sourceToTargetMatrix.M22, M23 = sourceToTargetMatrix.M23, M24 = sourceToTargetMatrix.M24,
-            M31 = sourceToTargetMatrix.M31, M32 = sourceToTargetMatrix.M32, M33 = sourceToTargetMatrix.M33, M34 = sourceToTargetMatrix.M34,
-            M41 = sourceToTargetMatrix.OffsetX, M42 = sourceToTargetMatrix.OffsetY, M43 = sourceToTargetMatrix.OffsetZ, M44 = sourceToTargetMatrix.M44
-        };
-
-        StatusText = "Reslicing volume matrix...";
-
-        // Pass both transforms so the Engine can determine exact physical boundaries and pad without waste!
-        // Reslice from the ORIGINAL volume so angles are absolute!
-        var resliced = await Task.Run(() => SegmentationEngine.ResliceVolume(OriginalVolume, transform, inverseTransform));
-
-        IsLoading = false;
-
-        // dPitch/Roll/Yaw/Lat/Ant/Vert are the delta values passed in from CommitNhpAsync
-        // (captured before _cXxx was updated, so they are the true increment to bake)
-        var deltaGroup = new Transform3DGroup();
-        deltaGroup.Children.Add(new TranslateTransform3D(-center.X, -center.Y, -center.Z));
-        deltaGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), dPitch)));
-        deltaGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), dRoll)));
-        deltaGroup.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), dYaw)));
-        deltaGroup.Children.Add(new TranslateTransform3D(center.X + dLat, center.Y + dAnt, center.Z + dVert));
-
-        var m = deltaGroup.Value;
-
-        var allSegmentModels = Segments.ToList();
-        if (HardTissueModel != null && !allSegmentModels.Contains(HardTissueModel)) allSegmentModels.Add(HardTissueModel);
-        if (SoftTissueModel != null && !allSegmentModels.Contains(SoftTissueModel)) allSegmentModels.Add(SoftTissueModel);
-        if (DentalModel != null && !allSegmentModels.Contains(DentalModel)) allSegmentModels.Add(DentalModel);
-
-        foreach (var seg in allSegmentModels)
-        {
-            if (seg.Vertices != null)
-            {
-                var p = new Point3D();
-                for (int i = 0; i < seg.Vertices.Length; i += 3)
-                {
-                    p.X = seg.Vertices[i]; p.Y = seg.Vertices[i + 1]; p.Z = seg.Vertices[i + 2];
-                    var t = m.Transform(p);
-                    seg.Vertices[i] = (float)t.X; seg.Vertices[i + 1] = (float)t.Y; seg.Vertices[i + 2] = (float)t.Z;
-                }
-            }
-        }
-        foreach (var mesh in ImportedMeshes)
-        {
-            if (mesh.Vertices != null)
-            {
-                var p = new Point3D();
-                for (int i = 0; i < mesh.Vertices.Length; i += 3)
-                {
-                    p.X = mesh.Vertices[i]; p.Y = mesh.Vertices[i + 1]; p.Z = mesh.Vertices[i + 2];
-                    var t = m.Transform(p);
-                    mesh.Vertices[i] = (float)t.X; mesh.Vertices[i + 1] = (float)t.Y; mesh.Vertices[i + 2] = (float)t.Z;
-                }
-            }
-        }
-        // NHP-FIX: Transform Occlusion STL meshes by the same delta so they stay aligned with bone
-        foreach (var occ in LoadedOcclusions)
-        {
-            if (occ.Vertices != null)
-            {
-                var p = new Point3D();
-                for (int i = 0; i < occ.Vertices.Length; i += 3)
-                {
-                    p.X = occ.Vertices[i]; p.Y = occ.Vertices[i + 1]; p.Z = occ.Vertices[i + 2];
-                    var t = m.Transform(p);
-                    occ.Vertices[i] = (float)t.X; occ.Vertices[i + 1] = (float)t.Y; occ.Vertices[i + 2] = (float)t.Z;
-                }
-            }
-        }
-        // NHP-FIX: Transform condylar axis pivot points and dental midline so surgical pivots remain correct
-        if (LeftCondyleCenter.HasValue)
-        {
-            var lc = m.Transform(new Point3D(LeftCondyleCenter.Value.X, LeftCondyleCenter.Value.Y, LeftCondyleCenter.Value.Z));
-            LeftCondyleCenter = (lc.X, lc.Y, lc.Z);
-        }
-        if (RightCondyleCenter.HasValue)
-        {
-            var rc = m.Transform(new Point3D(RightCondyleCenter.Value.X, RightCondyleCenter.Value.Y, RightCondyleCenter.Value.Z));
-            RightCondyleCenter = (rc.X, rc.Y, rc.Z);
-        }
-        if (DentalMidlinePoint.HasValue)
-        {
-            var dm = m.Transform(new Point3D(DentalMidlinePoint.Value.X, DentalMidlinePoint.Value.Y, DentalMidlinePoint.Value.Z));
-            DentalMidlinePoint = (dm.X, dm.Y, dm.Z);
-        }
-        // NHP-FIX: Transform cephalometric 3D landmark positions (2D coords are invalidated)
-        if (SavedCephLandmarks.Count > 0)
-        {
-            var updatedLandmarks = new List<CephLandmarkSave>();
-            foreach (var lm in SavedCephLandmarks)
-            {
-                if (lm.X3D.HasValue && lm.Y3D.HasValue && lm.Z3D.HasValue)
-                {
-                    var tp = m.Transform(new Point3D(lm.X3D.Value, lm.Y3D.Value, lm.Z3D.Value));
-                    // Invalidate 2D DRR coords (null) — must be re-projected from the new volume
-                    updatedLandmarks.Add(new CephLandmarkSave(lm.Name, null, null, tp.X, tp.Y, tp.Z));
-                }
-                else
-                {
-                    updatedLandmarks.Add(lm);
-                }
-            }
-            SavedCephLandmarks = updatedLandmarks;
-        }
-
-        await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => {
-            Volume = resliced;
-
-            // Re-initialize segmentation volume for the new dimensions (Air Padded array)
-            _segVolume = new SegmentationVolume(Volume);
-
-            // NHP-FIX: Explicitly invalidate _boneOnlySegVolume — its dimensions no longer match
-            // the resliced volume. SplitCraniumMandibleAsync will auto-regenerate it when needed.
-            _boneOnlySegVolume = null;
-
-            // Rebuild models since we mutated their vertices physically
-            foreach (var seg in allSegmentModels) seg.BuildModel();
-            foreach (var mesh in ImportedMeshes) mesh.BuildModel();
-            foreach (var occ in LoadedOcclusions) occ.BuildModel();
-
-            // Reset all transforms to identity — vertices are now physically at the correct NHP position
-            _nhpTransform = System.Windows.Media.Media3D.Transform3D.Identity;
-            foreach (var seg in allSegmentModels)
-            {
-                seg.SurgicalTransform = System.Windows.Media.Media3D.Transform3D.Identity;
-                seg.Transform = System.Windows.Media.Media3D.Transform3D.Identity;
-            }
-            foreach (var mesh in ImportedMeshes)
-                mesh.Transform = System.Windows.Media.Media3D.Transform3D.Identity;
-            foreach (var occ in LoadedOcclusions)
-                occ.Transform = System.Windows.Media.Media3D.Transform3D.Identity;
-            if (HardTissueModel != null) HardTissueModel.Transform = System.Windows.Media.Media3D.Transform3D.Identity;
-            if (SoftTissueModel != null) SoftTissueModel.Transform = System.Windows.Media.Media3D.Transform3D.Identity;
-            if (DentalModel != null)     DentalModel.Transform     = System.Windows.Media.Media3D.Transform3D.Identity;
-
-            // NHP-FIX: Reset all surgical movement sliders to zero.
-            // The SurgicalTransform on each segment is already reset to Identity above,
-            // but the UI slider values must also be zeroed to prevent them from being
-            // re-applied on the next UpdateSurgeryTransform() call.
-            SurgMaxillaLat = SurgMaxillaAnt = SurgMaxillaVert = 0;
-            SurgMaxillaRoll = SurgMaxillaPitch = SurgMaxillaYaw = 0;
-            SurgMandibleLat = SurgMandibleAnt = SurgMandibleVert = 0;
-            SurgMandibleRoll = SurgMandiblePitch = SurgMandibleYaw = 0;
-            SurgRightRamusLat = SurgRightRamusAnt = SurgRightRamusVert = 0;
-            SurgRightRamusRoll = SurgRightRamusPitch = SurgRightRamusYaw = 0;
-            SurgLeftRamusLat = SurgLeftRamusAnt = SurgLeftRamusVert = 0;
-            SurgLeftRamusRoll = SurgLeftRamusPitch = SurgLeftRamusYaw = 0;
-            SurgChinLat = SurgChinAnt = SurgChinVert = 0;
-            SurgChinRoll = SurgChinPitch = SurgChinYaw = 0;
-            _savedMaxilla = (0, 0, 0, 0, 0, 0);
-            _savedMandible = (0, 0, 0, 0, 0, 0);
-
-            // NHP-FIX: Clear undo/redo stacks. Snapshots hold references to the same
-            // SegmentViewModel objects whose Vertices arrays were just mutated in-place,
-            // so the snapshot data is silently corrupted. Undo after NHP commit is not supported.
-            _undoStack.Clear();
-            _redoStack.Clear();
-
-            // CRITICAL: sync BoneOnlyBounds to the new resliced volume NOW.
-            // Phase 0: Center the new bounds around the baked VolumePivot.
-            // This ensures the camera rotation pivot never drifts, even when
-            // the padded volume dimensions change after NHP commit.
-            IsNhpCommitInProgress = true;
-            var halfW = Volume.Width * Volume.Spacing[0] / 2.0;
-            var halfH = Volume.Height * Volume.Spacing[1] / 2.0;
-            var halfD = Volume.Depth * Volume.Spacing[2] / 2.0;
-            BoneOnlyBounds = new Rect3D(
-                VolumePivot.X - halfW, VolumePivot.Y - halfH, VolumePivot.Z - halfD,
-                Volume.Width * Volume.Spacing[0],
-                Volume.Height * Volume.Spacing[1],
-                Volume.Depth * Volume.Spacing[2]);
-            ModelCenter = VolumePivot;
-            OnPropertyChanged(nameof(BoneOnlyBounds));
-            OnPropertyChanged(nameof(ModelCenter));
-            IsNhpCommitInProgress = false;
-
-            // Refresh 2D Slices
-            AxialMax = Volume.Depth - 1;
-            CoronalMax = Volume.Height - 1;
-            SagittalMax = Volume.Width - 1;
-
-            // Push updated aspect ratios out
-            AxialDisplayHeight = new System.Windows.GridLength(Volume.Height * Volume.Spacing[1], System.Windows.GridUnitType.Star);
-            CoronalDisplayHeight = new System.Windows.GridLength(Volume.Depth * Volume.Spacing[2], System.Windows.GridUnitType.Star);
-            SagittalDisplayHeight = new System.Windows.GridLength(Volume.Depth * Volume.Spacing[2], System.Windows.GridUnitType.Star);
-
-            UpdateAllSlices();
-            UpdateHistograms();
-
-            StatusText = "NHP Alignment Complete. Model frozen.";
-            OnPropertyChanged(nameof(IsNhpDirty));
-        });
-    }
+    // NHP is now visual-only (see NhpViewModel.cs CommitNhp).
+    // Physical reslicing has been removed — oblique MPR sampling handles the rotated views.
 
     private static string FormatStudyDate(string dateStr)
     {

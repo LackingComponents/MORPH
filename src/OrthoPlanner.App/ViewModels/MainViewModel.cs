@@ -94,7 +94,6 @@ public partial class MainViewModel : ObservableObject
 
     // ─── Volume Pivot (set once on DICOM load, persists across reslices) ───
     [ObservableProperty] private System.Windows.Media.Media3D.Point3D _volumePivot = new System.Windows.Media.Media3D.Point3D(0, 0, 0);
-    [ObservableProperty] private bool _isNhpCommitInProgress = false;
 
     // ─── Segmentation flags → SegmentationViewModel.cs ───
 
@@ -160,7 +159,7 @@ public partial class MainViewModel : ObservableObject
     // ÔöÇÔöÇÔöÇ Undo/Redo ÔåÆ UndoRedoViewModel.cs ÔöÇÔöÇÔöÇ
     // ÔöÇÔöÇÔöÇ OpenLightingConfig, _isCephalometryOpen ÔåÆ ViewportViewModel.cs ÔöÇÔöÇÔöÇ
 
-    // ÔöÇÔöÇÔöÇ PerformPhysicalResliceAsync ÔåÆ DicomViewModel.cs ÔöÇÔöÇÔöÇ
+    // ─── NHP (visual-only; no physical reslicing) → NhpViewModel.cs ───
 }
 
 // ÔöÇÔöÇÔöÇ Helper ViewModels ÔöÇÔöÇÔöÇ

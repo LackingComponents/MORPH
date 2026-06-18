@@ -386,6 +386,188 @@ public class VolumeData
         return bgra;
     }
 
+    // ━━━ Oblique Slice Sampling (Visual-Only NHP) ━━━
+
+    /// <summary>
+    /// Sample an oblique plane through the volume using trilinear interpolation.
+    /// Returns grayscale pixel data (0-255) based on window/level.
+    /// </summary>
+    public byte[] GetObliqueSliceGrayscale(
+        int outWidth, int outHeight,
+        double originX, double originY, double originZ,
+        double uX, double uY, double uZ,
+        double vX, double vY, double vZ,
+        double windowCenter, double windowWidth)
+    {
+        var slice = new byte[outWidth * outHeight];
+        double lower = windowCenter - windowWidth / 2.0;
+        double upper = windowCenter + windowWidth / 2.0;
+
+        for (int row = 0; row < outHeight; row++)
+        for (int col = 0; col < outWidth; col++)
+        {
+            double x = originX + col * uX + row * vX;
+            double y = originY + col * uY + row * vY;
+            double z = originZ + col * uZ + row * vZ;
+
+            double ix = x / Spacing[0];
+            double iy = y / Spacing[1];
+            double iz = z / Spacing[2];
+
+            short hu = SampleTrilinear(ix, iy, iz);
+            double normalized = Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0);
+            slice[col + row * outWidth] = (byte)(normalized * 255);
+        }
+
+        return slice;
+    }
+
+    /// <summary>
+    /// Sample an oblique plane as BGRA32 with threshold overlay tint.
+    /// </summary>
+    public byte[] GetObliqueSliceBgra(
+        int outWidth, int outHeight,
+        double originX, double originY, double originZ,
+        double uX, double uY, double uZ,
+        double vX, double vY, double vZ,
+        double windowCenter, double windowWidth,
+        short threshMin, short threshMax)
+    {
+        var bgra = new byte[outWidth * outHeight * 4];
+        double lower = windowCenter - windowWidth / 2.0;
+        double upper = windowCenter + windowWidth / 2.0;
+
+        for (int row = 0; row < outHeight; row++)
+        for (int col = 0; col < outWidth; col++)
+        {
+            double x = originX + col * uX + row * vX;
+            double y = originY + col * uY + row * vY;
+            double z = originZ + col * uZ + row * vZ;
+
+            double ix = x / Spacing[0];
+            double iy = y / Spacing[1];
+            double iz = z / Spacing[2];
+
+            short hu = SampleTrilinear(ix, iy, iz);
+            byte gray = (byte)(Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0) * 255);
+            int idx = (col + row * outWidth) * 4;
+
+            if (hu >= threshMin && hu <= threshMax)
+            {
+                bgra[idx + 0] = (byte)(gray * 0.4 + 255 * 0.6);
+                bgra[idx + 1] = (byte)(gray * 0.4 + 200 * 0.6);
+                bgra[idx + 2] = (byte)(gray * 0.4 + 50 * 0.6);
+            }
+            else
+            {
+                bgra[idx + 0] = gray;
+                bgra[idx + 1] = gray;
+                bgra[idx + 2] = gray;
+            }
+            bgra[idx + 3] = 255;
+        }
+
+        return bgra;
+    }
+
+    /// <summary>
+    /// Sample an oblique plane as BGRA32, blending live SegmentationVolume label colors.
+    /// </summary>
+    public byte[] GetObliqueSliceWithMaskBgra(
+        int outWidth, int outHeight,
+        double originX, double originY, double originZ,
+        double uX, double uY, double uZ,
+        double vX, double vY, double vZ,
+        double windowCenter, double windowWidth,
+        SegmentationVolume segVol)
+    {
+        var bgra = new byte[outWidth * outHeight * 4];
+        double lower = windowCenter - windowWidth / 2.0;
+        double upper = windowCenter + windowWidth / 2.0;
+
+        for (int row = 0; row < outHeight; row++)
+        for (int col = 0; col < outWidth; col++)
+        {
+            double x = originX + col * uX + row * vX;
+            double y = originY + col * uY + row * vY;
+            double z = originZ + col * uZ + row * vZ;
+
+            double ix = x / Spacing[0];
+            double iy = y / Spacing[1];
+            double iz = z / Spacing[2];
+
+            short hu = SampleTrilinear(ix, iy, iz);
+            byte gray = (byte)(Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0) * 255);
+            int idx = (col + row * outWidth) * 4;
+
+            // Sample segmentation label via nearest-neighbor (integer coords)
+            int lx = (int)Math.Round(ix);
+            int ly = (int)Math.Round(iy);
+            int lz = (int)Math.Round(iz);
+            byte label = 0;
+            if (lx >= 0 && lx < Width && ly >= 0 && ly < Height && lz >= 0 && lz < Depth)
+                label = segVol.Labels[lx + ly * Width + lz * Width * Height];
+
+            if (label > 0 && segVol.Segments.TryGetValue(label, out var info))
+            {
+                bgra[idx + 0] = (byte)(gray * 0.4 + info.ColorB * 0.6);
+                bgra[idx + 1] = (byte)(gray * 0.4 + info.ColorG * 0.6);
+                bgra[idx + 2] = (byte)(gray * 0.4 + info.ColorR * 0.6);
+            }
+            else
+            {
+                bgra[idx + 0] = gray;
+                bgra[idx + 1] = gray;
+                bgra[idx + 2] = gray;
+            }
+            bgra[idx + 3] = 255;
+        }
+
+        return bgra;
+    }
+
+    /// <summary>Trilinearly sample the volume at fractional voxel coordinates.</summary>
+    private short SampleTrilinear(double ix, double iy, double iz)
+    {
+        int x0 = (int)Math.Floor(ix);
+        int y0 = (int)Math.Floor(iy);
+        int z0 = (int)Math.Floor(iz);
+        int x1 = x0 + 1;
+        int y1 = y0 + 1;
+        int z1 = z0 + 1;
+
+        double fx = ix - x0;
+        double fy = iy - y0;
+        double fz = iz - z0;
+
+        // Trilinear interpolation
+        double v000 = GetVoxelSafe(x0, y0, z0);
+        double v100 = GetVoxelSafe(x1, y0, z0);
+        double v010 = GetVoxelSafe(x0, y1, z0);
+        double v110 = GetVoxelSafe(x1, y1, z0);
+        double v001 = GetVoxelSafe(x0, y0, z1);
+        double v101 = GetVoxelSafe(x1, y0, z1);
+        double v011 = GetVoxelSafe(x0, y1, z1);
+        double v111 = GetVoxelSafe(x1, y1, z1);
+
+        double v00 = v000 * (1 - fx) + v100 * fx;
+        double v10 = v010 * (1 - fx) + v110 * fx;
+        double v01 = v001 * (1 - fx) + v101 * fx;
+        double v11 = v011 * (1 - fx) + v111 * fx;
+
+        double v0 = v00 * (1 - fy) + v10 * fy;
+        double v1 = v01 * (1 - fy) + v11 * fy;
+
+        return (short)(v0 * (1 - fz) + v1 * fz);
+    }
+
+    private short GetVoxelSafe(int x, int y, int z)
+    {
+        if (x < 0 || x >= Width || y < 0 || y >= Height || z < 0 || z >= Depth)
+            return -1000; // Air value for out-of-bounds
+        return Voxels[x + y * Width + z * Width * Height];
+    }
+
     /// <summary>
     /// HU histogram with 512 bins from MinValue to MaxValue.
     /// </summary>

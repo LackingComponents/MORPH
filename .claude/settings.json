@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(git checkout -- \"src\\\\OrthoPlanner.App\\\\ViewModels\\\\MainViewModel.cs\")",
+      "Bash(sed -i '163s/.*/    \\\\/\\\\/ ─── NHP \\(visual-only; no physical reslicing\\) → NhpViewModel.cs ───/' src/OrthoPlanner.App/ViewModels/MainViewModel.cs)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\Mirko\\Documents\\Orthoplanner\\src\\OrthoPlanner.App\\ViewModels"
+    ]
+  }
+}
