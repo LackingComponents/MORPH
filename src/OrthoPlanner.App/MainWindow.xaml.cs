@@ -8,6 +8,7 @@ using System.Windows.Media.Media3D;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using HelixToolkit.Wpf.SharpDX;
+using OrthoPlanner.App.ViewModels;
 
 namespace OrthoPlanner.App;
 
@@ -477,10 +478,10 @@ public partial class MainWindow : Window
         if (grid == null) return;
 
         var pos = e.GetPosition(grid);
-        double rx = Math.Clamp(pos.X / grid.ActualWidth, 0, 1);
-        double ry = Math.Clamp(pos.Y / grid.ActualHeight, 0, 1);
+        double cw = grid.ActualWidth;
+        double ch = grid.ActualHeight;
 
-        if (VM == null) return;
+        if (VM == null || VM.Volume == null || cw < 5 || ch < 5) return;
 
         int viewType = 0;
         if (grid.Name == "AxialPanel") viewType = 1;
@@ -488,19 +489,58 @@ public partial class MainWindow : Window
         else if (grid.Name == "SagittalPanel") viewType = 3;
         else if (grid.Name == "EnlargedGrid") viewType = VM.EnlargedView;
 
+        if (viewType == 0) return;
+
+        // Determine which MPR orientation and get its physical bounds
+        MprOrientation orient = viewType switch
+        {
+            1 => MprOrientation.Axial,
+            2 => MprOrientation.Coronal,
+            3 => MprOrientation.Sagittal,
+            _ => MprOrientation.Axial
+        };
+        VM.GetMprPhysicalBounds(orient,
+            out double hMin, out double hMax, out double vMin, out double vMax);
+
+        // Compute the Uniform-stretch image render rect (same logic as DrawCrosshairPhysical)
+        double hRange = hMax - hMin;
+        double vRange = vMax - vMin;
+        double physAspect = hRange / vRange;
+        double containerAspect = cw / ch;
+        double imgW, imgH, offX, offY;
+        if (physAspect > containerAspect)
+        {
+            imgW = cw; imgH = cw / physAspect;
+            offX = 0; offY = (ch - imgH) / 2;
+        }
+        else
+        {
+            imgH = ch; imgW = ch * physAspect;
+            offX = (cw - imgW) / 2; offY = 0;
+        }
+
+        // Convert click position to image-local fraction [0,1]
+        double rx = Math.Clamp((pos.X - offX) / imgW, 0, 1);
+        double ry = Math.Clamp((pos.Y - offY) / imgH, 0, 1);
+
+        // Map fraction to physical coordinate, then to slice index
+        double hPhys = hMin + rx * hRange;
+        double vPhys = vMin + ry * vRange;
+        var vol = VM.Volume;
+
         switch (viewType)
         {
-            case 1: // Axial (X=Sagittal, Y=Coronal)
-                VM.SagittalIndex = (int)(rx * VM.SagittalMax);
-                VM.CoronalIndex = (int)(ry * VM.CoronalMax);
+            case 1: // Axial: H=X, V=Y
+                VM.SagittalIndex = (int)Math.Clamp(Math.Round(hPhys / vol.Spacing[0]), 0, VM.SagittalMax);
+                VM.CoronalIndex = (int)Math.Clamp(Math.Round(vPhys / vol.Spacing[1]), 0, VM.CoronalMax);
                 break;
-            case 2: // Coronal (X=Sagittal, Y=Axial inverted)
-                VM.SagittalIndex = (int)(rx * VM.SagittalMax);
-                VM.AxialIndex = VM.AxialMax - (int)(ry * VM.AxialMax);
+            case 2: // Coronal: H=X, V=Z (display order: vMin=maxZ, vMax=minZ)
+                VM.SagittalIndex = (int)Math.Clamp(Math.Round(hPhys / vol.Spacing[0]), 0, VM.SagittalMax);
+                VM.AxialIndex = (int)Math.Clamp(Math.Round(vPhys / vol.Spacing[2]), 0, VM.AxialMax);
                 break;
-            case 3: // Sagittal (X=Coronal, Y=Axial inverted)
-                VM.CoronalIndex = (int)(rx * VM.CoronalMax);
-                VM.AxialIndex = VM.AxialMax - (int)(ry * VM.AxialMax);
+            case 3: // Sagittal: H=Y, V=Z (display order)
+                VM.CoronalIndex = (int)Math.Clamp(Math.Round(hPhys / vol.Spacing[1]), 0, VM.CoronalMax);
+                VM.AxialIndex = (int)Math.Clamp(Math.Round(vPhys / vol.Spacing[2]), 0, VM.AxialMax);
                 break;
         }
     }
@@ -607,24 +647,34 @@ public partial class MainWindow : Window
 
         if (VM == null || !VM.ShowCrosshairs || !VM.IsVolumeLoaded) return;
 
-        // AXIAL view: shows X (sagittal position) and Y (coronal position)
-        DrawCrosshair(AxialCrosshairCanvas,
-            VM.SagittalIndex, VM.Volume!.Width - 1,
-            VM.CoronalIndex, VM.Volume.Height - 1,
+        var vol = VM.Volume!;
+        // Physical coordinates of the 3 slice planes (mm)
+        double xMm = VM.SagittalIndex * vol.Spacing[0];
+        double yMm = VM.CoronalIndex * vol.Spacing[1];
+        double zMm = VM.AxialIndex * vol.Spacing[2];
+
+        // AXIAL view: H=X (sagittal), V=Y (coronal)
+        VM.GetMprPhysicalBounds(MprOrientation.Axial,
+            out double axHmin, out double axHmax, out double axVmin, out double axVmax);
+        DrawCrosshairPhysical(AxialCrosshairCanvas,
+            xMm, axHmin, axHmax,
+            yMm, axVmin, axVmax,
             _chBlue, _chGreen);
 
-        // CORONAL view: shows X (sagittal position) and Z (axial position, inverted)
-        int coronalH = VM.Volume.Depth;
-        DrawCrosshair(CoronalCrosshairCanvas,
-            VM.SagittalIndex, VM.Volume.Width - 1,
-            coronalH - 1 - VM.AxialIndex, coronalH - 1,
+        // CORONAL view: H=X (sagittal), V=Z (axial) — bounds are in display order (vMin=maxZ)
+        VM.GetMprPhysicalBounds(MprOrientation.Coronal,
+            out double coHmin, out double coHmax, out double coVmin, out double coVmax);
+        DrawCrosshairPhysical(CoronalCrosshairCanvas,
+            xMm, coHmin, coHmax,
+            zMm, coVmin, coVmax,
             _chBlue, _chRed);
 
-        // SAGITTAL view: shows Y (coronal position) and Z (axial position, inverted)
-        int sagH = VM.Volume.Depth;
-        DrawCrosshair(SagittalCrosshairCanvas,
-            VM.CoronalIndex, VM.Volume.Height - 1,
-            sagH - 1 - VM.AxialIndex, sagH - 1,
+        // SAGITTAL view: H=Y (coronal), V=Z (axial) — bounds in display order
+        VM.GetMprPhysicalBounds(MprOrientation.Sagittal,
+            out double saHmin, out double saHmax, out double saVmin, out double saVmax);
+        DrawCrosshairPhysical(SagittalCrosshairCanvas,
+            yMm, saHmin, saHmax,
+            zMm, saVmin, saVmax,
             _chGreen, _chRed);
 
         // Enlarged view crosshairs
@@ -633,39 +683,84 @@ public partial class MainWindow : Window
             switch (VM.EnlargedView)
             {
                 case 1: // Axial
-                    DrawCrosshair(EnlargedCrosshairCanvas,
-                        VM.SagittalIndex, VM.Volume.Width - 1,
-                        VM.CoronalIndex, VM.Volume.Height - 1,
+                    DrawCrosshairPhysical(EnlargedCrosshairCanvas,
+                        xMm, axHmin, axHmax, yMm, axVmin, axVmax,
                         _chBlue, _chGreen);
                     break;
                 case 2: // Coronal
-                    DrawCrosshair(EnlargedCrosshairCanvas,
-                        VM.SagittalIndex, VM.Volume.Width - 1,
-                        coronalH - 1 - VM.AxialIndex, coronalH - 1,
+                    DrawCrosshairPhysical(EnlargedCrosshairCanvas,
+                        xMm, coHmin, coHmax, zMm, coVmin, coVmax,
                         _chBlue, _chRed);
                     break;
                 case 3: // Sagittal
-                    DrawCrosshair(EnlargedCrosshairCanvas,
-                        VM.CoronalIndex, VM.Volume.Height - 1,
-                        sagH - 1 - VM.AxialIndex, sagH - 1,
+                    DrawCrosshairPhysical(EnlargedCrosshairCanvas,
+                        yMm, saHmin, saHmax, zMm, saVmin, saVmax,
                         _chGreen, _chRed);
                     break;
             }
         }
     }
 
-    private void DrawCrosshair(Canvas canvas, int vIdx, int vMax, int hIdx, int hMax,
+    /// <summary>
+    /// Draws a crosshair on the canvas at the given physical coordinate,
+    /// mapped to the NHP-padded bitmap display area (accounting for Uniform letterboxing).
+    /// </summary>
+    private void DrawCrosshairPhysical(Canvas canvas,
+        double hPhys, double hMin, double hMax,
+        double vPhys, double vMin, double vMax,
         Brush vBrush, Brush hBrush)
     {
-        double w = canvas.ActualWidth;
-        double h = canvas.ActualHeight;
-        if (w < 5 || h < 5 || vMax <= 0 || hMax <= 0) return;
+        double cw = canvas.ActualWidth;
+        double ch = canvas.ActualHeight;
+        if (cw < 5 || ch < 5) return;
 
-        double vx = (vIdx / (double)vMax) * w;
-        double hy = (hIdx / (double)hMax) * h;
+        double hRange = hMax - hMin;
+        double vRange = vMax - vMin;
+        if (hRange <= 0 || vRange <= 0) return;
 
-        canvas.Children.Add(new Line { X1 = vx, Y1 = 0, X2 = vx, Y2 = h, Stroke = vBrush, StrokeThickness = 1 });
-        canvas.Children.Add(new Line { X1 = 0, Y1 = hy, X2 = w, Y2 = hy, Stroke = hBrush, StrokeThickness = 1 });
+        // Physical aspect ratio of the NHP-padded bitmap
+        double physAspect = hRange / vRange;
+        double containerAspect = cw / ch;
+
+        // Uniform stretch: image fills one axis, letterbox on the other
+        double imgW, imgH, offX, offY;
+        if (physAspect > containerAspect)
+        {
+            // Image is wider → fills container width, letterbox on top/bottom
+            imgW = cw;
+            imgH = cw / physAspect;
+            offX = 0;
+            offY = (ch - imgH) / 2;
+        }
+        else
+        {
+            // Image is taller → fills container height, letterbox on left/right
+            imgH = ch;
+            imgW = ch * physAspect;
+            offX = (cw - imgW) / 2;
+            offY = 0;
+        }
+
+        // Map physical coordinate to fraction within the NHP-padded extent
+        double hFrac = (hPhys - hMin) / hRange;
+        double vFrac = (vPhys - vMin) / vRange;
+
+        // Convert to canvas pixel position within the image render rect
+        double vx = offX + hFrac * imgW;
+        double vy = offY + vFrac * imgH;
+
+        // Vertical line (sagittal / coronal index → X or Y position)
+        canvas.Children.Add(new Line
+        {
+            X1 = vx, Y1 = offY, X2 = vx, Y2 = offY + imgH,
+            Stroke = vBrush, StrokeThickness = 1
+        });
+        // Horizontal line (coronal / axial index → Y or Z position)
+        canvas.Children.Add(new Line
+        {
+            X1 = offX, Y1 = vy, X2 = offX + imgW, Y2 = vy,
+            Stroke = hBrush, StrokeThickness = 1
+        });
     }
 
     // ═══ MPR: Enlarge ═══

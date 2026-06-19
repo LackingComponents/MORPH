@@ -10,6 +10,8 @@ using OrthoPlanner.Core.Segmentation;
 
 namespace OrthoPlanner.App.ViewModels;
 
+public enum MprOrientation { Axial, Coronal, Sagittal }
+
 public partial class MainViewModel
 {
     // ÔöÇÔöÇÔöÇ Volume State ÔöÇÔöÇÔöÇ
@@ -81,9 +83,9 @@ public partial class MainViewModel
     [ObservableProperty] private bool _showSegmentation;
 
     // ÔöÇÔöÇÔöÇ Partial handlers: slice index & windowing ÔöÇÔöÇÔöÇ
-    partial void OnAxialIndexChanged(int value) => UpdateAxialSlice();
-    partial void OnCoronalIndexChanged(int value) => UpdateCoronalSlice();
-    partial void OnSagittalIndexChanged(int value) => UpdateSagittalSlice();
+    partial void OnAxialIndexChanged(int value) { GetInverseNhpTransform(out var invNhp); UpdateAxialSlice(invNhp); }
+    partial void OnCoronalIndexChanged(int value) { GetInverseNhpTransform(out var invNhp); UpdateCoronalSlice(invNhp); }
+    partial void OnSagittalIndexChanged(int value) { GetInverseNhpTransform(out var invNhp); UpdateSagittalSlice(invNhp); }
     partial void OnWindowCenterChanged(double value) => UpdateAllSlices();
     partial void OnWindowWidthChanged(double value) => UpdateAllSlices();
 
@@ -255,12 +257,70 @@ public partial class MainViewModel
         }
     }
 
-    // ÔöÇÔöÇÔöÇ Slice Update Methods ÔöÇÔöÇÔöÇ
+    // ─── Slice Update Methods ───
+
+    // NHP padded AABB bounds (in NHP-space mm), computed once per UpdateAllSlices call.
+    // Used by slice methods AND crosshair drawing. Null when NHP is identity.
+    private double? _nhpBoundsMinX, _nhpBoundsMaxX, _nhpBoundsMinY, _nhpBoundsMaxY, _nhpBoundsMinZ, _nhpBoundsMaxZ;
+
+    /// <summary>True when NHP transform is non-identity (padded bitmaps are in use).</summary>
+    public bool IsNhpPadded => _nhpBoundsMinX.HasValue;
+
+    /// <summary>
+    /// Returns the physical extents (mm) for the specified MPR orientation,
+    /// in display order: hMin/hMax = left/right, vMin/vMax = top/bottom.
+    /// Maps directly to canvas coordinates: fraction = (phys - min) / (max - min).
+    /// </summary>
+    public void GetMprPhysicalBounds(MprOrientation orient,
+        out double hMin, out double hMax, out double vMin, out double vMax)
+    {
+        if (Volume == null) { hMin = hMax = vMin = vMax = 0; return; }
+
+        double minX = IsNhpPadded ? _nhpBoundsMinX!.Value : 0;
+        double maxX = IsNhpPadded ? _nhpBoundsMaxX!.Value : Volume.Width * Volume.Spacing[0];
+        double minY = IsNhpPadded ? _nhpBoundsMinY!.Value : 0;
+        double maxY = IsNhpPadded ? _nhpBoundsMaxY!.Value : Volume.Height * Volume.Spacing[1];
+        double minZ = IsNhpPadded ? _nhpBoundsMinZ!.Value : 0;
+        double maxZ = IsNhpPadded ? _nhpBoundsMaxZ!.Value : (Volume.Depth - 1) * Volume.Spacing[2];
+
+        switch (orient)
+        {
+            case MprOrientation.Axial:    // H = X (left→right), V = Y (top→bottom)
+                hMin = minX; hMax = maxX; vMin = minY; vMax = maxY;
+                break;
+            case MprOrientation.Coronal:  // H = X (left→right), V = Z (top=maxZ, bottom=minZ, flipped)
+                hMin = minX; hMax = maxX; vMin = maxZ; vMax = minZ;
+                break;
+            case MprOrientation.Sagittal: // H = Y (left→right), V = Z (top=maxZ, bottom=minZ, flipped)
+                hMin = minY; hMax = maxY; vMin = maxZ; vMax = minZ;
+                break;
+            default:
+                hMin = hMax = vMin = vMax = 0;
+                break;
+        }
+    }
+
     private void UpdateAllSlices()
     {
-        UpdateAxialSlice();
-        UpdateCoronalSlice();
-        UpdateSagittalSlice();
+        if (Volume == null) return;
+
+        // Compute NHP bounds once, share across all 3 slice methods and crosshairs
+        GetInverseNhpTransform(out var invNhp);
+        if (invNhp.IsIdentity)
+        {
+            _nhpBoundsMinX = _nhpBoundsMaxX = _nhpBoundsMinY = _nhpBoundsMaxY = _nhpBoundsMinZ = _nhpBoundsMaxZ = null;
+        }
+        else
+        {
+            GetNhpVolumeBounds(out double minX, out double maxX, out double minY, out double maxY, out double minZ, out double maxZ);
+            _nhpBoundsMinX = minX; _nhpBoundsMaxX = maxX;
+            _nhpBoundsMinY = minY; _nhpBoundsMaxY = maxY;
+            _nhpBoundsMinZ = minZ; _nhpBoundsMaxZ = maxZ;
+        }
+
+        UpdateAxialSlice(invNhp);
+        UpdateCoronalSlice(invNhp);
+        UpdateSagittalSlice(invNhp);
     }
 
     private bool GetActiveThreshold(out double min, out double max)
@@ -273,11 +333,9 @@ public partial class MainViewModel
         return false;
     }
 
-    private void UpdateAxialSlice()
+    private void UpdateAxialSlice(Matrix3D invNhp)
     {
         if (Volume == null) return;
-
-        GetInverseNhpTransform(out var invNhp);
 
         double zMm = AxialIndex * Volume.Spacing[2];
         int outW, outH;
@@ -294,7 +352,8 @@ public partial class MainViewModel
         }
         else
         {
-            GetNhpVolumeBounds(out double minX, out double maxX, out double minY, out double maxY, out _, out _);
+            double minX = _nhpBoundsMinX!.Value, maxX = _nhpBoundsMaxX!.Value;
+            double minY = _nhpBoundsMinY!.Value, maxY = _nhpBoundsMaxY!.Value;
             outW = Math.Max(1, (int)Math.Ceiling((maxX - minX) / Volume.Spacing[0]));
             outH = Math.Max(1, (int)Math.Ceiling((maxY - minY) / Volume.Spacing[1]));
             // V-0.2: Cap MPR output size to prevent OOM from extreme NHP rotations
@@ -341,11 +400,9 @@ public partial class MainViewModel
         }
     }
 
-    private void UpdateCoronalSlice()
+    private void UpdateCoronalSlice(Matrix3D invNhp)
     {
         if (Volume == null) return;
-
-        GetInverseNhpTransform(out var invNhp);
 
         double yMm = CoronalIndex * Volume.Spacing[1];
         int outW, outH;
@@ -363,7 +420,8 @@ public partial class MainViewModel
         }
         else
         {
-            GetNhpVolumeBounds(out double minX, out double maxX, out _, out _, out double minZ, out double maxZ);
+            double minX = _nhpBoundsMinX!.Value, maxX = _nhpBoundsMaxX!.Value;
+            double minZ = _nhpBoundsMinZ!.Value, maxZ = _nhpBoundsMaxZ!.Value;
             outW = Math.Max(1, (int)Math.Ceiling((maxX - minX) / Volume.Spacing[0]));
             outH = Math.Max(1, (int)Math.Ceiling((maxZ - minZ) / Volume.Spacing[2]));
             // V-0.2: Cap MPR output size to prevent OOM from extreme NHP rotations
@@ -410,11 +468,9 @@ public partial class MainViewModel
         }
     }
 
-    private void UpdateSagittalSlice()
+    private void UpdateSagittalSlice(Matrix3D invNhp)
     {
         if (Volume == null) return;
-
-        GetInverseNhpTransform(out var invNhp);
 
         double xMm = SagittalIndex * Volume.Spacing[0];
         int outW, outH;
@@ -432,7 +488,8 @@ public partial class MainViewModel
         }
         else
         {
-            GetNhpVolumeBounds(out _, out _, out double minY, out double maxY, out double minZ, out double maxZ);
+            double minY = _nhpBoundsMinY!.Value, maxY = _nhpBoundsMaxY!.Value;
+            double minZ = _nhpBoundsMinZ!.Value, maxZ = _nhpBoundsMaxZ!.Value;
             outW = Math.Max(1, (int)Math.Ceiling((maxY - minY) / Volume.Spacing[1]));
             outH = Math.Max(1, (int)Math.Ceiling((maxZ - minZ) / Volume.Spacing[2]));
             // V-0.2: Cap MPR output size to prevent OOM from extreme NHP rotations
