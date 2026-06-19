@@ -75,7 +75,7 @@ public partial class MainViewModel
                     Yaw   = _cYaw
                 },
                 // Phase 1: Persist baked VolumePivot (stable rotation center across reslices)
-                VolumePivot = new { X = VolumePivot.X, Y = VolumePivot.Y, Z = VolumePivot.Z }
+                VolumePivot = VolumePivot.HasValue ? new { X = VolumePivot.Value.X, Y = VolumePivot.Value.Y, Z = VolumePivot.Value.Z } : (object?)null
             };
             var jsonEntry = zip.CreateEntry("project.json");
             using (var sw = new StreamWriter(jsonEntry.Open()))

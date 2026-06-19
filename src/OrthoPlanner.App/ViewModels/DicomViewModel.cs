@@ -309,7 +309,10 @@ public partial class MainViewModel
         if (invNhp.IsIdentity)
         {
             _nhpBoundsMinX = _nhpBoundsMaxX = _nhpBoundsMinY = _nhpBoundsMaxY = _nhpBoundsMinZ = _nhpBoundsMaxZ = null;
-            // Restore original proportional display heights
+            // Restore original slider ranges and display heights
+            AxialMax    = Volume.Depth  - 1;
+            CoronalMax  = Volume.Height - 1;
+            SagittalMax = Volume.Width  - 1;
             AxialDisplayHeight    = new System.Windows.GridLength(Volume.Height * Volume.Spacing[1], System.Windows.GridUnitType.Star);
             CoronalDisplayHeight  = new System.Windows.GridLength(Volume.Depth  * Volume.Spacing[2], System.Windows.GridUnitType.Star);
             SagittalDisplayHeight = new System.Windows.GridLength(Volume.Depth  * Volume.Spacing[2], System.Windows.GridUnitType.Star);
@@ -320,11 +323,19 @@ public partial class MainViewModel
             _nhpBoundsMinX = minX; _nhpBoundsMaxX = maxX;
             _nhpBoundsMinY = minY; _nhpBoundsMaxY = maxY;
             _nhpBoundsMinZ = minZ; _nhpBoundsMaxZ = maxZ;
+            // Update slider ranges to cover the full NHP-padded AABB
+            AxialMax    = Math.Max(1, (int)Math.Ceiling((maxZ - minZ) / Volume.Spacing[2]));
+            CoronalMax  = Math.Max(1, (int)Math.Ceiling((maxY - minY) / Volume.Spacing[1]));
+            SagittalMax = Math.Max(1, (int)Math.Ceiling((maxX - minX) / Volume.Spacing[0]));
             // Update display heights to match NHP-padded extents for uniform cranium scale
             AxialDisplayHeight    = new System.Windows.GridLength(maxY - minY, System.Windows.GridUnitType.Star);
             CoronalDisplayHeight  = new System.Windows.GridLength(maxZ - minZ, System.Windows.GridUnitType.Star);
             SagittalDisplayHeight = new System.Windows.GridLength(maxZ - minZ, System.Windows.GridUnitType.Star);
         }
+        // Clamp current indices to new ranges (prevent out-of-bounds after NHP range change)
+        AxialIndex    = Math.Clamp(AxialIndex, 0, AxialMax);
+        CoronalIndex  = Math.Clamp(CoronalIndex, 0, CoronalMax);
+        SagittalIndex = Math.Clamp(SagittalIndex, 0, SagittalMax);
 
         UpdateAxialSlice(invNhp);
         UpdateCoronalSlice(invNhp);
@@ -367,6 +378,8 @@ public partial class MainViewModel
             // V-0.2: Cap MPR output size to prevent OOM from extreme NHP rotations
             outW = Math.Min(outW, Volume.Width * MaxMprExpansion);
             outH = Math.Min(outH, Volume.Height * MaxMprExpansion);
+            // Offset slice position to NHP-space (slider now covers full NHP AABB)
+            zMm = _nhpBoundsMinZ!.Value + AxialIndex * Volume.Spacing[2];
             originNhp = new Point3D(minX, minY, zMm);
             uAxisNhp  = new Vector3D(Volume.Spacing[0], 0, 0);
             vAxisNhp  = new Vector3D(0, Volume.Spacing[1], 0);
@@ -435,6 +448,8 @@ public partial class MainViewModel
             // V-0.2: Cap MPR output size to prevent OOM from extreme NHP rotations
             outW = Math.Min(outW, Volume.Width * MaxMprExpansion);
             outH = Math.Min(outH, Volume.Depth * MaxMprExpansion);
+            // Offset slice position to NHP-space
+            yMm = _nhpBoundsMinY!.Value + CoronalIndex * Volume.Spacing[1];
             originNhp = new Point3D(minX, yMm, maxZ);
             uAxisNhp  = new Vector3D(Volume.Spacing[0], 0, 0);
             vAxisNhp  = new Vector3D(0, 0, -Volume.Spacing[2]);
@@ -503,6 +518,8 @@ public partial class MainViewModel
             // V-0.2: Cap MPR output size to prevent OOM from extreme NHP rotations
             outW = Math.Min(outW, Volume.Height * MaxMprExpansion);
             outH = Math.Min(outH, Volume.Depth * MaxMprExpansion);
+            // Offset slice position to NHP-space
+            xMm = _nhpBoundsMinX!.Value + SagittalIndex * Volume.Spacing[0];
             originNhp = new Point3D(xMm, minY, maxZ);
             uAxisNhp  = new Vector3D(0, Volume.Spacing[1], 0);
             vAxisNhp  = new Vector3D(0, 0, -Volume.Spacing[2]);

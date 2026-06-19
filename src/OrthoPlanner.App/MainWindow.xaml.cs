@@ -530,19 +530,30 @@ public partial class MainWindow : Window
         double vPhys = vMin + ry * vRange;
         var vol = VM.Volume;
 
+        // When NHP is active, physical coordinates are in NHP-space.
+        // Subtract the NHP bound minimum to get indices that match the NHP-offset slider range.
+        double xOff = 0, yOff = 0, zOff = 0;
+        if (VM.IsNhpPadded)
+        {
+            VM.GetMprPhysicalBounds(MprOrientation.Axial,
+                out xOff, out _, out yOff, out _);
+            VM.GetMprPhysicalBounds(MprOrientation.Coronal,
+                out _, out _, out _, out zOff); // vMax = minZ for coronal
+        }
+
         switch (viewType)
         {
             case 1: // Axial: H=X, V=Y
-                VM.SagittalIndex = (int)Math.Clamp(Math.Round(hPhys / vol.Spacing[0]), 0, VM.SagittalMax);
-                VM.CoronalIndex = (int)Math.Clamp(Math.Round(vPhys / vol.Spacing[1]), 0, VM.CoronalMax);
+                VM.SagittalIndex = (int)Math.Clamp(Math.Round((hPhys - xOff) / vol.Spacing[0]), 0, VM.SagittalMax);
+                VM.CoronalIndex = (int)Math.Clamp(Math.Round((vPhys - yOff) / vol.Spacing[1]), 0, VM.CoronalMax);
                 break;
             case 2: // Coronal: H=X, V=Z (display order: vMin=maxZ, vMax=minZ)
-                VM.SagittalIndex = (int)Math.Clamp(Math.Round(hPhys / vol.Spacing[0]), 0, VM.SagittalMax);
-                VM.AxialIndex = (int)Math.Clamp(Math.Round(vPhys / vol.Spacing[2]), 0, VM.AxialMax);
+                VM.SagittalIndex = (int)Math.Clamp(Math.Round((hPhys - xOff) / vol.Spacing[0]), 0, VM.SagittalMax);
+                VM.AxialIndex = (int)Math.Clamp(Math.Round((vPhys - zOff) / vol.Spacing[2]), 0, VM.AxialMax);
                 break;
             case 3: // Sagittal: H=Y, V=Z (display order)
-                VM.CoronalIndex = (int)Math.Clamp(Math.Round(hPhys / vol.Spacing[1]), 0, VM.CoronalMax);
-                VM.AxialIndex = (int)Math.Clamp(Math.Round(vPhys / vol.Spacing[2]), 0, VM.AxialMax);
+                VM.CoronalIndex = (int)Math.Clamp(Math.Round((hPhys - yOff) / vol.Spacing[1]), 0, VM.CoronalMax);
+                VM.AxialIndex = (int)Math.Clamp(Math.Round((vPhys - zOff) / vol.Spacing[2]), 0, VM.AxialMax);
                 break;
         }
     }
@@ -651,9 +662,28 @@ public partial class MainWindow : Window
 
         var vol = VM.Volume!;
         // Physical coordinates of the 3 slice planes (mm)
-        double xMm = VM.SagittalIndex * vol.Spacing[0];
-        double yMm = VM.CoronalIndex * vol.Spacing[1];
-        double zMm = VM.AxialIndex * vol.Spacing[2];
+        // When NHP is active, slider indices map into NHP-space starting at the NHP bound minimum
+        double xMm, yMm, zMm;
+        if (VM.IsNhpPadded)
+        {
+            VM.GetMprPhysicalBounds(MprOrientation.Axial,
+                out double tmpMinX, out _, out double tmpMinY, out _);
+            VM.GetMprPhysicalBounds(MprOrientation.Coronal,
+                out _, out _, out double tmpMaxZ, out _);
+            // NHP-space: slider 0 = nhpBoundsMin, so position = min + index * spacing
+            // For Z, vMin from Coronal = maxZ (flipped), so minZ = vMax from Coronal
+            VM.GetMprPhysicalBounds(MprOrientation.Coronal,
+                out _, out _, out _, out double tmpMinZ);
+            xMm = tmpMinX + VM.SagittalIndex * vol.Spacing[0];
+            yMm = tmpMinY + VM.CoronalIndex  * vol.Spacing[1];
+            zMm = tmpMinZ + VM.AxialIndex    * vol.Spacing[2];
+        }
+        else
+        {
+            xMm = VM.SagittalIndex * vol.Spacing[0];
+            yMm = VM.CoronalIndex  * vol.Spacing[1];
+            zMm = VM.AxialIndex    * vol.Spacing[2];
+        }
 
         // AXIAL view: H=X (sagittal), V=Y (coronal)
         VM.GetMprPhysicalBounds(MprOrientation.Axial,

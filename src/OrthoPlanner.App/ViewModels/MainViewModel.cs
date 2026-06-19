@@ -22,6 +22,9 @@ public partial class MainViewModel : ObservableObject
         // Re-evaluate HasLeFort1Maxilla whenever the segments collection changes
         // (covers project load, undo/redo, and segment deletion).
         Segments.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasLeFort1Maxilla));
+
+        // NHP Ledger: auto-apply NHP transform to any object entering the viewport collections
+        InitNhpLedger();
     }
 
     // ÔöÇÔöÇÔöÇ Photogrammetry ÔöÇÔöÇÔöÇ
@@ -93,7 +96,8 @@ public partial class MainViewModel : ObservableObject
     public List<CephLandmarkSave> SavedCephLandmarks { get; set; } = new();
 
     // ─── Volume Pivot (set once on DICOM load, persists across reslices) ───
-    [ObservableProperty] private System.Windows.Media.Media3D.Point3D _volumePivot = new System.Windows.Media.Media3D.Point3D(0, 0, 0);
+    // Nullable: null means "not yet set" — avoids false positive from (0,0,0) origin volumes
+    [ObservableProperty] private System.Windows.Media.Media3D.Point3D? _volumePivot;
 
     // ─── Segmentation flags → SegmentationViewModel.cs ───
 
@@ -138,7 +142,7 @@ public partial class MainViewModel : ObservableObject
         if (!BoneOnlyBounds.IsEmpty)
         {
             // Phase 0: Use baked VolumePivot when available (stable across reslices)
-            if (VolumePivot == new Point3D(0, 0, 0))
+            if (VolumePivot == null)
             {
                 ModelCenter = new Point3D(
                     BoneOnlyBounds.X + BoneOnlyBounds.SizeX / 2,
@@ -147,7 +151,7 @@ public partial class MainViewModel : ObservableObject
             }
             else
             {
-                ModelCenter = VolumePivot;
+                ModelCenter = VolumePivot.Value;
             }
             OnPropertyChanged(nameof(ModelCenter));
         }

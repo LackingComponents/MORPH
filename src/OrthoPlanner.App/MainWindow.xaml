@@ -231,6 +231,7 @@
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <TextBlock Text="Lateral (X):" Foreground="White" FontSize="11" VerticalAlignment="Center" />
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <Button Content="0" Command="{Binding ZeroNhpParamCommand}" CommandParameter="Lat" ToolTip="Zero Lateral" Width="18" Height="18" Padding="0" Margin="0,0,4,0" FontSize="9" Background="#FF30343D" Foreground="#FFA0AAB5" BorderThickness="0" VerticalAlignment="Center"/>
                                         <TextBox Width="50" Text="{Binding NhpLateral, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="0,0,4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Lat" MaxLength="8"/>
                                         <StackPanel Orientation="Vertical" VerticalAlignment="Center">
                                             <RepeatButton Content="▲" Style="{StaticResource VerticalStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Lat+" Margin="0,0,0,1"/>
@@ -243,6 +244,7 @@
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <TextBlock Text="Anterior (Y):" Foreground="White" FontSize="11" VerticalAlignment="Center" />
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <Button Content="0" Command="{Binding ZeroNhpParamCommand}" CommandParameter="Ant" ToolTip="Zero Anterior" Width="18" Height="18" Padding="0" Margin="0,0,4,0" FontSize="9" Background="#FF30343D" Foreground="#FFA0AAB5" BorderThickness="0" VerticalAlignment="Center"/>
                                         <TextBox Width="50" Text="{Binding NhpAnteroposterior, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="0,0,4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Ant" MaxLength="8"/>
                                         <StackPanel Orientation="Vertical" VerticalAlignment="Center">
                                             <RepeatButton Content="▲" Style="{StaticResource VerticalStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Ant+" Margin="0,0,0,1"/>
@@ -255,6 +257,7 @@
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <TextBlock Text="Vertical (Z):" Foreground="White" FontSize="11" VerticalAlignment="Center" />
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <Button Content="0" Command="{Binding ZeroNhpParamCommand}" CommandParameter="Vert" ToolTip="Zero Vertical" Width="18" Height="18" Padding="0" Margin="0,0,4,0" FontSize="9" Background="#FF30343D" Foreground="#FFA0AAB5" BorderThickness="0" VerticalAlignment="Center"/>
                                         <TextBox Width="50" Text="{Binding NhpVertical, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="0,0,4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Vert" MaxLength="8"/>
                                         <StackPanel Orientation="Vertical" VerticalAlignment="Center">
                                             <RepeatButton Content="▲" Style="{StaticResource VerticalStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Vert+" Margin="0,0,0,1"/>
@@ -270,6 +273,7 @@
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <TextBlock Text="Pitch (X):" Foreground="White" FontSize="11" VerticalAlignment="Center" />
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <Button Content="0" Command="{Binding ZeroNhpParamCommand}" CommandParameter="Pitch" ToolTip="Zero Pitch" Width="18" Height="18" Padding="0" Margin="0,0,4,0" FontSize="9" Background="#FF30343D" Foreground="#FFA0AAB5" BorderThickness="0" VerticalAlignment="Center"/>
                                         <TextBox Width="50" Text="{Binding NhpPitch, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="0,0,4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Pitch" MaxLength="8"/>
                                         <StackPanel Orientation="Vertical" VerticalAlignment="Center">
                                             <RepeatButton Content="▲" Style="{StaticResource VerticalStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Pitch+" Margin="0,0,0,1"/>
@@ -282,6 +286,7 @@
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <TextBlock Text="Roll (Y):" Foreground="White" FontSize="11" VerticalAlignment="Center" />
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <Button Content="0" Command="{Binding ZeroNhpParamCommand}" CommandParameter="Roll" ToolTip="Zero Roll" Width="18" Height="18" Padding="0" Margin="0,0,4,0" FontSize="9" Background="#FF30343D" Foreground="#FFA0AAB5" BorderThickness="0" VerticalAlignment="Center"/>
                                         <TextBox Width="50" Text="{Binding NhpRoll, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="0,0,4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Roll" MaxLength="8"/>
                                         <StackPanel Orientation="Vertical" VerticalAlignment="Center">
                                             <RepeatButton Content="▲" Style="{StaticResource VerticalStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Roll+" Margin="0,0,0,1"/>
@@ -294,6 +299,7 @@
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <TextBlock Text="Yaw (Z):" Foreground="White" FontSize="11" VerticalAlignment="Center" />
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <Button Content="0" Command="{Binding ZeroNhpParamCommand}" CommandParameter="Yaw" ToolTip="Zero Yaw" Width="18" Height="18" Padding="0" Margin="0,0,4,0" FontSize="9" Background="#FF30343D" Foreground="#FFA0AAB5" BorderThickness="0" VerticalAlignment="Center"/>
                                         <TextBox Width="50" Text="{Binding NhpYaw, StringFormat={}{0:F1}}" TextAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0" Margin="0,0,4,0" VerticalAlignment="Center" PreviewKeyDown="NhpTextBox_PreviewKeyDown" Tag="Yaw" MaxLength="8"/>
                                         <StackPanel Orientation="Vertical" VerticalAlignment="Center">
                                             <RepeatButton Content="▲" Style="{StaticResource VerticalStepperButtonStyle}" Command="{Binding AdjustNhpCommand}" CommandParameter="Yaw+" Margin="0,0,0,1"/>
@@ -304,19 +310,35 @@
 
                                 <Separator Background="#FF30343D" Margin="0,0,0,12"/>
 
-                                <Button Content="DONE" Command="{Binding CommitNhpCommand}" 
-                                        IsEnabled="{Binding IsNhpDirty}"
-                                        Background="#FF1E80B4" Foreground="White" FontWeight="Bold" Padding="0,6" BorderThickness="0">
-                                    <Button.Style>
-                                        <Style TargetType="Button">
-                                            <Style.Triggers>
-                                                <Trigger Property="IsEnabled" Value="False">
-                                                    <Setter Property="Opacity" Value="0.4" />
-                                                </Trigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Button.Style>
-                                </Button>
+                                <Grid Margin="0,0,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <Button Content="RESET" Command="{Binding ResetNhpCommand}"
+                                            IsEnabled="{Binding IsNhpDirty}"
+                                            Background="#FF30343D" Foreground="#FFA0AAB5" FontWeight="Bold" Padding="0,6" BorderThickness="0">
+                                        <Button.Style>
+                                            <Style TargetType="Button">
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsEnabled" Value="False">
+                                                        <Setter Property="Opacity" Value="0.4" />
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                    <Button Grid.Column="2" Content="DONE" Command="{Binding CommitNhpCommand}" 
+                                            IsEnabled="{Binding IsNhpDirty}"
+                                            Background="#FF1E80B4" Foreground="White" FontWeight="Bold" Padding="0,6" BorderThickness="0">
+                                        <Button.Style>
+                                            <Style TargetType="Button">
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsEnabled" Value="False">
+                                                        <Setter Property="Opacity" Value="0.4" />
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                </Grid>
                             </StackPanel>
                         </Border>
                     </Popup>

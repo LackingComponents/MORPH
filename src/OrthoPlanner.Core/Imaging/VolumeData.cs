@@ -403,21 +403,23 @@ public class VolumeData
         double lower = windowCenter - windowWidth / 2.0;
         double upper = windowCenter + windowWidth / 2.0;
 
-        for (int row = 0; row < outHeight; row++)
-        for (int col = 0; col < outWidth; col++)
+        System.Threading.Tasks.Parallel.For(0, outHeight, row =>
         {
-            double x = originX + col * uX + row * vX;
-            double y = originY + col * uY + row * vY;
-            double z = originZ + col * uZ + row * vZ;
+            for (int col = 0; col < outWidth; col++)
+            {
+                double x = originX + col * uX + row * vX;
+                double y = originY + col * uY + row * vY;
+                double z = originZ + col * uZ + row * vZ;
 
-            double ix = x / Spacing[0];
-            double iy = y / Spacing[1];
-            double iz = z / Spacing[2];
+                double ix = x / Spacing[0];
+                double iy = y / Spacing[1];
+                double iz = z / Spacing[2];
 
-            short hu = SampleTrilinear(ix, iy, iz);
-            double normalized = Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0);
-            slice[col + row * outWidth] = (byte)(normalized * 255);
-        }
+                short hu = SampleTrilinear(ix, iy, iz);
+                double normalized = Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0);
+                slice[col + row * outWidth] = (byte)(normalized * 255);
+            }
+        });
 
         return slice;
     }
@@ -437,35 +439,37 @@ public class VolumeData
         double lower = windowCenter - windowWidth / 2.0;
         double upper = windowCenter + windowWidth / 2.0;
 
-        for (int row = 0; row < outHeight; row++)
-        for (int col = 0; col < outWidth; col++)
+        System.Threading.Tasks.Parallel.For(0, outHeight, row =>
         {
-            double x = originX + col * uX + row * vX;
-            double y = originY + col * uY + row * vY;
-            double z = originZ + col * uZ + row * vZ;
-
-            double ix = x / Spacing[0];
-            double iy = y / Spacing[1];
-            double iz = z / Spacing[2];
-
-            short hu = SampleTrilinear(ix, iy, iz);
-            byte gray = (byte)(Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0) * 255);
-            int idx = (col + row * outWidth) * 4;
-
-            if (hu >= threshMin && hu <= threshMax)
+            for (int col = 0; col < outWidth; col++)
             {
-                bgra[idx + 0] = (byte)(gray * 0.4 + 255 * 0.6);
-                bgra[idx + 1] = (byte)(gray * 0.4 + 200 * 0.6);
-                bgra[idx + 2] = (byte)(gray * 0.4 + 50 * 0.6);
+                double x = originX + col * uX + row * vX;
+                double y = originY + col * uY + row * vY;
+                double z = originZ + col * uZ + row * vZ;
+
+                double ix = x / Spacing[0];
+                double iy = y / Spacing[1];
+                double iz = z / Spacing[2];
+
+                short hu = SampleTrilinear(ix, iy, iz);
+                byte gray = (byte)(Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0) * 255);
+                int idx = (col + row * outWidth) * 4;
+
+                if (hu >= threshMin && hu <= threshMax)
+                {
+                    bgra[idx + 0] = (byte)(gray * 0.4 + 255 * 0.6);
+                    bgra[idx + 1] = (byte)(gray * 0.4 + 200 * 0.6);
+                    bgra[idx + 2] = (byte)(gray * 0.4 + 50 * 0.6);
+                }
+                else
+                {
+                    bgra[idx + 0] = gray;
+                    bgra[idx + 1] = gray;
+                    bgra[idx + 2] = gray;
+                }
+                bgra[idx + 3] = 255;
             }
-            else
-            {
-                bgra[idx + 0] = gray;
-                bgra[idx + 1] = gray;
-                bgra[idx + 2] = gray;
-            }
-            bgra[idx + 3] = 255;
-        }
+        });
 
         return bgra;
     }
@@ -485,43 +489,45 @@ public class VolumeData
         double lower = windowCenter - windowWidth / 2.0;
         double upper = windowCenter + windowWidth / 2.0;
 
-        for (int row = 0; row < outHeight; row++)
-        for (int col = 0; col < outWidth; col++)
+        System.Threading.Tasks.Parallel.For(0, outHeight, row =>
         {
-            double x = originX + col * uX + row * vX;
-            double y = originY + col * uY + row * vY;
-            double z = originZ + col * uZ + row * vZ;
-
-            double ix = x / Spacing[0];
-            double iy = y / Spacing[1];
-            double iz = z / Spacing[2];
-
-            short hu = SampleTrilinear(ix, iy, iz);
-            byte gray = (byte)(Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0) * 255);
-            int idx = (col + row * outWidth) * 4;
-
-            // Sample segmentation label via nearest-neighbor (integer coords)
-            int lx = (int)Math.Round(ix);
-            int ly = (int)Math.Round(iy);
-            int lz = (int)Math.Round(iz);
-            byte label = 0;
-            if (lx >= 0 && lx < Width && ly >= 0 && ly < Height && lz >= 0 && lz < Depth)
-                label = segVol.Labels[lx + ly * Width + lz * Width * Height];
-
-            if (label > 0 && segVol.Segments.TryGetValue(label, out var info))
+            for (int col = 0; col < outWidth; col++)
             {
-                bgra[idx + 0] = (byte)(gray * 0.4 + info.ColorB * 0.6);
-                bgra[idx + 1] = (byte)(gray * 0.4 + info.ColorG * 0.6);
-                bgra[idx + 2] = (byte)(gray * 0.4 + info.ColorR * 0.6);
+                double x = originX + col * uX + row * vX;
+                double y = originY + col * uY + row * vY;
+                double z = originZ + col * uZ + row * vZ;
+
+                double ix = x / Spacing[0];
+                double iy = y / Spacing[1];
+                double iz = z / Spacing[2];
+
+                short hu = SampleTrilinear(ix, iy, iz);
+                byte gray = (byte)(Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0) * 255);
+                int idx = (col + row * outWidth) * 4;
+
+                // Sample segmentation label via nearest-neighbor (integer coords)
+                int lx = (int)Math.Round(ix);
+                int ly = (int)Math.Round(iy);
+                int lz = (int)Math.Round(iz);
+                byte label = 0;
+                if (lx >= 0 && lx < Width && ly >= 0 && ly < Height && lz >= 0 && lz < Depth)
+                    label = segVol.Labels[lx + ly * Width + lz * Width * Height];
+
+                if (label > 0 && segVol.Segments.TryGetValue(label, out var info))
+                {
+                    bgra[idx + 0] = (byte)(gray * 0.4 + info.ColorB * 0.6);
+                    bgra[idx + 1] = (byte)(gray * 0.4 + info.ColorG * 0.6);
+                    bgra[idx + 2] = (byte)(gray * 0.4 + info.ColorR * 0.6);
+                }
+                else
+                {
+                    bgra[idx + 0] = gray;
+                    bgra[idx + 1] = gray;
+                    bgra[idx + 2] = gray;
+                }
+                bgra[idx + 3] = 255;
             }
-            else
-            {
-                bgra[idx + 0] = gray;
-                bgra[idx + 1] = gray;
-                bgra[idx + 2] = gray;
-            }
-            bgra[idx + 3] = 255;
-        }
+        });
 
         return bgra;
     }
