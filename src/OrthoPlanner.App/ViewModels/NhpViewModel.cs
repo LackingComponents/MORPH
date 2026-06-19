@@ -24,9 +24,18 @@ public partial class MainViewModel
 
     // ━━━ NHP Committed State (Baseline) ━━━
     private double _cLat, _cAnt, _cVert, _cRoll, _cPitch, _cYaw;
-    // The current NHP delta transform (applied to ALL segments on top of their surgical offsets)
-    private System.Windows.Media.Media3D.Transform3D _nhpTransform = System.Windows.Media.Media3D.Transform3D.Identity;
-    public Rect3D BoneOnlyBounds { get; private set; } = Rect3D.Empty; // Bone segment bounds only, excludes imported STL meshes
+
+    // ━━━ NHP Transform State ━━━
+    // _nhpTransform: the DELTA from committed baseline (what is visually applied as a preview).
+    // When committed, this is Identity. Applied on top of already-baked vertices.
+    private Transform3D _nhpTransform = Transform3D.Identity;
+
+    // _cumulativeNhpMatrix: product of ALL committed NHP deltas since DICOM load.
+    // Used by MPR (cumulative × delta = total transform from DICOM space).
+    // CORRECT multiplication order: _cumulativeNhpMatrix = _cumulativeNhpMatrix * delta
+    private Matrix3D _cumulativeNhpMatrix = Matrix3D.Identity;
+
+    public Rect3D BoneOnlyBounds { get; private set; } = Rect3D.Empty; // Bone segment bounds only
 
     public bool IsNhpDirty => Math.Abs(NhpLateral - _cLat) > 0.01 ||
                               Math.Abs(NhpAnteroposterior - _cAnt) > 0.01 ||
@@ -64,34 +73,104 @@ public partial class MainViewModel
         _mprDebounceTimer.Start();
     }
 
-    partial void OnNhpLateralChanged(double value) { if (value != ClampNhp(value, false)) NhpLateral = ClampNhp(value, false); else { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); ScheduleDebouncedSliceUpdate(); } }
-    partial void OnNhpAnteroposteriorChanged(double value) { if (value != ClampNhp(value, false)) NhpAnteroposterior = ClampNhp(value, false); else { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); ScheduleDebouncedSliceUpdate(); } }
-    partial void OnNhpVerticalChanged(double value) { if (value != ClampNhp(value, false)) NhpVertical = ClampNhp(value, false); else { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); ScheduleDebouncedSliceUpdate(); } }
-    partial void OnNhpRollChanged(double value) { if (value != ClampNhp(value, true)) NhpRoll = ClampNhp(value, true); else { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); ScheduleDebouncedSliceUpdate(); } }
-    partial void OnNhpPitchChanged(double value) { if (value != ClampNhp(value, true)) NhpPitch = ClampNhp(value, true); else { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); ScheduleDebouncedSliceUpdate(); } }
-    partial void OnNhpYawChanged(double value) { if (value != ClampNhp(value, true)) NhpYaw = ClampNhp(value, true); else { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); ScheduleDebouncedSliceUpdate(); } }
+    partial void OnNhpLateralChanged(double value)         { if (value != ClampNhp(value, false)) NhpLateral          = ClampNhp(value, false); else { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); ScheduleDebouncedSliceUpdate(); } }
+    partial void OnNhpAnteroposteriorChanged(double value) { if (value != ClampNhp(value, false)) NhpAnteroposterior  = ClampNhp(value, false); else { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); ScheduleDebouncedSliceUpdate(); } }
+    partial void OnNhpVerticalChanged(double value)        { if (value != ClampNhp(value, false)) NhpVertical         = ClampNhp(value, false); else { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); ScheduleDebouncedSliceUpdate(); } }
+    partial void OnNhpRollChanged(double value)            { if (value != ClampNhp(value, true))  NhpRoll             = ClampNhp(value, true);  else { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); ScheduleDebouncedSliceUpdate(); } }
+    partial void OnNhpPitchChanged(double value)           { if (value != ClampNhp(value, true))  NhpPitch            = ClampNhp(value, true);  else { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); ScheduleDebouncedSliceUpdate(); } }
+    partial void OnNhpYawChanged(double value)             { if (value != ClampNhp(value, true))  NhpYaw              = ClampNhp(value, true);  else { OnPropertyChanged(nameof(IsNhpDirty)); UpdateNhpTransform(); ScheduleDebouncedSliceUpdate(); } }
 
     [RelayCommand]
     private void AdjustNhp(string param)
     {
         double step = 0.1;
-        if (param.Contains("Lat")) NhpLateral = ClampNhp(NhpLateral + (param.EndsWith("+") ? step : -step), false);
-        else if (param.Contains("Ant")) NhpAnteroposterior = ClampNhp(NhpAnteroposterior + (param.EndsWith("+") ? step : -step), false);
-        else if (param.Contains("Vert")) NhpVertical = ClampNhp(NhpVertical + (param.EndsWith("+") ? step : -step), false);
-        else if (param.Contains("Roll")) NhpRoll = ClampNhp(NhpRoll + (param.EndsWith("+") ? step : -step), true);
-        else if (param.Contains("Pitch")) NhpPitch = ClampNhp(NhpPitch + (param.EndsWith("+") ? step : -step), true);
-        else if (param.Contains("Yaw")) NhpYaw = ClampNhp(NhpYaw + (param.EndsWith("+") ? step : -step), true);
+        if (param.Contains("Lat"))        NhpLateral          = ClampNhp(NhpLateral          + (param.EndsWith("+") ? step : -step), false);
+        else if (param.Contains("Ant"))   NhpAnteroposterior  = ClampNhp(NhpAnteroposterior  + (param.EndsWith("+") ? step : -step), false);
+        else if (param.Contains("Vert"))  NhpVertical         = ClampNhp(NhpVertical          + (param.EndsWith("+") ? step : -step), false);
+        else if (param.Contains("Roll"))  NhpRoll             = ClampNhp(NhpRoll              + (param.EndsWith("+") ? step : -step), true);
+        else if (param.Contains("Pitch")) NhpPitch            = ClampNhp(NhpPitch             + (param.EndsWith("+") ? step : -step), true);
+        else if (param.Contains("Yaw"))   NhpYaw              = ClampNhp(NhpYaw               + (param.EndsWith("+") ? step : -step), true);
     }
 
+    /// <summary>
+    /// Commit NHP: bake the current delta into all mesh vertices and landmarks,
+    /// update the cumulative matrix, and reset the delta to Identity.
+    /// After commit, _nhpTransform = Identity; everything lives in baked NHP space.
+    /// </summary>
     [RelayCommand]
     private void CommitNhp()
     {
-        // Visual-only NHP: simply lock the current slider values as the new baseline.
-        // No physical reslicing, no surgical reset, no undo clear.
+        if (BoneOnlyBounds.IsEmpty) { StatusText = "⚠ Segment bone first to enable NHP commit"; return; }
+
+        // 1. Build the delta matrix (current slider values - baseline)
+        var deltaMatrix = BuildNhpMatrix(
+            NhpLateral - _cLat, NhpAnteroposterior - _cAnt, NhpVertical - _cVert,
+            NhpRoll - _cRoll, NhpPitch - _cPitch, NhpYaw - _cYaw);
+
+        // 2. Snapshot for undo BEFORE mutating vertices
+        SaveStateForUndo();
+
+        // 3. Bake delta into all mesh vertices (with dedup for named models)
+        var baked = new HashSet<SegmentViewModel>();
+        foreach (var seg in Segments)
+        {
+            if (seg.Vertices != null) BakeTransformIntoVertices(seg.Vertices, deltaMatrix);
+            seg.BuildModel();
+            baked.Add(seg);
+        }
+        void BakeNamedSeg(SegmentViewModel? s) { if (s != null && !baked.Contains(s) && s.Vertices != null) { BakeTransformIntoVertices(s.Vertices, deltaMatrix); s.BuildModel(); baked.Add(s); } }
+        BakeNamedSeg(HardTissueModel);
+        BakeNamedSeg(SoftTissueModel);
+        BakeNamedSeg(DentalModel);
+
+        foreach (var mesh in ImportedMeshes)
+            if (mesh.Vertices != null) { BakeTransformIntoVertices(mesh.Vertices, deltaMatrix); mesh.BuildModel(); }
+
+        foreach (var occ in LoadedOcclusions)
+            if (occ.Vertices != null) { BakeTransformIntoVertices(occ.Vertices, deltaMatrix); occ.BuildModel(); }
+
+        // 4. Bake anatomical landmarks
+        DentalMidlinePoint = TransformTuple(DentalMidlinePoint, deltaMatrix);
+        LeftCondyleCenter  = TransformTuple(LeftCondyleCenter, deltaMatrix);
+        RightCondyleCenter = TransformTuple(RightCondyleCenter, deltaMatrix);
+
+        // 5. Bake VolumePivot (rotation center must move with the baked space)
+        if (VolumePivot.HasValue)
+            VolumePivot = deltaMatrix.Transform(VolumePivot.Value);
+
+        // 6. Bake cephalometric 3D coordinates
+        if (SavedCephLandmarks.Count > 0)
+        {
+            var updatedLandmarks = new List<CephLandmarkSave>(SavedCephLandmarks.Count);
+            foreach (var lm in SavedCephLandmarks)
+            {
+                if (lm.X3D == null || lm.Y3D == null || lm.Z3D == null)
+                    updatedLandmarks.Add(lm);
+                else
+                {
+                    var p = deltaMatrix.Transform(new Point3D(lm.X3D.Value, lm.Y3D.Value, lm.Z3D.Value));
+                    updatedLandmarks.Add(new CephLandmarkSave(lm.Name, lm.X2D, lm.Y2D, p.X, p.Y, p.Z));
+                }
+            }
+            SavedCephLandmarks = updatedLandmarks;
+        }
+
+        // 7. Update cumulative matrix: CORRECT ORDER — cumulative first, then delta
+        _cumulativeNhpMatrix = _cumulativeNhpMatrix * deltaMatrix;
+
+        // 8. New baseline = current slider values
         _cLat = NhpLateral; _cAnt = NhpAnteroposterior; _cVert = NhpVertical;
-        _cRoll = NhpRoll; _cPitch = NhpPitch; _cYaw = NhpYaw;
+        _cRoll = NhpRoll;   _cPitch = NhpPitch;         _cYaw  = NhpYaw;
+
+        // 9. Delta = 0 → _nhpTransform becomes Identity
+        _nhpTransform = Transform3D.Identity;
+
+        // 10. Re-apply transforms and refresh
         OnPropertyChanged(nameof(IsNhpDirty));
-        StatusText = "NHP committed.";
+        ApplyNhpToAllTrackedObjects();
+        RefreshCombinedModel();
+        UpdateAllSlices();
+        StatusText = "NHP committed and baked into geometry.";
     }
 
     /// <summary>Reset all NHP parameters to the committed baseline.</summary>
@@ -127,82 +206,87 @@ public partial class MainViewModel
     [RelayCommand]
     private void ZeroNhpParam(string param)
     {
-        if (param.Contains("Lat")) NhpLateral = 0;
-        else if (param.Contains("Ant")) NhpAnteroposterior = 0;
-        else if (param.Contains("Vert")) NhpVertical = 0;
-        else if (param.Contains("Roll")) NhpRoll = 0;
-        else if (param.Contains("Pitch")) NhpPitch = 0;
-        else if (param.Contains("Yaw")) NhpYaw = 0;
+        // Direct field write to suppress the OnChanged handler (avoid double UpdateNhpTransform)
+#pragma warning disable MVVMTK0034
+        if      (param.Contains("Lat"))   _nhpLateral         = 0;
+        else if (param.Contains("Ant"))   _nhpAnteroposterior = 0;
+        else if (param.Contains("Vert"))  _nhpVertical        = 0;
+        else if (param.Contains("Roll"))  _nhpRoll            = 0;
+        else if (param.Contains("Pitch")) _nhpPitch           = 0;
+        else if (param.Contains("Yaw"))   _nhpYaw             = 0;
+#pragma warning restore MVVMTK0034
 
-        // Force immediate full update (bypass debounce)
+        OnPropertyChanged(nameof(NhpLateral)); OnPropertyChanged(nameof(NhpAnteroposterior));
+        OnPropertyChanged(nameof(NhpVertical)); OnPropertyChanged(nameof(NhpRoll));
+        OnPropertyChanged(nameof(NhpPitch)); OnPropertyChanged(nameof(NhpYaw));
+        OnPropertyChanged(nameof(IsNhpDirty));
+
         _mprDebounceTimer?.Stop();
         UpdateNhpTransform();
         UpdateAllSlices();
+    }
+
+    /// <summary>
+    /// Builds the NHP delta transform matrix from delta values centered on VolumePivot.
+    /// </summary>
+    private Matrix3D BuildNhpMatrix(double dLat, double dAnt, double dVert,
+        double dRoll, double dPitch, double dYaw)
+    {
+        var center = VolumePivot ?? new Point3D(
+            BoneOnlyBounds.X + BoneOnlyBounds.SizeX / 2,
+            BoneOnlyBounds.Y + BoneOnlyBounds.SizeY / 2,
+            BoneOnlyBounds.Z + BoneOnlyBounds.SizeZ / 2);
+
+        var nhp = new Transform3DGroup();
+        nhp.Children.Add(new TranslateTransform3D(-center.X, -center.Y, -center.Z));
+        nhp.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), dPitch)));
+        nhp.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), dRoll)));
+        nhp.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), dYaw)));
+        nhp.Children.Add(new TranslateTransform3D(center.X + dLat, center.Y + dAnt, center.Z + dVert));
+        return nhp.Value;
     }
 
     private void UpdateNhpTransform()
     {
         if (BoneOnlyBounds.IsEmpty)
         {
-            // Provide feedback instead of silently doing nothing
             if (Math.Abs(NhpLateral) > 0.01 || Math.Abs(NhpAnteroposterior) > 0.01 ||
                 Math.Abs(NhpVertical) > 0.01 || Math.Abs(NhpRoll) > 0.01 ||
                 Math.Abs(NhpPitch) > 0.01 || Math.Abs(NhpYaw) > 0.01)
-            {
                 StatusText = "⚠ Segment bone first to enable NHP adjustment";
-            }
             return;
         }
 
-        // Phase 0: Use the baked VolumePivot for rotation center (stable across reslices).
-        // Fallback to bounds-derived center when VolumePivot has not been set yet.
-        var center = VolumePivot == null
-            ? new Point3D(BoneOnlyBounds.X + BoneOnlyBounds.SizeX / 2,
-                          BoneOnlyBounds.Y + BoneOnlyBounds.SizeY / 2,
-                          BoneOnlyBounds.Z + BoneOnlyBounds.SizeZ / 2)
-            : VolumePivot.Value;
+        // Build the DELTA transform from committed baseline
+        var deltaMatrix = BuildNhpMatrix(
+            NhpLateral - _cLat, NhpAnteroposterior - _cAnt, NhpVertical - _cVert,
+            NhpRoll - _cRoll, NhpPitch - _cPitch, NhpYaw - _cYaw);
 
-        // TOTAL NHP transform: apply the full current NHP values (not just the delta).
-        // This makes _nhpTransform the definitive orientation of all meshes in world space.
-        var nhp = new Transform3DGroup();
-        nhp.Children.Add(new TranslateTransform3D(-center.X, -center.Y, -center.Z));
-        nhp.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), NhpPitch)));
-        nhp.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), NhpRoll)));
-        nhp.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), NhpYaw)));
-        nhp.Children.Add(new TranslateTransform3D(center.X + NhpLateral, center.Y + NhpAnteroposterior, center.Z + NhpVertical));
+        _nhpTransform = new MatrixTransform3D(deltaMatrix);
 
-        _nhpTransform = nhp;
-
-        // Apply total NHP transform to all tracked objects (the "NHP ledger")
         ApplyNhpToAllTrackedObjects();
 
-        // Dynamically enforce the freehand rotation pivot point!
-        ModelCenter = nhp.Transform(center);
+        // ModelCenter follows the delta-transformed pivot
+        var center = VolumePivot ?? new Point3D(
+            BoneOnlyBounds.X + BoneOnlyBounds.SizeX / 2,
+            BoneOnlyBounds.Y + BoneOnlyBounds.SizeY / 2,
+            BoneOnlyBounds.Z + BoneOnlyBounds.SizeZ / 2);
+        ModelCenter = deltaMatrix.Transform(center);
     }
 
     /// <summary>
-    /// NHP Ledger: Applies the current NHP transform to ALL viewport objects.
-    /// Called whenever NHP changes. Individual objects are also auto-tagged
-    /// via CollectionChanged handlers when they first enter the collections.
+    /// Applies the current NHP delta transform to ALL tracked objects.
+    /// Called when sliders change (preview mode) or after commit (Identity = no-op).
     /// </summary>
     private void ApplyNhpToAllTrackedObjects()
     {
-        // Convenience references (may be null before segmentation)
         if (HardTissueModel != null) HardTissueModel.Transform = _nhpTransform;
         if (SoftTissueModel != null) SoftTissueModel.Transform = _nhpTransform;
-        if (DentalModel != null)     DentalModel.Transform     = _nhpTransform;
+        if (DentalModel     != null) DentalModel.Transform     = _nhpTransform;
 
-        // All segments: NHP composes with their per-segment surgical offset
-        foreach (var seg in Segments)
-            seg.Transform = ComposeTransforms(_nhpTransform, seg.SurgicalTransform);
-
-        // All imported meshes: NHP only
-        foreach (var mesh in ImportedMeshes)
-            mesh.Transform = _nhpTransform;
-
-        // All occlusion STLs: NHP only
-        foreach (var occ in LoadedOcclusions)
-            occ.Transform = _nhpTransform;
+        foreach (var seg  in Segments)       seg.Transform  = ComposeTransforms(_nhpTransform, seg.SurgicalTransform);
+        foreach (var mesh in ImportedMeshes) mesh.Transform = _nhpTransform;
+        foreach (var occ  in LoadedOcclusions) occ.Transform = _nhpTransform;
     }
 
     /// <summary>
@@ -212,8 +296,8 @@ public partial class MainViewModel
     /// </summary>
     private void InitNhpLedger()
     {
-        Segments.CollectionChanged += OnSegmentsChangedForNhp;
-        ImportedMeshes.CollectionChanged += OnMeshesChangedForNhp;
+        Segments.CollectionChanged        += OnSegmentsChangedForNhp;
+        ImportedMeshes.CollectionChanged  += OnMeshesChangedForNhp;
         LoadedOcclusions.CollectionChanged += OnOcclusionsChangedForNhp;
     }
 
@@ -222,7 +306,15 @@ public partial class MainViewModel
         if (e.Action == NotifyCollectionChangedAction.Add && e.NewItems != null)
         {
             foreach (SegmentViewModel seg in e.NewItems)
+            {
+                // Auto-bake cumulative NHP into new DICOM-space vertices (unless suppressed)
+                if (!SuppressLedgerBake && seg.Vertices != null && !_cumulativeNhpMatrix.IsIdentity)
+                {
+                    BakeTransformIntoVertices(seg.Vertices, _cumulativeNhpMatrix);
+                    seg.BuildModel();
+                }
                 seg.Transform = ComposeTransforms(_nhpTransform, seg.SurgicalTransform);
+            }
         }
     }
 
@@ -231,7 +323,14 @@ public partial class MainViewModel
         if (e.Action == NotifyCollectionChangedAction.Add && e.NewItems != null)
         {
             foreach (MeshViewModel mesh in e.NewItems)
+            {
+                if (!SuppressLedgerBake && mesh.Vertices != null && !_cumulativeNhpMatrix.IsIdentity)
+                {
+                    BakeTransformIntoVertices(mesh.Vertices, _cumulativeNhpMatrix);
+                    mesh.BuildModel();
+                }
                 mesh.Transform = _nhpTransform;
+            }
         }
     }
 
@@ -240,17 +339,47 @@ public partial class MainViewModel
         if (e.Action == NotifyCollectionChangedAction.Add && e.NewItems != null)
         {
             foreach (MeshViewModel occ in e.NewItems)
+            {
+                if (!SuppressLedgerBake && occ.Vertices != null && !_cumulativeNhpMatrix.IsIdentity)
+                {
+                    BakeTransformIntoVertices(occ.Vertices, _cumulativeNhpMatrix);
+                    occ.BuildModel();
+                }
                 occ.Transform = _nhpTransform;
+            }
         }
     }
 
-    /// <summary>Composes two transforms: applies <paramref name="first"/>, then <paramref name="second"/>.</summary>
-    private static System.Windows.Media.Media3D.Transform3D ComposeTransforms(
-        System.Windows.Media.Media3D.Transform3D first,
-        System.Windows.Media.Media3D.Transform3D second)
+    /// <summary>
+    /// Bakes a Matrix3D transform directly into a flat float[] vertex array (stride 3).
+    /// Mutates vertices in-place. Always call seg.BuildModel() after.
+    /// </summary>
+    private static void BakeTransformIntoVertices(float[] vertices, Matrix3D matrix)
     {
-        if (second == System.Windows.Media.Media3D.Transform3D.Identity) return first;
-        var g = new System.Windows.Media.Media3D.Transform3DGroup();
+        for (int i = 0; i + 2 < vertices.Length; i += 3)
+        {
+            var p  = new Point3D(vertices[i], vertices[i + 1], vertices[i + 2]);
+            var tp = matrix.Transform(p);
+            vertices[i]     = (float)tp.X;
+            vertices[i + 1] = (float)tp.Y;
+            vertices[i + 2] = (float)tp.Z;
+        }
+    }
+
+    /// <summary>Transforms a nullable (X,Y,Z) tuple by a Matrix3D.</summary>
+    private static (double X, double Y, double Z)? TransformTuple(
+        (double X, double Y, double Z)? pt, Matrix3D m)
+    {
+        if (pt == null) return null;
+        var p = m.Transform(new Point3D(pt.Value.X, pt.Value.Y, pt.Value.Z));
+        return (p.X, p.Y, p.Z);
+    }
+
+    /// <summary>Composes two transforms: applies <paramref name="first"/>, then <paramref name="second"/>.</summary>
+    private static Transform3D ComposeTransforms(Transform3D first, Transform3D second)
+    {
+        if (second == Transform3D.Identity) return first;
+        var g = new Transform3DGroup();
         g.Children.Add(first);
         g.Children.Add(second);
         return g;

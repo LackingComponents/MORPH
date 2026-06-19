@@ -304,9 +304,10 @@ public partial class MainViewModel
     {
         if (Volume == null) return;
 
-        // Compute NHP bounds once, share across all 3 slice methods and crosshairs
+        // Compute NHP total bounds once (cumulative × delta), share across slice methods
         GetInverseNhpTransform(out var invNhp);
-        if (invNhp.IsIdentity)
+        bool isNhpEffectivelyIdentity = _cumulativeNhpMatrix.IsIdentity && _nhpTransform.Value.IsIdentity;
+        if (isNhpEffectivelyIdentity)
         {
             _nhpBoundsMinX = _nhpBoundsMaxX = _nhpBoundsMinY = _nhpBoundsMaxY = _nhpBoundsMinZ = _nhpBoundsMaxZ = null;
             // Restore original slider ranges and display heights
@@ -337,6 +338,7 @@ public partial class MainViewModel
         CoronalIndex  = Math.Clamp(CoronalIndex, 0, CoronalMax);
         SagittalIndex = Math.Clamp(SagittalIndex, 0, SagittalMax);
 
+        // Pass identity-check flag so slice methods avoid GetNhpBounds re-computation
         UpdateAxialSlice(invNhp);
         UpdateCoronalSlice(invNhp);
         UpdateSagittalSlice(invNhp);
@@ -567,17 +569,28 @@ public partial class MainViewModel
     private const int MaxMprExpansion = 4;
 
     /// <summary>
-    /// Inverts the current NHP transform so we can map NHP-space slice geometry
-    /// back into the original DICOM coordinate system for oblique sampling.
+    /// Inverts the TOTAL NHP transform (cumulative committed × current delta) so we can
+    /// map NHP-space slice geometry back into DICOM space for oblique sampling.
+    /// - Cumulative: baked history of all past commits (DICOM → baked space)
+    /// - Delta: current uncommitted preview (baked space → preview space)
+    /// - Total = cumulative × delta (CORRECT order for row-vector convention)
     /// </summary>
     private void GetInverseNhpTransform(out Matrix3D matrix)
     {
-        if (_nhpTransform == System.Windows.Media.Media3D.Transform3D.Identity)
+        // Total transform = cumulative baked history × current uncommitted delta
+        var deltaMatrix = _nhpTransform.Value;
+        bool isTotalIdentity = _cumulativeNhpMatrix.IsIdentity && deltaMatrix.IsIdentity;
+
+        if (isTotalIdentity)
         {
             matrix = Matrix3D.Identity;
             return;
         }
-        matrix = _nhpTransform.Value;
+
+        // Compose: cumulative first, then delta (row-vector convention: cumulative × delta)
+        matrix = _cumulativeNhpMatrix;
+        matrix.Append(deltaMatrix);
+
         if (matrix.HasInverse) matrix.Invert();
         else { matrix = Matrix3D.Identity; return; }
 
@@ -592,8 +605,8 @@ public partial class MainViewModel
 
 
     /// <summary>
-    /// Computes the axis-aligned bounding box of the volume after NHP rotation.
-    /// Used to size the MPR output bitmaps when NHP is active so nothing clips.
+    /// Computes the AABB of the volume after the TOTAL NHP transform (cumulative × delta).
+    /// Used to size the MPR output bitmaps so nothing clips during rotation.
     /// </summary>
     private void GetNhpVolumeBounds(out double minX, out double maxX, out double minY, out double maxY, out double minZ, out double maxZ)
     {
@@ -602,25 +615,30 @@ public partial class MainViewModel
             minX = maxX = minY = maxY = minZ = maxZ = 0;
             return;
         }
-        double w = Volume.Width * Volume.Spacing[0];
+        double w = Volume.Width  * Volume.Spacing[0];
         double h = Volume.Height * Volume.Spacing[1];
-        double d = Volume.Depth * Volume.Spacing[2];
-        var corners = new Point3D[]
-        {
-            new Point3D(0, 0, 0), new Point3D(w, 0, 0), new Point3D(0, h, 0), new Point3D(w, h, 0),
-            new Point3D(0, 0, d), new Point3D(w, 0, d), new Point3D(0, h, d), new Point3D(w, h, d),
-        };
-        if (_nhpTransform == System.Windows.Media.Media3D.Transform3D.Identity)
+        double d = Volume.Depth  * Volume.Spacing[2];
+
+        // Total transform = cumulative × delta (row-vector convention)
+        var totalMatrix = _cumulativeNhpMatrix;
+        totalMatrix.Append(_nhpTransform.Value);
+
+        if (totalMatrix.IsIdentity)
         {
             minX = 0; maxX = w; minY = 0; maxY = h; minZ = 0; maxZ = d;
             return;
         }
-        var matrix = _nhpTransform.Value;
+
+        var corners = new Point3D[]
+        {
+            new(0, 0, 0), new(w, 0, 0), new(0, h, 0), new(w, h, 0),
+            new(0, 0, d), new(w, 0, d), new(0, h, d), new(w, h, d),
+        };
         minX = maxX = minY = maxY = minZ = maxZ = 0;
         bool first = true;
         foreach (var p in corners)
         {
-            var tp = matrix.Transform(p);
+            var tp = totalMatrix.Transform(p);
             if (first) { minX = maxX = tp.X; minY = maxY = tp.Y; minZ = maxZ = tp.Z; first = false; continue; }
             minX = Math.Min(minX, tp.X); maxX = Math.Max(maxX, tp.X);
             minY = Math.Min(minY, tp.Y); maxY = Math.Max(maxY, tp.Y);

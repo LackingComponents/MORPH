@@ -12,6 +12,17 @@ public partial class MainViewModel
     public bool HasLeFort1Maxilla =>
         Segments.Any(s => s.Name?.Contains("Maxilla (LeFort 1 Separated)") == true && s.IsVisible);
 
+    /// <summary>
+    /// Ensures NHP is committed before any wizard that reads Vertices in DICOM space.
+    /// If the user has uncommitted NHP preview, auto-commits with a status note.
+    /// </summary>
+    private void EnsureNhpCommittedForWizard(string wizardName)
+    {
+        if (!IsNhpDirty) return;
+        CommitNhp();
+        StatusText = $"NHP auto-committed before {wizardName}. " + StatusText;
+    }
+
     [RelayCommand]
     private void PlanLeFort1()
     {
@@ -21,6 +32,7 @@ public partial class MainViewModel
             System.Windows.MessageBox.Show("Please isolate the Cranium segment first.", "Missing Segment", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
             return;
         }
+        EnsureNhpCommittedForWizard("LeFort 1 Osteotomy");
 
         var wizard = new LeFortOsteotomyWindow(MeshHelper.ToVertexList(cranium.Vertices));
         wizard.Owner = System.Windows.Application.Current.MainWindow;
@@ -75,6 +87,7 @@ public partial class MainViewModel
                 "No LeFort 1 Maxilla", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
             return;
         }
+        EnsureNhpCommittedForWizard("LeFort 1 Sagittal Cut");
 
         var wizard = new LeFort1SagittalCutWindow(MeshHelper.ToVertexList(maxSeg.Vertices));
         wizard.Owner = System.Windows.Application.Current.MainWindow;
@@ -122,6 +135,7 @@ public partial class MainViewModel
                 "No LeFort 1 Maxilla", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
             return;
         }
+        EnsureNhpCommittedForWizard("LeFort 1 Y-Cut");
 
         var wizard = new LeFort1YCutWindow(MeshHelper.ToVertexList(maxSeg.Vertices));
         wizard.Owner = System.Windows.Application.Current.MainWindow;
@@ -185,6 +199,7 @@ public partial class MainViewModel
             System.Windows.MessageBox.Show("Please generate the 3D model first.", "Missing Model", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
             return;
         }
+        EnsureNhpCommittedForWizard("Genioplasty");
 
         var wizard = new GenioplastyOsteotomyWindow(MeshHelper.ToVertexList(targetSeg.Vertices));
         wizard.Owner = System.Windows.Application.Current.MainWindow;
@@ -245,6 +260,7 @@ public partial class MainViewModel
                 System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
             return;
         }
+        EnsureNhpCommittedForWizard("BSSO");
 
         var wizard = new BssoOsteotomyWindow(MeshHelper.ToVertexList(inputVerts));
         wizard.Owner = System.Windows.Application.Current.MainWindow;
@@ -360,9 +376,11 @@ public partial class MainViewModel
                 SaveStateForUndo();
 
                 // Store condylar axis data & midline
-                LeftCondyleCenter  = wizard.LeftCondyleCenter;
-                RightCondyleCenter = wizard.RightCondyleCenter;
-                DentalMidlinePoint = wizard.DentalMidlinePoint;
+                // Wizard returns points in DICOM space. Bake cumulative NHP so they
+                // land in the same space as the already-committed mesh vertices.
+                LeftCondyleCenter  = TransformTuple(wizard.LeftCondyleCenter,  _cumulativeNhpMatrix);
+                RightCondyleCenter = TransformTuple(wizard.RightCondyleCenter, _cumulativeNhpMatrix);
+                DentalMidlinePoint = TransformTuple(wizard.DentalMidlinePoint, _cumulativeNhpMatrix);
 
                 // Create Cranium segment
                 if (wizard.CraniumResult != null && wizard.CraniumResult.Count > 0)

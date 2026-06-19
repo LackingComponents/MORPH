@@ -74,8 +74,17 @@ public partial class MainViewModel
                     Pitch = _cPitch,
                     Yaw   = _cYaw
                 },
+                // Hybrid NHP: Persist cumulative baked matrix (product of all committed deltas)
+                CumulativeNhpMatrix = MatrixToArray(_cumulativeNhpMatrix),
                 // Phase 1: Persist baked VolumePivot (stable rotation center across reslices)
-                VolumePivot = VolumePivot.HasValue ? new { X = VolumePivot.Value.X, Y = VolumePivot.Value.Y, Z = VolumePivot.Value.Z } : (object?)null
+                VolumePivot = VolumePivot.HasValue ? new { X = VolumePivot.Value.X, Y = VolumePivot.Value.Y, Z = VolumePivot.Value.Z } : (object?)null,
+                // Hybrid NHP: Persist anatomical landmarks (in baked NHP space after first commit)
+                CondyleCenters = new
+                {
+                    Left    = LeftCondyleCenter  == null ? null : (object)new { LeftCondyleCenter.Value.X,  LeftCondyleCenter.Value.Y,  LeftCondyleCenter.Value.Z },
+                    Right   = RightCondyleCenter == null ? null : (object)new { RightCondyleCenter.Value.X, RightCondyleCenter.Value.Y, RightCondyleCenter.Value.Z },
+                    Midline = DentalMidlinePoint == null ? null : (object)new { DentalMidlinePoint.Value.X, DentalMidlinePoint.Value.Y, DentalMidlinePoint.Value.Z }
+                }
             };
             var jsonEntry = zip.CreateEntry("project.json");
             using (var sw = new StreamWriter(jsonEntry.Open()))
@@ -273,15 +282,22 @@ public partial class MainViewModel
                             vol.Depth * vol.Spacing[2] / 2.0);
                     }
 
-                    // Phase 1: Restore committed NHP baseline (cumulative, relative to original DICOM)
+                    // Phase 1: Restore committed NHP baseline
                     if (root.TryGetProperty("NhpBaseline", out var nhpNode))
                     {
-                        _cLat  = nhpNode.GetProperty("Lat").GetDouble();
-                        _cAnt  = nhpNode.GetProperty("Ant").GetDouble();
-                        _cVert = nhpNode.GetProperty("Vert").GetDouble();
-                        _cRoll = nhpNode.GetProperty("Roll").GetDouble();
-                        _cPitch = nhpNode.GetProperty("Pitch").GetDouble();
-                        _cYaw  = nhpNode.GetProperty("Yaw").GetDouble();
+                        double ReadNhpDouble(System.Text.Json.JsonElement node, string key, double fallback = 0.0)
+                        {
+                            if (!node.TryGetProperty(key, out var el)) return fallback;
+                            double v = el.GetDouble();
+                            // V-2.1: NaN/Infinity guard — corrupt .orthoplan file protection
+                            return double.IsNaN(v) || double.IsInfinity(v) ? fallback : v;
+                        }
+                        _cLat   = ReadNhpDouble(nhpNode, "Lat");
+                        _cAnt   = ReadNhpDouble(nhpNode, "Ant");
+                        _cVert  = ReadNhpDouble(nhpNode, "Vert");
+                        _cRoll  = ReadNhpDouble(nhpNode, "Roll");
+                        _cPitch = ReadNhpDouble(nhpNode, "Pitch");
+                        _cYaw   = ReadNhpDouble(nhpNode, "Yaw");
 
                         // V-0.1: Clamp restored NHP values to safe limits (±200mm / ±45°)
                         bool clamped = false;
@@ -304,7 +320,7 @@ public partial class MainViewModel
                                 "NHP Values Clamped", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
                         }
 
-                        // Sync live sliders to the committed baseline so IsNhpDirty = false
+                        // Sync live sliders to committed baseline so IsNhpDirty = false
 #pragma warning disable MVVMTK0034 // Direct field access during bulk restore (avoid 6x UpdateNhpTransform)
                         _nhpLateral         = _cLat;
                         _nhpAnteroposterior = _cAnt;
@@ -321,18 +337,68 @@ public partial class MainViewModel
                         OnPropertyChanged(nameof(NhpPitch));
                         OnPropertyChanged(nameof(NhpYaw));
                         OnPropertyChanged(nameof(IsNhpDirty));
-
-                        // Re-apply the NHP transform and regenerate MPR slices
-                        // (direct field writes above bypass the source-generated setters,
-                        //  so the partial OnChanged methods never fire)
-                        UpdateNhpTransform();
-                        UpdateAllSlices();
                     }
-                }
-            }
 
-            // 3. Read imported meshes
+                    // Hybrid NHP: Restore cumulative baked matrix
+                    if (root.TryGetProperty("CumulativeNhpMatrix", out var cumNode))
+                    {
+                        var matD = new double[16];
+                        int di = 0;
+                        foreach (var v in cumNode.EnumerateArray())
+                        {
+                            double val = v.GetDouble();
+                            matD[di++] = double.IsNaN(val) || double.IsInfinity(val) ? (di == 1 || di == 6 || di == 11 || di == 16 ? 1.0 : 0.0) : val;
+                        }
+                        if (di == 16)
+                            _cumulativeNhpMatrix = new System.Windows.Media.Media3D.Matrix3D(
+                                matD[0],  matD[1],  matD[2],  matD[3],
+                                matD[4],  matD[5],  matD[6],  matD[7],
+                                matD[8],  matD[9],  matD[10], matD[11],
+                                matD[12], matD[13], matD[14], matD[15]);
+                        else
+                            _cumulativeNhpMatrix = System.Windows.Media.Media3D.Matrix3D.Identity;
+                    }
+                    else
+                    {
+                        // Backward compatibility: old project saved with visual-only NHP (no cumulative matrix).
+                        // Vertices are still in DICOM space. Compute the cumulative matrix from the baseline
+                        // so any NEW objects added later get auto-baked correctly.
+                        // VolumePivot must be set before this call (restored above).
+                        bool hasBaseline = _cLat != 0 || _cAnt != 0 || _cVert != 0 ||
+                                           _cRoll != 0 || _cPitch != 0 || _cYaw != 0;
+                        _cumulativeNhpMatrix = hasBaseline
+                            ? BuildNhpMatrix(_cLat, _cAnt, _cVert, _cRoll, _cPitch, _cYaw)
+                            : System.Windows.Media.Media3D.Matrix3D.Identity;
+                    }
+
+                    // Hybrid NHP: Restore anatomical landmarks (in baked NHP space)
+                    if (root.TryGetProperty("CondyleCenters", out var ccNode))
+                    {
+                        static (double X, double Y, double Z)? ReadPoint(System.Text.Json.JsonElement parent, string key)
+                        {
+                            if (!parent.TryGetProperty(key, out var node)) return null;
+                            if (node.ValueKind == System.Text.Json.JsonValueKind.Null) return null;
+                            return (node.GetProperty("X").GetDouble(),
+                                    node.GetProperty("Y").GetDouble(),
+                                    node.GetProperty("Z").GetDouble());
+                        }
+                        LeftCondyleCenter  = ReadPoint(ccNode, "Left");
+                        RightCondyleCenter = ReadPoint(ccNode, "Right");
+                        DentalMidlinePoint = ReadPoint(ccNode, "Midline");
+                    }
+
+                    // Re-apply the NHP transform and regenerate MPR slices
+                    UpdateNhpTransform();
+                    UpdateAllSlices();
+                } // end if (volEntry != null)
+            } // end if (volMeta != Null)
+
+            // 3. Read imported meshes — SuppressLedgerBake prevents double-baking restored vertices
+            SuppressLedgerBake = true;
+            try
+            {
             ImportedMeshes.Clear();
+
             var meshesArr = root.GetProperty("ImportedMeshes");
             int meshIdx = 0;
             foreach (var meshMeta in meshesArr.EnumerateArray())
@@ -403,6 +469,12 @@ public partial class MainViewModel
                     segIdx++;
                 }
             }
+
+            } // end SuppressLedgerBake try
+            finally { SuppressLedgerBake = false; }
+
+            // Apply visual delta (Identity at this point since sliders == baseline) and refresh
+            UpdateNhpTransform();
 
             // 5. (Issue 11) Read occlusion meshes + their alignment transforms
             LoadedOcclusions.Clear();
@@ -476,6 +548,7 @@ public partial class MainViewModel
             StatusText = $"Project loaded: {Path.GetFileName(dialog.FileName)}";
         }
         catch (Exception ex)
+
         {
             StatusText = $"Open failed: {ex.Message}";
         }
