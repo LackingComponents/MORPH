@@ -349,22 +349,13 @@ public partial class MainViewModel
 
             if (splitTargetVolume == null)
             {
-                StatusText = "Bone mask is out of date after NHP. Recomputing bone model...";
-                await RunSegmentInternalAsync("Bone", BoneMinHU, BoneMaxHU, 230, 210, 180,
-                    HardTissueModel, enhanceThinBone: EnhanceSegmentation, confirmOverwrite: false);
-
-                boneSegment = HardTissueModel;
-                splitTargetVolume = boneSegment != null ? GetValidSplitTargetVolume(boneSegment.Label) : null;
-
-                if (boneSegment?.Vertices == null || boneSegment.Vertices.Length < 100 || splitTargetVolume == null)
-                {
-                    System.Windows.MessageBox.Show(
-                        "The current bone segmentation mask could not be regenerated for the NHP CT volume. Please recompute the bone model manually before splitting.",
-                        "Bone Segmentation Required", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
-                    StatusText = "Cranium/Mandible split requires a valid bone segmentation for the current NHP volume.";
-                    return;
-                }
+                System.Windows.MessageBox.Show(
+                    "No valid bone segmentation mask found. Please run bone segmentation before splitting.",
+                    "Bone Segmentation Required", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+                StatusText = "Cranium/Mandible split requires a valid bone segmentation mask.";
+                return;
             }
+
 
             var wizard = new CondyleSplitWindow(
                 MeshHelper.ToVertexList(boneSegment.Vertices),
