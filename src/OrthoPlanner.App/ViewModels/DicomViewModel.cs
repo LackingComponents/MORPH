@@ -309,6 +309,10 @@ public partial class MainViewModel
         if (invNhp.IsIdentity)
         {
             _nhpBoundsMinX = _nhpBoundsMaxX = _nhpBoundsMinY = _nhpBoundsMaxY = _nhpBoundsMinZ = _nhpBoundsMaxZ = null;
+            // Restore original proportional display heights
+            AxialDisplayHeight    = new System.Windows.GridLength(Volume.Height * Volume.Spacing[1], System.Windows.GridUnitType.Star);
+            CoronalDisplayHeight  = new System.Windows.GridLength(Volume.Depth  * Volume.Spacing[2], System.Windows.GridUnitType.Star);
+            SagittalDisplayHeight = new System.Windows.GridLength(Volume.Depth  * Volume.Spacing[2], System.Windows.GridUnitType.Star);
         }
         else
         {
@@ -316,6 +320,10 @@ public partial class MainViewModel
             _nhpBoundsMinX = minX; _nhpBoundsMaxX = maxX;
             _nhpBoundsMinY = minY; _nhpBoundsMaxY = maxY;
             _nhpBoundsMinZ = minZ; _nhpBoundsMaxZ = maxZ;
+            // Update display heights to match NHP-padded extents for uniform cranium scale
+            AxialDisplayHeight    = new System.Windows.GridLength(maxY - minY, System.Windows.GridUnitType.Star);
+            CoronalDisplayHeight  = new System.Windows.GridLength(maxZ - minZ, System.Windows.GridUnitType.Star);
+            SagittalDisplayHeight = new System.Windows.GridLength(maxZ - minZ, System.Windows.GridUnitType.Star);
         }
 
         UpdateAxialSlice(invNhp);

@@ -505,7 +505,9 @@ public partial class MainWindow : Window
         // Compute the Uniform-stretch image render rect (same logic as DrawCrosshairPhysical)
         double hRange = hMax - hMin;
         double vRange = vMax - vMin;
-        double physAspect = hRange / vRange;
+        if (Math.Abs(hRange) < 1e-6 || Math.Abs(vRange) < 1e-6) return;
+        // Absolute values for aspect ratio — V-axis is flipped (negative vRange) for coronal/sagittal
+        double physAspect = Math.Abs(hRange) / Math.Abs(vRange);
         double containerAspect = cw / ch;
         double imgW, imgH, offX, offY;
         if (physAspect > containerAspect)
@@ -716,10 +718,10 @@ public partial class MainWindow : Window
 
         double hRange = hMax - hMin;
         double vRange = vMax - vMin;
-        if (hRange <= 0 || vRange <= 0) return;
+        if (Math.Abs(hRange) < 1e-6 || Math.Abs(vRange) < 1e-6) return;
 
-        // Physical aspect ratio of the NHP-padded bitmap
-        double physAspect = hRange / vRange;
+        // Physical aspect ratio (absolute values to handle flipped V-axis in coronal/sagittal)
+        double physAspect = Math.Abs(hRange) / Math.Abs(vRange);
         double containerAspect = cw / ch;
 
         // Uniform stretch: image fills one axis, letterbox on the other
