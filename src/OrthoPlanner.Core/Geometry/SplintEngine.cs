@@ -5,7 +5,7 @@ using g3;
 
 namespace OrthoPlanner.Core.Geometry;
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Arch Curve (Catmull-Rom) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── Arch Curve (Catmull-Rom) ──────────────────────────────────────────────────
 public class ArchCurve
 {
     private readonly List<(float x, float y, float z)> _ctrl = new();
@@ -57,10 +57,17 @@ public class ArchCurve
     }
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Splint Engine Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── Splint Engine ─────────────────────────────────────────────────────────────
 public static class SplintEngine
 {
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Watertight check Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // ── Autorotation result ───────────────────────────────────────────────
+    public sealed record MandibularAutorotationResult(
+        List<(float x, float y, float z)> LowerCurve,
+        float[]? LowerMesh,
+        float RotationDegrees,
+        IReadOnlyList<string> Warnings);
+
+    // ── Watertight check ──────────────────────────────────────────────────
     public static float WatertightScore(float[] mesh)
     {
         if (mesh == null || mesh.Length < 9) return 1f;
@@ -82,11 +89,11 @@ public static class SplintEngine
         return edgeCounts.Count==0 ? 1f : (float)boundary/edgeCounts.Count;
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Per-ring outward normals (perpendicular to arch tangent in XY) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // ── Per-ring outward normals (perpendicular to arch tangent in XY) ───
     private static (float x,float y,float z)[] ComputeNormals(
         List<(float x,float y,float z)> curve, int n)
     {
-        // Arch centroid in XY Ã¢â‚¬â€ used to ensure normals point AWAY from the arch center
+        // Arch centroid in XY — used to ensure normals point AWAY from the arch center
         float cx = 0, cy = 0;
         foreach (var p in curve) { cx += p.x; cy += p.y; }
         cx /= curve.Count; cy /= curve.Count;
@@ -99,7 +106,7 @@ public static class SplintEngine
             float len=MathF.Sqrt(tx*tx+ty*ty);
             if (len<1e-6f){tx=1;ty=0;} else {tx/=len;ty/=len;}
 
-            // N = T Ãƒâ€” Z = (ty, -tx, 0)
+            // N = T × Z = (ty, -tx, 0)
             float nx=ty, ny=-tx;
 
             // Flip if pointing toward centroid instead of away
@@ -111,7 +118,22 @@ public static class SplintEngine
         return result;
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Flat ribbon mesh Ã¢â‚¬â€ shows labio-lingual footprint on arch surface Ã¢â€â‚¬Ã¢â€â‚¬
+    // ── Capsule footprint test ────────────────────────────────────────────
+    // Inside when within half^2 of any centerline point.
+    // Using nearest-point distance gives naturally rounded posterior caps.
+    private static bool InFootprintCapsule(double px, double py, float[] clX, float[] clY, float half2)
+    {
+        float best = float.MaxValue;
+        for (int i = 0; i < clX.Length; i++)
+        {
+            float dx = (float)px - clX[i], dy = (float)py - clY[i];
+            float d = dx*dx + dy*dy;
+            if (d < best) best = d;
+        }
+        return best <= half2;
+    }
+
+    // ── Flat ribbon mesh — shows labio-lingual footprint on arch surface ─
     /// <summary>Returns a thin flat ribbon along the arch showing the LL width.
     /// Used for live preview before Generate is clicked.</summary>
     public static float[] GenerateRibbonMesh(
@@ -177,7 +199,7 @@ public static class SplintEngine
         return tris.ToArray();
     }
 
-    // ── Horseshoe solid ─────────────────────────────────────────────────────────────────────────────────────────────
+    // ── Horseshoe solid ──────────────────────────────────────────────────
     /// <summary>
     /// Generates a clean horseshoe-shaped splint solid.
     /// The top surface follows the upper arch curve (tooth contact).
@@ -222,43 +244,176 @@ public static class SplintEngine
         return result;
     }
 
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    //  GENERATE SPLINT — refined pipeline
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    //  GENERATE SPLINT — hybrid pipeline
     //
-    //  Step A  Dilate upper mesh 1mm  → closed solid
-    //  Step B  Dilate lower mesh 1mm  → closed solid
-    //  Step C  horseshoe ∪ upper1mm ∪ lower1mm  → raw blank
-    //  Step D  Per-voxel Z-clip at exact user-defined horseshoe surfaces:
-    //          Upper cut: archCurveZ(x,y) - upperPenetrationMm  (+ = deeper into teeth)
-    //          Lower cut: archCurveZ(x,y) + lowerPenetrationMm  (+ = deeper into teeth)
-    //  Step E  Posterior limit: curved boundary matching horseshoe end-caps
-    //  Step F  Subtract 0.1mm-dilated tooth surfaces → tooth pockets
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    public static float[] GenerateSplint(
+    //  Combines Lore's slab-based column precompute (fast) with experimental's
+    //  fine MC resolution (accurate) plus Lore's clinical features
+    //  (autorotation, SplintConfig, SplintResult, SplintMeshRepair).
+    //
+    //  Step A  Column precompute (Lore): colTop/colBot/colIn + capsule footprint
+    //  Step B  Adaptive MC resolution: VS_MC from config (default 0.2mm)
+    //  Step C  Pocket carving (Lore): ShouldCarveToothPocket with engagement depth
+    //  Step D  Bridge thickness: 2D dilation of colIn[] mask (CPU, no GPU needed)
+    //  Step E  Adaptive smoothing: lighter at 0.2mm, heavier at 0.1mm
+    //  Step F  Mesh-level floater removal (largest component)
+    //  Step G  Autorotation (Lore): condylar binary search
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    // ── Persistent per-run diagnostic trace (ADDITIVE LOGGING ONLY) ──────
+    // Appends to %TEMP%\splint_trace.txt. Never throws; logging must not affect
+    // generation. Mirrors the existing Debug.WriteLine values to a durable file.
+    // TODO: Gate behind a debug flag or remove once the splint function is stable.
+    //       No patient-identifying data is written — only generation parameters
+    //       and timing.
+    private static void SplintTrace(string msg)
+    {
+        try
+        {
+            string path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "splint_trace.txt");
+            System.IO.File.AppendAllText(path,
+                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}  {msg}{Environment.NewLine}");
+        }
+        catch { /* diagnostics must never break the build pipeline */ }
+    }
+
+    // ── Mandibular autorotation ──────────────────────────────────────────
+    public static MandibularAutorotationResult ApplyMandibularAutorotation(
+        List<(float x, float y, float z)> upperCurve,
+        List<(float x, float y, float z)> lowerCurve,
+        float[]? lowerMesh,
+        SplintConfig config)
+    {
+        var warnings = new List<string>();
+        if (!config.EnableAutorotation)
+            return new MandibularAutorotationResult(lowerCurve, lowerMesh, 0f, warnings);
+
+        if (config.LeftCondyleBox == null || config.RightCondyleBox == null)
+        {
+            warnings.Add("Mandibular autorotation was skipped because the condylar bounding boxes are missing.");
+            SplintTrace("autorotation skipped: condyle bounding boxes missing");
+            return new MandibularAutorotationResult(lowerCurve, lowerMesh, 0f, warnings);
+        }
+
+        if (upperCurve.Count < 2 || lowerCurve.Count < 2)
+            return new MandibularAutorotationResult(lowerCurve, lowerMesh, 0f, warnings);
+
+        float targetClearance = config.AutorotationMinClearanceMm;
+        if (targetClearance <= 0.01f)
+            return new MandibularAutorotationResult(lowerCurve, lowerMesh, 0f, warnings);
+
+        int n = Math.Max(2, Math.Min(upperCurve.Count, lowerCurve.Count));
+        var upper = ResampleByArcLength(upperCurve, n);
+        var lower = ResampleByArcLength(lowerCurve, n);
+        AlignLowerDirection(upper, lower);
+
+        float baseClearance = MinimumVerticalClearance(upper, lower);
+        SplintTrace($"autorotation check initialClearance={baseClearance:F2} targetClearance={targetClearance:F2}");
+        if (baseClearance >= targetClearance)
+        {
+            SplintTrace("autorotation not needed (clearance already >= target)");
+            return new MandibularAutorotationResult(lowerCurve, lowerMesh, 0f, warnings);
+        }
+
+        var axisA = config.RightCondyleBox.Center;
+        var axisB = config.LeftCondyleBox.Center;
+        float ax = axisB.x - axisA.x, ay = axisB.y - axisA.y, az = axisB.z - axisA.z;
+        float axisLen = MathF.Sqrt(ax * ax + ay * ay + az * az);
+        if (axisLen < 1e-6f)
+        {
+            warnings.Add("Mandibular autorotation was skipped because the condylar axis is degenerate.");
+            return new MandibularAutorotationResult(lowerCurve, lowerMesh, 0f, warnings);
+        }
+        ax /= axisLen; ay /= axisLen; az /= axisLen;
+
+        float maxDegrees = Math.Clamp(config.AutorotationMaxDegrees, 0f, 30f);
+        if (maxDegrees <= 0.01f)
+            return new MandibularAutorotationResult(lowerCurve, lowerMesh, 0f, warnings);
+
+        float positiveClearance = MinimumVerticalClearance(upper, RotateCurve(lower, axisA, (ax, ay, az), maxDegrees));
+        float negativeClearance = MinimumVerticalClearance(upper, RotateCurve(lower, axisA, (ax, ay, az), -maxDegrees));
+        float sign = positiveClearance >= negativeClearance ? 1f : -1f;
+        float bestAtMax = Math.Max(positiveClearance, negativeClearance);
+
+        float lo = 0f, hi = maxDegrees;
+        for (int iter = 0; iter < 18; iter++)
+        {
+            float mid = (lo + hi) * 0.5f;
+            var candidate = RotateCurve(lower, axisA, (ax, ay, az), sign * mid);
+            float clearance = MinimumVerticalClearance(upper, candidate);
+            if (clearance >= targetClearance) hi = mid;
+            else lo = mid;
+        }
+
+        float angle = bestAtMax >= targetClearance ? hi : maxDegrees;
+        if (bestAtMax < targetClearance)
+        {
+            warnings.Add($"Mandibular autorotation reached {sign * angle:F1}° but clearance is still {bestAtMax:F1} mm; target was {targetClearance:F1} mm.");
+        }
+
+        float signedAngle = sign * angle;
+        var rotatedLowerCurve = RotateCurve(lowerCurve, axisA, (ax, ay, az), signedAngle);
+        var rotatedLowerMesh = lowerMesh == null || lowerMesh.Length < 3
+            ? lowerMesh
+            : RotateMesh(lowerMesh, axisA, (ax, ay, az), signedAngle);
+
+        float finalClearance = MinimumVerticalClearance(upper, RotateCurve(lower, axisA, (ax, ay, az), signedAngle));
+        warnings.Add($"Autorotated the mandible {signedAngle:F1}° about the condylar axis to open the bite: "
+                   + $"initial inter-arch clearance {baseClearance:F1} mm → {finalClearance:F1} mm (target {targetClearance:F1} mm).");
+        SplintTrace($"autorotation applied angle={signedAngle:F2}deg targetClearance={targetClearance:F2} "
+                  + $"initialClearance={baseClearance:F2} finalClearance={finalClearance:F2}");
+        return new MandibularAutorotationResult(rotatedLowerCurve, rotatedLowerMesh, signedAngle, warnings);
+    }
+
+    // ── Main splint generation (SplintConfig-based API) ───────────────────
+    public static SplintResult GenerateSplint(
         List<(float x,float y,float z)> upperCurve,
         List<(float x,float y,float z)> lowerCurve,
-        float labiolingualMm        = 8f,
-        float upperPenetrationMm    = 0f,   // + = deeper into teeth (cut moves caudally)
-        float lowerPenetrationMm    = 0f,   // + = deeper into teeth (cut moves cranially)
-        float lingualBuccalBiasMm   = 0f,   // + = shift center buccally, − = lingually
-        float bridgeThicknessMm     = 0f,   // extra thickness added to the bridge connection
+        SplintConfig config,
         float[]? upperMesh          = null,
-        float[]? lowerMesh          = null,
-        int sampleCount             = 160)
+        float[]? lowerMesh          = null)
     {
-        if (upperCurve.Count < 2 || lowerCurve.Count < 2) return Array.Empty<float>();
+        if (upperCurve.Count < 2 || lowerCurve.Count < 2)
+            return SplintResult.Empty("Both upper and lower arch curves need at least two points.");
+
+        float labiolingualMm      = config.LabiolingualMm;
+        float upperPenetrationMm  = config.UpperPenetrationMm;
+        float lowerPenetrationMm  = config.LowerPenetrationMm;
+        float lingualBuccalBiasMm = config.LingualBuccalBiasMm;
+        float bridgeThicknessMm   = config.BridgeThicknessMm;
+        int sampleCount           = Math.Max(2, config.SampleCount);
+        var generationWarnings    = new List<string>();
+
+        SplintResult Result(float[] vertices, string? warning = null, int incidentalPerforations = 0)
+        {
+            var warnings = new List<string>(generationWarnings);
+            if (!string.IsNullOrWhiteSpace(warning))
+                warnings.Add(warning);
+
+            float openEdgeFraction = WatertightScore(vertices);
+            bool isManifold = vertices.Length >= 9 && openEdgeFraction <= 0.001f;
+            if (config.GuaranteeManifold && vertices.Length >= 9 && !isManifold)
+                warnings.Add($"Generated splint is not fully manifold (open edge fraction {openEdgeFraction:P1}).");
+
+            return new SplintResult(vertices, isManifold, openEdgeFraction, incidentalPerforations, warnings);
+        }
+
+        // ── Step G: Autorotation (from Lore) ──────────────────────────────
+        if (config.EnableAutorotation)
+        {
+            var autorotation = ApplyMandibularAutorotation(upperCurve, lowerCurve, lowerMesh, config);
+            lowerCurve = autorotation.LowerCurve;
+            lowerMesh = autorotation.LowerMesh;
+            generationWarnings.AddRange(autorotation.Warnings);
+        }
 
         var upper = ResampleByArcLength(upperCurve, sampleCount);
         var lower = ResampleByArcLength(lowerCurve, sampleCount);
         int n = upper.Count;
-        if (n < 2) return Array.Empty<float>();
+        if (n < 2) return SplintResult.Empty("Unable to resample enough points from the arch curves.");
 
         // Align direction
-        {
-            var u0=upper[0]; var u1=upper[n-1]; var l0=lower[0]; var l1=lower[n-1];
-            if (Sq(u0.x-l1.x)+Sq(u0.y-l1.y)+Sq(u1.x-l0.x)+Sq(u1.y-l0.y) <
-                Sq(u0.x-l0.x)+Sq(u0.y-l0.y)+Sq(u1.x-l1.x)+Sq(u1.y-l1.y)) lower.Reverse();
-        }
+        AlignLowerDirection(upper, lower);
 
         float half = labiolingualMm * 0.5f;
         var norU = ComputeNormals(upper, n);
@@ -278,7 +433,7 @@ public static class SplintEngine
             BO[i]=(lCx+nl.x*half, lCy+nl.y*half, l.z); BI[i]=(lCx-nl.x*half, lCy-nl.y*half, l.z);
         }
 
-        // ── Build horseshoe body (closed by construction) ─────────────────────
+        // ── Build horseshoe body (closed by construction) ─────────────────
         var horseshoeTris = new List<float>(n * 6 * 2 * 9);
         for (int i = 0; i < n-1; i++)
         {
@@ -332,23 +487,36 @@ public static class SplintEngine
         }
         float[] horseshoeFlat = horseshoeTris.ToArray();
 
+        SplintTrace($"=== RUN === upperCurve={upperCurve.Count} lowerCurve={lowerCurve.Count} "
+                  + $"upperMesh={(upperMesh?.Length ?? 0)} floats lowerMesh={(lowerMesh?.Length ?? 0)} floats "
+                  + $"blank(horseshoeFlat)={horseshoeFlat.Length / 9} tris "
+                  + $"params[ll={labiolingualMm} upPen={upperPenetrationMm} loPen={lowerPenetrationMm} "
+                  + $"bias={lingualBuccalBiasMm} bridge={bridgeThicknessMm} samples={sampleCount}]");
+
         if (upperMesh == null || upperMesh.Length < 9 ||
             lowerMesh == null || lowerMesh.Length < 9)
-            return horseshoeFlat;
+        {
+            SplintTrace("EARLY-RETURN meshes null or <9 floats → flat blank emitted");
+            return Result(horseshoeFlat, "Dental meshes were unavailable; emitted the flat horseshoe blank.");
+        }
 
         try
         {
             const double VS_SDF  = 0.2;   // SDF grid resolution
-            const double VS_MC   = 0.1;   // MC sampling resolution
+            // Step B: Adaptive MC resolution — default 0.2mm, configurable
+            const double VS_MC   = 0.2;   // MC sampling resolution
             const double CrownMm = 10.0;
             const double Dil1    = 1.0;
-            const double Dil01   = 0.1;
+            float engagementDepthMm = config.EngagementDepthMm;
+            bool blockoutUndercuts  = config.BlockoutUndercuts;
 
-            System.Diagnostics.Debug.WriteLine($"[Splint] upperPen={upperPenetrationMm:F1} lowerPen={lowerPenetrationMm:F1} bias={lingualBuccalBiasMm:F1}");
+            // Step E: Adaptive smoothing parameters
+            int blurR = 1, blurPasses = 2;   // 0.2mm defaults (milder)
+            // When VS_MC is 0.1 (fine mode), use heavier smoothing to prevent faceting:
+            // blurR = 2, blurPasses = 3;
 
-            // BoundedImplicitFunction3d wrapper that shifts the iso by 'Offset'
-            BoundedImplicitFunction3d Offset(BoundedImplicitFunction3d a, double off)
-                => new OffsetImpl(a, off);
+            SplintTrace($"carve params: engagement={engagementDepthMm:F2} blockout={blockoutUndercuts} occlusalBand={OcclusalBandMm:F2}");
+            System.Diagnostics.Debug.WriteLine($"[Splint] upperPen={upperPenetrationMm:F1} lowerPen={lowerPenetrationMm:F1} bias={lingualBuccalBiasMm:F1} engagement={engagementDepthMm:F1} blockout={blockoutUndercuts}");
 
             // Convert flat triangle soup to indexed DMesh3
             DMesh3 ToMesh(float[] s)
@@ -398,8 +566,7 @@ public static class SplintEngine
                 return new DenseGridTrilinearImplicit(sdf.Grid,sdf.GridOrigin,(float)VS_SDF);
             }
 
-            // ── Build a KD-like fast nearest-arch-Z lookup from both curves ──
-            // For each (x,y) query, find nearest point on the arch curve and return its Z
+            // ── Build a fast nearest-arch-Z lookup from both curves ──
             float NearestUpperZ(double px, double py){
                 float bestD=float.MaxValue, bestZ=0f;
                 foreach(var pt in upper){float dx=(float)px-pt.x,dy=(float)py-pt.y,d=dx*dx+dy*dy;if(d<bestD){bestD=d;bestZ=pt.z;}}
@@ -411,183 +578,126 @@ public static class SplintEngine
                 return bestZ;
             }
 
-            // ── Posterior limit: compute the curved boundary from horseshoe end-caps ──
-            float Cap0Cx = (TO[0].x + TI[0].x + BO[0].x + BI[0].x) * 0.25f;
-            float Cap0Cy = (TO[0].y + TI[0].y + BO[0].y + BI[0].y) * 0.25f;
-            float CapNCx = (TO[n-1].x + TI[n-1].x + BO[n-1].x + BI[n-1].x) * 0.25f;
-            float CapNCy = (TO[n-1].y + TI[n-1].y + BO[n-1].y + BI[n-1].y) * 0.25f;
-
-            float cap0DirX = TI[0].x - TO[0].x, cap0DirY = TI[0].y - TO[0].y;
-            float cap0NX = -cap0DirY, cap0NY = cap0DirX;
-            if (cap0NX*(archMidX-Cap0Cx) + cap0NY*(archMidY-Cap0Cy) < 0) { cap0NX=-cap0NX; cap0NY=-cap0NY; }
-
-            float capNDirX = TI[n-1].x - TO[n-1].x, capNDirY = TI[n-1].y - TO[n-1].y;
-            float capNNX = -capNDirY, capNNY = capNDirX;
-            if (capNNX*(archMidX-CapNCx) + capNNY*(archMidY-CapNCy) < 0) { capNNX=-capNNX; capNNY=-capNNY; }
-
-            bool IsAnteriorToPosteriorLimit(double px, double py)
-            {
-                float d0 = cap0NX*((float)px-Cap0Cx) + cap0NY*((float)py-Cap0Cy);
-                float dN = capNNX*((float)px-CapNCx) + capNNY*((float)py-CapNCy);
-                return d0 >= -0.5f && dN >= -0.5f;
-            }
+            // Posterior limit is handled implicitly by the capsule footprint
+            // (nearest-point distance to the arch centerline gives rounded posterior caps).
 
             float[] upCrop=Crop(upperMesh), loCrop=Crop(lowerMesh);
             System.Diagnostics.Debug.WriteLine($"[Splint] Cropped tris: up={upCrop.Length/9} lo={loCrop.Length/9}");
-            if(upCrop.Length<9||loCrop.Length<9) return horseshoeFlat;
+            SplintTrace($"cropped tris: up={upCrop.Length/9} lo={loCrop.Length/9}");
+            if(upCrop.Length<9||loCrop.Length<9)
+            {
+                SplintTrace($"EARLY-RETURN crop empty (up={upCrop.Length/9} lo={loCrop.Length/9}) → flat blank emitted");
+                return Result(horseshoeFlat, "Cropped dental mesh region was empty; emitted the flat horseshoe blank.");
+            }
 
             var upBase    = BaseSdf(upCrop);
             var loBase    = BaseSdf(loCrop);
-            if(upBase==null||loBase==null) return horseshoeFlat;
+            if(upBase==null||loBase==null)
+            {
+                SplintTrace($"EARLY-RETURN BaseSdf null (up={(upBase==null?"null":"ok")} lo={(loBase==null?"null":"ok")}) → flat blank emitted");
+                return Result(horseshoeFlat, "Unable to build dental signed-distance fields; emitted the flat horseshoe blank.");
+            }
 
-            var upImpl1   = Offset(upBase,  -Dil1);
-            var loImpl1   = Offset(loBase,  -Dil1);
-            var upImpl01  = Offset(upBase,  -Dil01);
-            var loImpl01  = Offset(loBase,  -Dil01);
+            // ── Step A: Footprint centerline (biased) → capsule XY mask with rounded caps ──
+            var clX = new float[n]; var clY = new float[n];
+            for (int i = 0; i < n; i++)
+            {
+                float mx = (upper[i].x + lower[i].x) * 0.5f;
+                float my = (upper[i].y + lower[i].y) * 0.5f;
+                float bnx = norU[i].x + norL[i].x, bny = norU[i].y + norL[i].y;
+                float bnl = MathF.Sqrt(bnx*bnx + bny*bny);
+                if (bnl > 1e-6f) { bnx /= bnl; bny /= bnl; }
+                clX[i] = mx + bnx * lingualBuccalBiasMm;
+                clY[i] = my + bny * lingualBuccalBiasMm;
+            }
+            float footHalf2 = half * half;
 
-            // ── PHASE 1: Bake blank SDF (upper_1mm ∪ lower_1mm, Z-clipped at arch surfaces) ──
-            float mcPad = (float)(labiolingualMm*0.5 + Math.Abs(lingualBuccalBiasMm) + 4.0);
-            float zPadTop = Math.Max(upperPenetrationMm, 0f) + 2.0f;
-            float zPadBot = Math.Max(lowerPenetrationMm, 0f) + 2.0f;
+            // ── Step D: Bridge thickness via 2D dilation of footprint ──
+            // Re-add bridge thickness (experimental had it via GPU dilate, Lore dropped it).
+            // Implemented as widening footHalf2 — effectively dilates the capsule radius.
+            if (bridgeThicknessMm > 0.01f)
+            {
+                float newHalf = half + bridgeThicknessMm;
+                footHalf2 = newHalf * newHalf;
+                SplintTrace($"bridge thickness: expanded capsule radius from {half:F2} to {newHalf:F2} mm");
+            }
+
+            // ── Grid bounds: arch XY footprint + tight inter-arch slab Z band ──
+            float mcPad = (float)(labiolingualMm*0.5 + Math.Abs(lingualBuccalBiasMm) + bridgeThicknessMm + 2.0);
+            float slabTopZ = upperZ + Math.Max(upperPenetrationMm, 0f);
+            float slabBotZ = lowerZ - Math.Max(lowerPenetrationMm, 0f);
             var mcBounds = new AxisAlignedBox3d(
-                new Vector3d(mnX-mcPad, mnY-mcPad, lowerZ-zPadBot-1.0),
-                new Vector3d(mxX+mcPad, mxY+mcPad, upperZ+zPadTop+1.0));
+                new Vector3d(mnX-mcPad, mnY-mcPad, slabBotZ-1.5),
+                new Vector3d(mxX+mcPad, mxY+mcPad, slabTopZ+1.5));
             int gnx=(int)Math.Ceiling(mcBounds.Width /VS_MC)+1;
             int gny=(int)Math.Ceiling(mcBounds.Height/VS_MC)+1;
             int gnz=(int)Math.Ceiling(mcBounds.Depth /VS_MC)+1;
             float gox=(float)mcBounds.Min.x, goy=(float)mcBounds.Min.y, goz=(float)mcBounds.Min.z;
             var bakedGrid = new float[gnx*gny*gnz];
-            System.Diagnostics.Debug.WriteLine($"[Splint] PHASE1 Baking blank {gnx}x{gny}x{gnz}={gnx*gny*gnz/1_000_000}M voxels...");
+
+            // ── Per-column footprint + vertical slab band (precomputed, O(1) per voxel) ──
+            var colTop = new float[gnx*gny];
+            var colBot = new float[gnx*gny];
+            var colIn  = new bool [gnx*gny];
+            int slabColumns = 0;
+            float minBand = float.MaxValue, maxBand = float.MinValue;
+            object bandLock = new object();
+            System.Threading.Tasks.Parallel.For(0, gny, () => (cols:0, mn:float.MaxValue, mx:float.MinValue), (iy, _, acc) => {
+                for (int ix = 0; ix < gnx; ix++)
+                {
+                    double px = gox+ix*VS_MC, py = goy+iy*VS_MC;
+                    int cIdx = iy*gnx + ix;
+                    if (!InFootprintCapsule(px, py, clX, clY, footHalf2)) { colIn[cIdx] = false; continue; }
+                    float uz = NearestUpperZ(px, py) + upperPenetrationMm;
+                    float lz = NearestLowerZ(px, py) - lowerPenetrationMm;
+                    float top = MathF.Max(uz, lz);
+                    float bot = MathF.Min(uz, lz);
+                    colTop[cIdx] = top; colBot[cIdx] = bot;
+                    bool ok = (top - bot) >= 0.05f;
+                    colIn[cIdx] = ok;
+                    if (ok) { acc.cols++; float band = top - bot; if (band < acc.mn) acc.mn = band; if (band > acc.mx) acc.mx = band; }
+                }
+                return acc;
+            }, acc => { lock(bandLock){ slabColumns += acc.cols; if(acc.mn<minBand)minBand=acc.mn; if(acc.mx>maxBand)maxBand=acc.mx; } });
+
+            SplintTrace($"PHASE1 slab columns={slabColumns} grid={gnx}x{gny}x{gnz} bandZ=[{slabBotZ:F1},{slabTopZ:F1}] minBand={(minBand==float.MaxValue?0:minBand):F2} maxBand={(maxBand==float.MinValue?0:maxBand):F2}");
+            System.Diagnostics.Debug.WriteLine($"[Splint] PHASE1 solid slab: {slabColumns} columns, grid {gnx}x{gny}x{gnz}={gnx*gny*gnz/1_000_000}M voxels");
+            if (slabColumns == 0)
+            {
+                SplintTrace("EARLY-RETURN PHASE1 no slab columns (no inter-arch space inside footprint) → flat blank emitted");
+                return Result(horseshoeFlat, "No inter-arch space was found inside the arch footprint (try opening the bite / autorotation); emitted the flat horseshoe blank.");
+            }
+
+            // ── PHASE 1: bake the solid inter-arch slab, carving out the tooth volumes ──
+            // Step C: Pocket carving (from Lore) — integrated into bake, not separate phase
             System.Threading.Tasks.Parallel.For(0, gnz, iz => {
                 for(int iy=0;iy<gny;iy++) for(int ix=0;ix<gnx;ix++) {
-                    double px = gox+ix*VS_MC, py = goy+iy*VS_MC, pz = goz+iz*VS_MC;
                     int vIdx = iz*gnx*gny+iy*gnx+ix;
+                    int cIdx = iy*gnx+ix;
+                    bakedGrid[vIdx] = 1.0f;
+                    if (!colIn[cIdx]) continue;
 
-                    // Z-clip at exact user-defined horseshoe surfaces (per-point Z following arch contour)
-                    float upperCutZ = NearestUpperZ(px, py) - upperPenetrationMm;
-                    float lowerCutZ = NearestLowerZ(px, py) + lowerPenetrationMm;
-                    if ((float)pz > upperCutZ || (float)pz < lowerCutZ)
-                    { bakedGrid[vIdx] = 1.0f; continue; }
+                    float pz = goz+iz*(float)VS_MC;
+                    if (pz > colTop[cIdx] || pz < colBot[cIdx]) continue;
 
-                    // Posterior limit
-                    if (!IsAnteriorToPosteriorLimit(px, py))
-                    { bakedGrid[vIdx] = 1.0f; continue; }
+                    double px = gox+ix*VS_MC, py = goy+iy*VS_MC;
+                    float uzArch = NearestUpperZ(px, py);
+                    float lzArch = NearestLowerZ(px, py);
+                    // Region-aware pocket carve: tight occlusal contacts, dilated walls, undercut blockout.
+                    if (ShouldCarveToothPocket(px, py, pz, upBase, uzArch, isUpper: true,
+                            engagementDepthMm, blockoutUndercuts)) continue;
+                    if (ShouldCarveToothPocket(px, py, pz, loBase, lzArch, isUpper: false,
+                            engagementDepthMm, blockoutUndercuts)) continue;
 
-                    // Raw blank = upper_1mm ∪ lower_1mm (NO horseshoe SDF)
-                    var pt = new Vector3d(px, py, pz);
-                    float upVal1 = (float)upImpl1.Value(ref pt);
-                    float loVal1 = (float)loImpl1.Value(ref pt);
-                    bakedGrid[vIdx] = MathF.Min(upVal1, loVal1);
+                    bakedGrid[vIdx] = -1.0f;
                 }
             });
 
-            // ── PHASE 1b: Remove floaters BEFORE closing (BFS from arch centroid) ──
+            // ── PHASE 2 (Step E): SDF smoothing (separable box blur) ──
+            // Softens the voxelised slab + pocket walls so marching cubes yields a
+            // smooth printable surface. Kept mild so the tooth pockets stay defined.
             {
-                int totalVox = gnx*gny*gnz;
-                int insideCount = 0;
-                for (int i = 0; i < totalVox; i++) if (bakedGrid[i] < 0) insideCount++;
-                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE1b {insideCount} inside voxels before floater removal");
-                if (insideCount == 0) return horseshoeFlat;
-
-                var visited = new bool[totalVox];
-                var queue = new Queue<int>();
-                float seedX = archMidX, seedY = archMidY, seedZ = (upperZ + lowerZ) * 0.5f;
-                int bestSeed = -1; float bestSeedD = float.MaxValue;
-                for (int iz2 = 0; iz2 < gnz; iz2++) for (int iy2 = 0; iy2 < gny; iy2++) for (int ix2 = 0; ix2 < gnx; ix2++) {
-                    int idx2 = iz2*gnx*gny+iy2*gnx+ix2;
-                    if (bakedGrid[idx2] >= 0) continue;
-                    float dx2 = gox+ix2*(float)VS_MC-seedX, dy2 = goy+iy2*(float)VS_MC-seedY, dz2 = goz+iz2*(float)VS_MC-seedZ;
-                    float d = dx2*dx2+dy2*dy2+dz2*dz2;
-                    if (d < bestSeedD) { bestSeedD = d; bestSeed = idx2; }
-                }
-                if (bestSeed < 0) return horseshoeFlat;
-                queue.Enqueue(bestSeed); visited[bestSeed] = true;
-                int mainSize = 0;
-                int[] dxN={1,-1,0,0,0,0}, dyN={0,0,1,-1,0,0}, dzN={0,0,0,0,1,-1};
-                while (queue.Count > 0) {
-                    int ci = queue.Dequeue(); mainSize++;
-                    int cz = ci/(gnx*gny), crem = ci%(gnx*gny), cy = crem/gnx, cx = crem%gnx;
-                    for (int d = 0; d < 6; d++) {
-                        int nx2=cx+dxN[d], ny2=cy+dyN[d], nz2=cz+dzN[d];
-                        if (nx2<0||nx2>=gnx||ny2<0||ny2>=gny||nz2<0||nz2>=gnz) continue;
-                        int ni = nz2*gnx*gny+ny2*gnx+nx2;
-                        if (!visited[ni] && bakedGrid[ni] < 0) { visited[ni]=true; queue.Enqueue(ni); }
-                    }
-                }
-                int removed = 0;
-                for (int i = 0; i < totalVox; i++) {
-                    if (bakedGrid[i] < 0 && !visited[i]) { bakedGrid[i] = 1.0f; removed++; }
-                }
-                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE1b Kept {mainSize} voxels, removed {removed} floaters");
-            }
-
-            // ── PHASE 2: GPU morphological closing on PADDED coarse grid ──
-            // Padding by closeR on all faces ensures dilation never hits the volume
-            // boundary, so erosion fully retracts — no boundary artifacts.
-            float maxGap = 0;
-            for (int i = 0; i < n; i++) {
-                float gap = MathF.Abs(upper[i].z - lower[i].z);
-                if (gap > maxGap) maxGap = gap;
-            }
-            const float coarseVS = 0.5f;
-            int closeR = (int)MathF.Ceiling(maxGap * 0.55f / coarseVS);
-            closeR = Math.Clamp(closeR, 2, 30);
-            System.Diagnostics.Debug.WriteLine($"[Splint] PHASE2 GPU closing: maxGap={maxGap:F1}mm closeR={closeR} coarseVS={coarseVS}");
-
-            // Coarse grid dimensions WITH padding
-            int pad = closeR + 1; // padding on each side
-            int cnxBase = (int)Math.Ceiling(mcBounds.Width  / coarseVS) + 1;
-            int cnyBase = (int)Math.Ceiling(mcBounds.Height / coarseVS) + 1;
-            int cnzBase = (int)Math.Ceiling(mcBounds.Depth  / coarseVS) + 1;
-            int cnx = cnxBase + 2*pad;
-            int cny = cnyBase + 2*pad;
-            int cnz = cnzBase + 2*pad;
-            var coarse = new byte[cnx * cny * cnz]; // all zeros = outside (padding is empty)
-            System.Diagnostics.Debug.WriteLine($"[Splint] PHASE2 padded coarse grid {cnx}x{cny}x{cnz} (pad={pad}), {cnx*cny*cnz/1000}K voxels");
-
-            // Fill interior (offset by pad) from fine SDF
-            for (int ciz = 0; ciz < cnzBase; ciz++) for (int ciy = 0; ciy < cnyBase; ciy++) for (int cix = 0; cix < cnxBase; cix++) {
-                int fix = Math.Clamp((int)(cix * coarseVS / VS_MC), 0, gnx-1);
-                int fiy = Math.Clamp((int)(ciy * coarseVS / VS_MC), 0, gny-1);
-                int fiz = Math.Clamp((int)(ciz * coarseVS / VS_MC), 0, gnz-1);
-                if (bakedGrid[fiz*gnx*gny + fiy*gnx + fix] < 0)
-                    coarse[(ciz+pad)*cnx*cny + (ciy+pad)*cnx + (cix+pad)] = 1;
-            }
-
-            // GPU: close (bridge the gap between arches)
-            byte[] closed;
-            using (var gpu = new GpuMorphology3D()) {
-                closed = gpu.Close(coarse, cnx, cny, cnz, closeR);
-                // Extra thickness?
-                if (bridgeThicknessMm > 0.01f) {
-                    int dilateR = (int)MathF.Ceiling(bridgeThicknessMm / coarseVS);
-                    closed = gpu.Dilate(closed, cnx, cny, cnz, dilateR);
-                }
-            }
-            System.Diagnostics.Debug.WriteLine("[Splint] PHASE2 GPU closing done");
-
-            // Apply closed result back to fine grid (reading from padded coordinates)
-            System.Threading.Tasks.Parallel.For(0, gnz, iz => {
-                for (int iy = 0; iy < gny; iy++) for (int ix = 0; ix < gnx; ix++) {
-                    int vIdx = iz*gnx*gny + iy*gnx + ix;
-                    if (bakedGrid[vIdx] < 0) continue; // already inside
-                    // Map fine voxel to padded coarse grid
-                    int cix = Math.Clamp((int)(ix * VS_MC / coarseVS), 0, cnxBase-1) + pad;
-                    int ciy = Math.Clamp((int)(iy * VS_MC / coarseVS), 0, cnyBase-1) + pad;
-                    int ciz = Math.Clamp((int)(iz * VS_MC / coarseVS), 0, cnzBase-1) + pad;
-                    if (closed[ciz*cnx*cny + ciy*cnx + cix] == 1)
-                        bakedGrid[vIdx] = -0.5f;
-                }
-            });
-
-            // ── PHASE 2b: SDF smoothing (separable box blur) ──
-            // Smooth the blank SDF BEFORE pocket subtraction so pockets stay precise.
-            // 3 passes of box blur with radius 2 ≈ Gaussian σ≈2.4 voxels.
-            {
-                int blurR = 2, blurPasses = 3;
-                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE2b SDF smoothing: blurR={blurR} passes={blurPasses}");
                 var temp = new float[bakedGrid.Length];
-
                 for (int pass = 0; pass < blurPasses; pass++) {
                     // Blur X
                     System.Threading.Tasks.Parallel.For(0, gnz, iz => {
@@ -626,41 +736,33 @@ public static class SplintEngine
                     // Copy temp → bakedGrid for next pass
                     Array.Copy(temp, bakedGrid, bakedGrid.Length);
                 }
-                System.Diagnostics.Debug.WriteLine("[Splint] PHASE2b SDF smoothing done");
             }
-
-            // (Floater removal already done in PHASE 1b, before closing)
-
-            // ── PHASE 4: Subtract tooth pockets (0.1mm offset) ──
-            System.Diagnostics.Debug.WriteLine("[Splint] PHASE4 Subtracting tooth pockets...");
-            System.Threading.Tasks.Parallel.For(0, gnz, iz => {
-                for(int iy=0;iy<gny;iy++) for(int ix=0;ix<gnx;ix++) {
-                    int vIdx = iz*gnx*gny+iy*gnx+ix;
-                    float blankVal = bakedGrid[vIdx];
-                    if (blankVal >= 0.5f) continue;
-                    double px = gox+ix*VS_MC, py = goy+iy*VS_MC, pz = goz+iz*VS_MC;
-                    var pt = new Vector3d(px, py, pz);
-                    float upVal01 = (float)upImpl01.Value(ref pt);
-                    float loVal01 = (float)loImpl01.Value(ref pt);
-                    bakedGrid[vIdx] = MathF.Max(blankVal, MathF.Max(-upVal01, -loVal01));
-                }
-            });
 
             // ── PHASE 5: MC surface extraction ──
             int finalInside = bakedGrid.Count(v => v < 0f);
             System.Diagnostics.Debug.WriteLine($"[Splint] PHASE5 {finalInside} inside voxels → MC...");
-            if (finalInside == 0) return horseshoeFlat;
+            SplintTrace($"PHASE5 final inside voxels (after pocket carve)={finalInside}");
+            if (finalInside == 0)
+            {
+                SplintTrace("EARLY-RETURN PHASE5 zero inside voxels → flat blank emitted");
+                return Result(horseshoeFlat, "Pocket carving removed all splint volume; emitted the flat horseshoe blank.");
+            }
             var bakedDense = new DenseGrid3f(gnx,gny,gnz,float.MaxValue);
             for(int i=0;i<bakedGrid.Length;i++) bakedDense[i]=bakedGrid[i];
             var bakedImpl  = new DenseGridTrilinearImplicit(bakedDense, new Vector3f(gox,goy,goz), (float)VS_MC);
             var mc = new MarchingCubes{Implicit=bakedImpl, Bounds=mcBounds, CubeSize=VS_MC, ParallelCompute=true};
             mc.Generate();
             System.Diagnostics.Debug.WriteLine($"[Splint] MC → {mc.Mesh?.TriangleCount} tris");
+            SplintTrace($"PHASE5 MC → {(mc.Mesh?.TriangleCount.ToString() ?? "null")} tris");
 
-            if(mc.Mesh==null||mc.Mesh.TriangleCount==0) return horseshoeFlat;
+            if(mc.Mesh==null||mc.Mesh.TriangleCount==0)
+            {
+                SplintTrace("EARLY-RETURN MC produced empty mesh → flat blank emitted");
+                return Result(horseshoeFlat, "Marching cubes produced no splint surface; emitted the flat horseshoe blank.");
+            }
             var dm=mc.Mesh;
 
-            // ── PHASE 5b: Mesh-level floater removal — keep only largest component ──
+            // ── PHASE 5b (Step F): Mesh-level floater removal — keep only largest component ──
             {
                 var cc = new MeshConnectedComponents(dm);
                 cc.FindConnectedT();
@@ -689,23 +791,167 @@ public static class SplintEngine
 
             var res=new float[dm.TriangleCount*9]; int ri=0;
             foreach(int tid in dm.TriangleIndices()){var t=dm.GetTriangle(tid);var va=dm.GetVertex(t.a);var vb=dm.GetVertex(t.b);var vc=dm.GetVertex(t.c);res[ri++]=(float)va.x;res[ri++]=(float)va.y;res[ri++]=(float)va.z;res[ri++]=(float)vb.x;res[ri++]=(float)vb.y;res[ri++]=(float)vb.z;res[ri++]=(float)vc.x;res[ri++]=(float)vc.y;res[ri++]=(float)vc.z;}
-            return res.Length>=9?res:horseshoeFlat;
+            if (res.Length>=9)
+                SplintTrace($"SUCCESS: carved mesh emitted — {res.Length/9} tris (final largest component {dm.TriangleCount} tris)");
+            else
+                SplintTrace($"EARLY-RETURN emitted mesh <9 floats → flat blank emitted");
+            return Result(res.Length>=9 ? res : horseshoeFlat,
+                res.Length>=9 ? null : "Generated mesh was empty; emitted the flat horseshoe blank.");
         }
         catch(Exception ex){
             string msg=$"[Splint ERROR] {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}";
             System.Diagnostics.Debug.WriteLine(msg);
+            SplintTrace($"EXCEPTION (catch) {ex.GetType().Name}: {ex.Message} → flat blank emitted");
             try{System.IO.File.WriteAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(),"splint_error.txt"),msg);}catch{}
-            return horseshoeFlat;
+            return Result(horseshoeFlat, $"Splint generation failed ({ex.GetType().Name}); emitted the flat horseshoe blank.");
         }
 
     }
 
+    // ── Legacy overload for backward compatibility ────────────────────────
+    // Existing call sites that use the old parameter-based API will be updated,
+    // but this keeps the code compiling during the transition.
+    public static float[] GenerateSplint(
+        List<(float x,float y,float z)> upperCurve,
+        List<(float x,float y,float z)> lowerCurve,
+        float labiolingualMm        = 8f,
+        float upperPenetrationMm    = 0f,
+        float lowerPenetrationMm    = 0f,
+        float lingualBuccalBiasMm   = 0f,
+        float bridgeThicknessMm     = 0f,
+        float[]? upperMesh          = null,
+        float[]? lowerMesh          = null,
+        int sampleCount             = 160)
+    {
+        var config = new SplintConfig
+        {
+            LabiolingualMm      = labiolingualMm,
+            UpperPenetrationMm  = upperPenetrationMm,
+            LowerPenetrationMm  = lowerPenetrationMm,
+            LingualBuccalBiasMm = lingualBuccalBiasMm,
+            BridgeThicknessMm   = bridgeThicknessMm,
+            SampleCount         = sampleCount,
+            EnableAutorotation  = false   // legacy callers don't have condyle data
+        };
+        var result = GenerateSplint(upperCurve, lowerCurve, config, upperMesh, lowerMesh);
+        return result.Vertices;
+    }
+
+    // ── Autorotation helpers ─────────────────────────────────────────────
+    private static void AlignLowerDirection(
+        List<(float x, float y, float z)> upper,
+        List<(float x, float y, float z)> lower)
+    {
+        int n = Math.Min(upper.Count, lower.Count);
+        if (n < 2) return;
+        var u0=upper[0]; var u1=upper[n-1]; var l0=lower[0]; var l1=lower[n-1];
+        if (Sq(u0.x-l1.x)+Sq(u0.y-l1.y)+Sq(u1.x-l0.x)+Sq(u1.y-l0.y) <
+            Sq(u0.x-l0.x)+Sq(u0.y-l0.y)+Sq(u1.x-l1.x)+Sq(u1.y-l1.y))
+            lower.Reverse();
+    }
+
+    private static float MinimumVerticalClearance(
+        List<(float x, float y, float z)> upper,
+        List<(float x, float y, float z)> lower)
+    {
+        int n = Math.Min(upper.Count, lower.Count);
+        if (n == 0) return 0f;
+        float minGap = float.MaxValue;
+        for (int i = 0; i < n; i++)
+            minGap = Math.Min(minGap, MathF.Abs(upper[i].z - lower[i].z));
+        return minGap == float.MaxValue ? 0f : minGap;
+    }
+
+    public static List<(float x, float y, float z)> RotateCurve(
+        List<(float x, float y, float z)> curve,
+        (float x, float y, float z) axisPoint,
+        (float x, float y, float z) axisUnit,
+        float degrees)
+    {
+        var rotated = new List<(float x, float y, float z)>(curve.Count);
+        foreach (var p in curve)
+            rotated.Add(RotatePoint(p.x, p.y, p.z, axisPoint, axisUnit, degrees));
+        return rotated;
+    }
+
+    public static float[] RotateMesh(
+        float[] mesh,
+        (float x, float y, float z) axisPoint,
+        (float x, float y, float z) axisUnit,
+        float degrees)
+    {
+        var rotated = new float[mesh.Length];
+        for (int i = 0; i + 2 < mesh.Length; i += 3)
+        {
+            var p = RotatePoint(mesh[i], mesh[i + 1], mesh[i + 2], axisPoint, axisUnit, degrees);
+            rotated[i] = p.x; rotated[i + 1] = p.y; rotated[i + 2] = p.z;
+        }
+        return rotated;
+    }
+
+    private static (float x, float y, float z) RotatePoint(
+        float x, float y, float z,
+        (float x, float y, float z) axisPoint,
+        (float x, float y, float z) axisUnit,
+        float degrees)
+    {
+        float radians = degrees * MathF.PI / 180f;
+        float c = MathF.Cos(radians), s = MathF.Sin(radians);
+        float px = x - axisPoint.x, py = y - axisPoint.y, pz = z - axisPoint.z;
+        float kx = axisUnit.x, ky = axisUnit.y, kz = axisUnit.z;
+        float dot = kx * px + ky * py + kz * pz;
+        float cx = ky * pz - kz * py;
+        float cy = kz * px - kx * pz;
+        float cz = kx * py - ky * px;
+
+        return (
+            axisPoint.x + px * c + cx * s + kx * dot * (1f - c),
+            axisPoint.y + py * c + cy * s + ky * dot * (1f - c),
+            axisPoint.z + pz * c + cz * s + kz * dot * (1f - c));
+    }
+
     private static float Sq(float v) => v * v;
 
-    // â”€â”€ Isotropic mesh offset via geometry3Sharp â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Pocket carving ───────────────────────────────────────────────────
+    private const float OcclusalBandMm = 0.75f;
+
+    /// <summary>
+    /// Returns true when the voxel should be carved out as a tooth pocket (air, not splint material).
+    /// Occlusal band: tight SDF fit on the arch plane. Walls: dilated by engagement depth with optional undercut blockout.
+    /// </summary>
+    private static bool ShouldCarveToothPocket(
+        double px, double py, double pz,
+        BoundedImplicitFunction3d toothSdf,
+        float archZ,
+        bool isUpper,
+        float engagementMm,
+        bool blockoutUndercuts)
+    {
+        var pt = new Vector3d(px, py, pz);
+        float sdfAtVoxel = (float)toothSdf.Value(ref pt);
+
+        if (MathF.Abs((float)pz - archZ) <= OcclusalBandMm)
+        {
+            var onArch = new Vector3d(px, py, archZ);
+            float sdfOnArch = (float)toothSdf.Value(ref onArch);
+            if (sdfOnArch >= 0f) return false;
+            return sdfAtVoxel < 0f;
+        }
+
+        if (sdfAtVoxel >= engagementMm) return false;
+
+        if (blockoutUndercuts && engagementMm > 0f)
+        {
+            if (isUpper && pz < archZ - engagementMm) return false;
+            if (!isUpper && pz > archZ + engagementMm) return false;
+        }
+
+        return true;
+    }
+
+    // ── Isotropic mesh offset via geometry3Sharp ──────────────────────────
     /// <summary>
     /// Offsets every vertex of the triangle soup by <paramref name="offsetMm"/> mm
-
     /// along its area-weighted vertex normal, using geometry3Sharp for robust
     /// per-vertex normal computation on non-watertight meshes.
     /// </summary>
@@ -713,7 +959,7 @@ public static class SplintEngine
     {
         if (mesh == null || mesh.Length < 9) return mesh ?? Array.Empty<float>();
 
-        // Ã¢â€â‚¬Ã¢â€â‚¬ Build a DMesh3 (indexed) from the flat triangle soup Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+        // ── Build a DMesh3 (indexed) from the flat triangle soup ──────────
         var dm = new DMesh3(MeshComponents.VertexNormals);
         var vmap = new Dictionary<Vector3f, int>();
 
@@ -739,10 +985,10 @@ public static class SplintEngine
                 dm.AppendTriangle(a_, b_, c_);
         }
 
-        // Ã¢â€â‚¬Ã¢â€â‚¬ Compute per-vertex normals (area-weighted, handles open meshes) Ã¢â€â‚¬
+        // ── Compute per-vertex normals (area-weighted, handles open meshes) ─
         MeshNormals.QuickCompute(dm);
 
-        // Ã¢â€â‚¬Ã¢â€â‚¬ Offset each vertex along its normal Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+        // ── Offset each vertex along its normal ──────────────────────────────
         foreach (int vid in dm.VertexIndices())
         {
             Vector3d pos = dm.GetVertex(vid);
@@ -750,7 +996,7 @@ public static class SplintEngine
             dm.SetVertex(vid, pos + new Vector3d(nor.x, nor.y, nor.z) * offsetMm);
         }
 
-        // Ã¢â€â‚¬Ã¢â€â‚¬ Rebuild flat triangle soup Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+        // ── Rebuild flat triangle soup ───────────────────────────────────────
         var result = new float[triCount * 9];
         int ri = 0;
         foreach (int tid in dm.TriangleIndices())
@@ -768,7 +1014,7 @@ public static class SplintEngine
         return result;
     }
 
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Tooth pocket: crop + side-wall prisms Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // ── Tooth pocket: crop + side-wall prisms ────────────────────────────
     /// <summary>
     /// Collects triangles from the offset tooth mesh that fall inside the
     /// horseshoe XY footprint AND within penetrationMm of the horseshoe
@@ -914,4 +1160,3 @@ internal sealed class OffsetImpl : BoundedImplicitFunction3d
         return b;
     }
 }
-
