@@ -819,8 +819,8 @@ public static class SegmentationEngine
         {
             // 1. Convert mask to probability field
             float[] field = new float[w * h * d];
-            System.Threading.Tasks.Parallel.For(0, field.Length, i =>
-                field[i] = segVol.Labels[i] == label ? 100f : 0f);
+            for (int i = 0; i < field.Length; i++)
+                field[i] = segVol.Labels[i] == label ? 100f : 0f;
 
             smooth = new float[w * h * d];
 
@@ -833,28 +833,22 @@ public static class SegmentationEngine
                 for (int pass = 0; pass < smoothingPasses; pass++)
                 {
                     // X-blur
-                    System.Threading.Tasks.Parallel.For(0, d, z =>
-                    {
-                        for (int y = 0; y < h; y++)
-                        for (int x = 1; x < w - 1; x++)
-                            smooth[x+y*w+z*w*h] = field[x+y*w+z*w*h] * wCenter + (field[x-1+y*w+z*w*h] + field[x+1+y*w+z*w*h]) * wNeighbors;
-                    });
+                    for (int z = 0; z < d; z++)
+                    for (int y = 0; y < h; y++)
+                    for (int x = 1; x < w - 1; x++)
+                        smooth[x+y*w+z*w*h] = field[x+y*w+z*w*h] * wCenter + (field[x-1+y*w+z*w*h] + field[x+1+y*w+z*w*h]) * wNeighbors;
 
                     // Y-blur
-                    System.Threading.Tasks.Parallel.For(0, d, z =>
-                    {
-                        for (int y = 1; y < h - 1; y++)
-                        for (int x = 0; x < w; x++)
-                            field[x+y*w+z*w*h] = smooth[x+y*w+z*w*h] * wCenter + (smooth[x+(y-1)*w+z*w*h] + smooth[x+(y+1)*w+z*w*h]) * wNeighbors;
-                    });
+                    for (int z = 0; z < d; z++)
+                    for (int y = 1; y < h - 1; y++)
+                    for (int x = 0; x < w; x++)
+                        field[x+y*w+z*w*h] = smooth[x+y*w+z*w*h] * wCenter + (smooth[x+(y-1)*w+z*w*h] + smooth[x+(y+1)*w+z*w*h]) * wNeighbors;
 
                     // Z-blur
-                    System.Threading.Tasks.Parallel.For(1, d - 1, z =>
-                    {
-                        for (int y = 0; y < h; y++)
-                        for (int x = 0; x < w; x++)
-                            smooth[x+y*w+z*w*h] = field[x+y*w+z*w*h] * wCenter + (field[x+y*w+(z-1)*w*h] + field[x+y*w+(z+1)*w*h]) * wNeighbors;
-                    });
+                    for (int z = 1; z < d - 1; z++)
+                    for (int y = 0; y < h; y++)
+                    for (int x = 0; x < w; x++)
+                        smooth[x+y*w+z*w*h] = field[x+y*w+z*w*h] * wCenter + (field[x+y*w+(z-1)*w*h] + field[x+y*w+(z+1)*w*h]) * wNeighbors;
 
                     // Copy smoothed output back to input for the next iter
                     if (pass < smoothingPasses - 1) Array.Copy(smooth, field, smooth.Length);
@@ -875,33 +869,26 @@ public static class SegmentationEngine
         }
 
         // Iterate from -1 to Width to allow the zero-padded bounds to act as solid sealing mesh walls
-        var threadBags = new System.Collections.Concurrent.ConcurrentBag<float[]>();
-
         int maxX = w, maxY = h, maxZ = d;
-        System.Threading.Tasks.Parallel.For(-1, maxZ, z =>
+        for (int z = -1; z < maxZ; z += stepSize)
         {
-            // Only process iterations that match the stepSize
-            if ((z + 1) % stepSize != 0) return;
-
-            var localVerts = new List<float>(8192);
-            int[] ox = [0, stepSize, stepSize, 0, 0, stepSize, stepSize, 0];
-            int[] oy = [0, 0, stepSize, stepSize, 0, 0, stepSize, stepSize];
-            int[] oz = [0, 0, 0, 0, stepSize, stepSize, stepSize, stepSize];
-            int[] edgePairs = [0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7];
-            double[] val = new double[8];
-            float[][] edgeVerts = new float[12][];
-            double[][] pos = new double[8][];
-            for (int i = 0; i < 8; i++) pos[i] = new double[3];
-
             for (int y = -1; y < maxY; y += stepSize)
             for (int x = -1; x < maxX; x += stepSize)
             {
+                int[] ox = [0, stepSize, stepSize, 0, 0, stepSize, stepSize, 0];
+                int[] oy = [0, 0, stepSize, stepSize, 0, 0, stepSize, stepSize];
+                int[] oz = [0, 0, 0, 0, stepSize, stepSize, stepSize, stepSize];
+
+                double[] val = new double[8];
                 for (int i = 0; i < 8; i++)
                 {
                     int px = x + ox[i];
                     int py = y + oy[i];
                     int pz = z + oz[i];
                     
+                    // If out of bounds of the actual volume, explicitly return 0.0 probability.
+                    // This forces Marching Cubes to abruptly jump across the 45.0 IsoLevel threshold
+                    // right at the boundary box edges, drawing completely flat sealing caps across the gap!
                     if (px < 0 || px >= w || py < 0 || py >= h || pz < 0 || pz >= d)
                     {
                          val[i] = 0.0;
@@ -921,15 +908,21 @@ public static class SegmentationEngine
                     if (val[i] >= isoLevel) cubeIndex |= (1 << i);
                 if (cubeIndex == 0 || cubeIndex == 255) continue;
 
-                pos[0][0] = x*sx;           pos[0][1] = y*sy;           pos[0][2] = z*sz;
-                pos[1][0] = (x+stepSize)*sx; pos[1][1] = y*sy;           pos[1][2] = z*sz;
-                pos[2][0] = (x+stepSize)*sx; pos[2][1] = (y+stepSize)*sy; pos[2][2] = z*sz;
-                pos[3][0] = x*sx;           pos[3][1] = (y+stepSize)*sy; pos[3][2] = z*sz;
-                pos[4][0] = x*sx;           pos[4][1] = y*sy;           pos[4][2] = (z+stepSize)*sz;
-                pos[5][0] = (x+stepSize)*sx; pos[5][1] = y*sy;           pos[5][2] = (z+stepSize)*sz;
-                pos[6][0] = (x+stepSize)*sx; pos[6][1] = (y+stepSize)*sy; pos[6][2] = (z+stepSize)*sz;
-                pos[7][0] = x*sx;           pos[7][1] = (y+stepSize)*sy; pos[7][2] = (z+stepSize)*sz;
+                // Corner positions in world coordinates
+                double[][] pos =
+                [
+                    [x*sx, y*sy, z*sz],
+                    [(x+stepSize)*sx, y*sy, z*sz],
+                    [(x+stepSize)*sx, (y+stepSize)*sy, z*sz],
+                    [x*sx, (y+stepSize)*sy, z*sz],
+                    [x*sx, y*sy, (z+stepSize)*sz],
+                    [(x+stepSize)*sx, y*sy, (z+stepSize)*sz],
+                    [(x+stepSize)*sx, (y+stepSize)*sy, (z+stepSize)*sz],
+                    [x*sx, (y+stepSize)*sy, (z+stepSize)*sz]
+                ];
 
+                float[][] edgeVerts = new float[12][];
+                int[] edgePairs = [0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7];
                 int edgeFlags = MarchingCubes.GetEdgeFlags(cubeIndex);
 
                 for (int i = 0; i < 12; i++)
@@ -937,6 +930,7 @@ public static class SegmentationEngine
                     if ((edgeFlags & (1 << i)) == 0) continue;
                     int a = edgePairs[i * 2], b = edgePairs[i * 2 + 1];
 
+                    // Linear interpolation based on actual values
                     double diff = val[b] - val[a];
                     double t = Math.Abs(diff) > 0.001 ? (isoLevel - val[a]) / diff : 0.5;
                     t = Math.Clamp(t, 0, 1);
@@ -955,22 +949,14 @@ public static class SegmentationEngine
                     var ev0 = edgeVerts[triIndices[i]];
                     var ev1 = edgeVerts[triIndices[i + 1]];
                     var ev2 = edgeVerts[triIndices[i + 2]];
-                    localVerts.Add(ev0[0]); localVerts.Add(ev0[1]); localVerts.Add(ev0[2]);
-                    localVerts.Add(ev1[0]); localVerts.Add(ev1[1]); localVerts.Add(ev1[2]);
-                    localVerts.Add(ev2[0]); localVerts.Add(ev2[1]); localVerts.Add(ev2[2]);
+                    vertices.Add(ev0[0]); vertices.Add(ev0[1]); vertices.Add(ev0[2]);
+                    vertices.Add(ev1[0]); vertices.Add(ev1[1]); vertices.Add(ev1[2]);
+                    vertices.Add(ev2[0]); vertices.Add(ev2[1]); vertices.Add(ev2[2]);
                 }
             }
-            if (localVerts.Count > 0) threadBags.Add(localVerts.ToArray());
             progress?.Invoke((double)(z + 1) / d);
-        });
-
-        int totalCount = 0;
-        foreach (var bag in threadBags) totalCount += bag.Length;
-        var merged = new float[totalCount];
-        int offset = 0;
-        foreach (var bag in threadBags) { Array.Copy(bag, 0, merged, offset, bag.Length); offset += bag.Length; }
-        
-        return merged;
+        }
+        return vertices.ToArray();
     }
 
     /// <summary>
@@ -980,7 +966,7 @@ public static class SegmentationEngine
     public static float[] ExtractLivePreviewMesh(
         VolumeData volume, short minHU, short maxHU, int stepSize = 4)
     {
-        var threadBags = new System.Collections.Concurrent.ConcurrentBag<float[]>();
+        var vertices = new List<float>();
         int w = volume.Width, h = volume.Height, d = volume.Depth;
         double sx = volume.Spacing[0], sy = volume.Spacing[1], sz = volume.Spacing[2];
 
@@ -990,97 +976,363 @@ public static class SegmentationEngine
 
         int maxX = w - stepSize, maxY = h - stepSize, maxZ = d - stepSize;
         
-        System.Threading.Tasks.Parallel.For(0, maxZ, z =>
+        for (int z = 0; z < maxZ; z += stepSize)
+        for (int y = 0; y < maxY; y += stepSize)
+        for (int x = 0; x < maxX; x += stepSize)
         {
-            if (z % stepSize != 0) return;
-
-            var localVerts = new List<float>(4096);
             int[] ox = [0, stepSize, stepSize, 0, 0, stepSize, stepSize, 0];
             int[] oy = [0, 0, stepSize, stepSize, 0, 0, stepSize, stepSize];
             int[] oz = [0, 0, 0, 0, stepSize, stepSize, stepSize, stepSize];
-            int[] edgePairs = [0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7];
+
             double[] val = new double[8];
-            float[][] edgeVerts = new float[12][];
-            double[][] pos = new double[8][];
-            for (int i = 0; i < 8; i++) pos[i] = new double[3];
-
-            for (int y = 0; y < maxY; y += stepSize)
-            for (int x = 0; x < maxX; x += stepSize)
+            for (int i = 0; i < 8; i++)
             {
-                for (int i = 0; i < 8; i++)
+                int px = x + ox[i], py = y + oy[i], pz = z + oz[i];
+                short hu = volume.Voxels[px + py * w + pz * w * h];
+                if (hu >= minHU && hu <= maxHU)
                 {
-                    int px = x + ox[i], py = y + oy[i], pz = z + oz[i];
-                    short hu = volume.Voxels[px + py * w + pz * w * h];
-                    if (hu >= minHU && hu <= maxHU)
-                    {
-                        val[i] = Math.Min(hu - minHU, maxHU - hu);
-                        if (val[i] == 0) val[i] = 0.001; // ensure strict inclusion for boundaries
-                    }
-                    else if (hu < minHU)
-                    {
-                        val[i] = hu - minHU;
-                    }
-                    else
-                    {
-                        val[i] = maxHU - hu;
-                    }
+                    val[i] = Math.Min(hu - minHU, maxHU - hu);
+                    if (val[i] == 0) val[i] = 0.001; // ensure strict inclusion for boundaries
                 }
-
-                int cubeIndex = 0;
-                for (int i = 0; i < 8; i++)
-                    if (val[i] >= isoLevel) cubeIndex |= (1 << i);
-                
-                if (cubeIndex == 0 || cubeIndex == 255) continue;
-
-                pos[0][0] = x*sx;           pos[0][1] = y*sy;           pos[0][2] = z*sz;
-                pos[1][0] = (x+stepSize)*sx; pos[1][1] = y*sy;           pos[1][2] = z*sz;
-                pos[2][0] = (x+stepSize)*sx; pos[2][1] = (y+stepSize)*sy; pos[2][2] = z*sz;
-                pos[3][0] = x*sx;           pos[3][1] = (y+stepSize)*sy; pos[3][2] = z*sz;
-                pos[4][0] = x*sx;           pos[4][1] = y*sy;           pos[4][2] = (z+stepSize)*sz;
-                pos[5][0] = (x+stepSize)*sx; pos[5][1] = y*sy;           pos[5][2] = (z+stepSize)*sz;
-                pos[6][0] = (x+stepSize)*sx; pos[6][1] = (y+stepSize)*sy; pos[6][2] = (z+stepSize)*sz;
-                pos[7][0] = x*sx;           pos[7][1] = (y+stepSize)*sy; pos[7][2] = (z+stepSize)*sz;
-
-                int edgeFlags = MarchingCubes.GetEdgeFlags(cubeIndex);
-
-                for (int i = 0; i < 12; i++)
+                else if (hu < minHU)
                 {
-                    if ((edgeFlags & (1 << i)) == 0) continue;
-                    int a = edgePairs[i * 2], b = edgePairs[i * 2 + 1];
-
-                    double diff = val[b] - val[a];
-                    double t = Math.Abs(diff) > 0.001 ? (isoLevel - val[a]) / diff : 0.5;
-                    t = Math.Clamp(t, 0, 1);
-
-                    edgeVerts[i] =
-                    [
-                        (float)(pos[a][0] + t * (pos[b][0] - pos[a][0])),
-                        (float)(pos[a][1] + t * (pos[b][1] - pos[a][1])),
-                        (float)(pos[a][2] + t * (pos[b][2] - pos[a][2]))
-                    ];
+                    val[i] = hu - minHU;
                 }
-
-                var triIndices = MarchingCubes.GetTriangles(cubeIndex);
-                for (int i = 0; i < triIndices.Length && triIndices[i] != -1; i += 3)
+                else
                 {
-                    var ev0 = edgeVerts[triIndices[i]];
-                    var ev1 = edgeVerts[triIndices[i + 1]];
-                    var ev2 = edgeVerts[triIndices[i + 2]];
-                    localVerts.Add(ev0[0]); localVerts.Add(ev0[1]); localVerts.Add(ev0[2]);
-                    localVerts.Add(ev1[0]); localVerts.Add(ev1[1]); localVerts.Add(ev1[2]);
-                    localVerts.Add(ev2[0]); localVerts.Add(ev2[1]); localVerts.Add(ev2[2]);
+                    val[i] = maxHU - hu;
                 }
             }
-            if (localVerts.Count > 0) threadBags.Add(localVerts.ToArray());
+
+            int cubeIndex = 0;
+            for (int i = 0; i < 8; i++)
+                if (val[i] >= isoLevel) cubeIndex |= (1 << i);
+            
+            if (cubeIndex == 0 || cubeIndex == 255) continue;
+
+            double[][] pos =
+            [
+                [x*sx, y*sy, z*sz],
+                [(x+stepSize)*sx, y*sy, z*sz],
+                [(x+stepSize)*sx, (y+stepSize)*sy, z*sz],
+                [x*sx, (y+stepSize)*sy, z*sz],
+                [x*sx, y*sy, (z+stepSize)*sz],
+                [(x+stepSize)*sx, y*sy, (z+stepSize)*sz],
+                [(x+stepSize)*sx, (y+stepSize)*sy, (z+stepSize)*sz],
+                [x*sx, (y+stepSize)*sy, (z+stepSize)*sz]
+            ];
+
+            float[][] edgeVerts = new float[12][];
+            int[] edgePairs = [0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7];
+            int edgeFlags = MarchingCubes.GetEdgeFlags(cubeIndex);
+
+            for (int i = 0; i < 12; i++)
+            {
+                if ((edgeFlags & (1 << i)) == 0) continue;
+                int a = edgePairs[i * 2], b = edgePairs[i * 2 + 1];
+
+                double diff = val[b] - val[a];
+                double t = Math.Abs(diff) > 0.001 ? (isoLevel - val[a]) / diff : 0.5;
+                t = Math.Clamp(t, 0, 1);
+
+                edgeVerts[i] =
+                [
+                    (float)(pos[a][0] + t * (pos[b][0] - pos[a][0])),
+                    (float)(pos[a][1] + t * (pos[b][1] - pos[a][1])),
+                    (float)(pos[a][2] + t * (pos[b][2] - pos[a][2]))
+                ];
+            }
+
+            var triIndices = MarchingCubes.GetTriangles(cubeIndex);
+            for (int i = 0; i < triIndices.Length && triIndices[i] != -1; i += 3)
+            {
+                var ev0 = edgeVerts[triIndices[i]];
+                var ev1 = edgeVerts[triIndices[i + 1]];
+                var ev2 = edgeVerts[triIndices[i + 2]];
+                vertices.Add(ev0[0]); vertices.Add(ev0[1]); vertices.Add(ev0[2]);
+                vertices.Add(ev1[0]); vertices.Add(ev1[1]); vertices.Add(ev1[2]);
+                vertices.Add(ev2[0]); vertices.Add(ev2[1]); vertices.Add(ev2[2]);
+            }
+        }
+        
+        return vertices.ToArray();
+    }
+
+    /// <summary>
+    /// Performs a physical reslice of the volume using trilinear interpolation.
+    /// </summary>
+    public static VolumeData ResliceVolume(VolumeData source, NhpTransform transform, NhpTransform inverseTransform)
+    {
+        int wSrc = source.Width, hSrc = source.Height, dSrc = source.Depth;
+        double sx = source.Spacing[0], sy = source.Spacing[1], sz = source.Spacing[2];
+
+        // The world-center of the Original Volume
+        double cx = wSrc * sx / 2.0;
+        double cy = hSrc * sy / 2.0;
+        double cz = dSrc * sz / 2.0;
+
+        // Extract the 8 local physical corners of the source box
+        double[] xCorners = [0, wSrc * sx];
+        double[] yCorners = [0, hSrc * sy];
+        double[] zCorners = [0, dSrc * sz];
+
+        double minWorldX = double.MaxValue, maxWorldX = double.MinValue;
+        double minWorldY = double.MaxValue, maxWorldY = double.MinValue;
+        double minWorldZ = double.MaxValue, maxWorldZ = double.MinValue;
+
+        // Map every corner through the inverse transform (Source -> Forward -> Target)
+        // to find exactly where the bounding box reaches in the New Coordinate Space
+        foreach (double x in xCorners)
+        {
+            foreach (double y in yCorners)
+            {
+                foreach (double z in zCorners)
+                {
+                    // Center the corner
+                    double lox = x - cx; double loy = y - cy; double loz = z - cz;
+                    // Project it forward to see how far the rotation throws it
+                    var (wx, wy, wz) = inverseTransform.TransformPoint(lox, loy, loz);
+                    
+                    if (wx < minWorldX) minWorldX = wx; if (wx > maxWorldX) maxWorldX = wx;
+                    if (wy < minWorldY) minWorldY = wy; if (wy > maxWorldY) maxWorldY = wy;
+                    if (wz < minWorldZ) minWorldZ = wz; if (wz > maxWorldZ) maxWorldZ = wz;
+                }
+            }
+        }
+
+        // Calculate absolute minimum grid bounds necessary to enclose the rotated data
+        int maxW = (int)Math.Ceiling((maxWorldX - minWorldX) / sx);
+        int maxH = (int)Math.Ceiling((maxWorldY - minWorldY) / sy);
+        int maxD = (int)Math.Ceiling((maxWorldZ - minWorldZ) / sz);
+
+        int w = maxW, h = maxH, d = maxD;
+        var newVoxels = new short[w * h * d];
+
+        System.Threading.Tasks.Parallel.For(0, d, z =>
+        {
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    // Iterate through the NEW grid bounds and map backwards to see what's there
+                    // Shift the (0,0,0) iteration point back to the global Box Minimums
+                    double worldX = (x * sx) + minWorldX;
+                    double worldY = (y * sy) + minWorldY;
+                    double worldZ = (z * sz) + minWorldZ;
+
+                    var (ox, oy, oz) = transform.TransformPoint(worldX, worldY, worldZ);
+                    
+                    // Shift back into local Source coordinates before Trilinear Interpolation picks it up
+                    newVoxels[x + y * w + z * w * h] = SampleTrilinear(source, ox + cx, oy + cy, oz + cz);
+                }
+            }
         });
 
-        int totalCount = 0;
-        foreach (var bag in threadBags) totalCount += bag.Length;
-        var merged = new float[totalCount];
-        int offset = 0;
-        foreach (var bag in threadBags) { Array.Copy(bag, 0, merged, offset, bag.Length); offset += bag.Length; }
+        var newVolume = new VolumeData(w, h, d, (double[])source.Spacing.Clone());
+        Array.Copy(newVoxels, newVolume.Voxels, newVoxels.Length);
         
-        return merged;
+        newVolume.PatientName = source.PatientName;
+        newVolume.StudyDate = source.StudyDate;
+        newVolume.SeriesDescription = source.SeriesDescription + " (Resliced)";
+        
+        newVolume.ComputeMinMax();
+        return newVolume;
     }
 
+    private static short SampleTrilinear(VolumeData source, double vx, double vy, double vz)
+    {
+        double px = vx / source.Spacing[0];
+        double py = vy / source.Spacing[1];
+        double pz = vz / source.Spacing[2];
+
+        int w = source.Width, h = source.Height, d = source.Depth;
+
+        if (px < 0 || px >= w - 1 || py < 0 || py >= h - 1 || pz < 0 || pz >= d - 1)
+            return -1024;
+
+        int x0 = (int)px; int x1 = x0 + 1;
+        int y0 = (int)py; int y1 = y0 + 1;
+        int z0 = (int)pz; int z1 = z0 + 1;
+
+        double dx = px - x0;
+        double dy = py - y0;
+        double dz = pz - z0;
+
+        double v000 = source.Voxels[x0 + y0 * w + z0 * w * h];
+        double v100 = source.Voxels[x1 + y0 * w + z0 * w * h];
+        double v010 = source.Voxels[x0 + y1 * w + z0 * w * h];
+        double v110 = source.Voxels[x1 + y1 * w + z0 * w * h];
+        double v001 = source.Voxels[x0 + y0 * w + z1 * w * h];
+        double v101 = source.Voxels[x1 + y0 * w + z1 * w * h];
+        double v011 = source.Voxels[x0 + y1 * w + z1 * w * h];
+        double v111 = source.Voxels[x1 + y1 * w + z1 * w * h];
+
+        double v00 = v000 * (1 - dx) + v100 * dx;
+        double v01 = v001 * (1 - dx) + v101 * dx;
+        double v10 = v010 * (1 - dx) + v110 * dx;
+        double v11 = v011 * (1 - dx) + v111 * dx;
+
+        double v0 = v00 * (1 - dy) + v10 * dy;
+        double v1 = v01 * (1 - dy) + v11 * dy;
+
+        return (short)(v0 * (1 - dz) + v1 * dz);
     }
+
+    /// <summary>
+    /// Competitive multi-label region grow CONSTRAINED to a binary mask.
+    /// <paramref name="outVol"/> must already contain the accepted seed labels (any non-zero
+    /// label) before this call. Seeds that do NOT sit on a <paramref name="maskLabel"/> voxel of
+    /// <paramref name="maskVol"/> are discarded (treated as preview noise and cleared).
+    ///
+    /// All seed fronts advance simultaneously at equal velocity (FIFO BFS) through 6-connected
+    /// voxels where <paramref name="maskVol"/> == <paramref name="maskLabel"/>, claiming each
+    /// unvisited mask voxel for the first front to reach it. Where two fronts collide they block
+    /// each other, so the resulting cut follows bone connectivity (Voronoi-like geodesic split).
+    ///
+    /// Voxels outside the mask are never claimed; mask voxels in islands unreachable from any seed
+    /// are left unlabeled — feed those to <see cref="FillNearestLabelWithinMask"/> as a fallback.
+    /// Existing Core methods are untouched; this is an additive helper.
+    /// </summary>
+    public static void CompetitiveGrowLabelsWithinMask(
+        SegmentationVolume maskVol, byte maskLabel,
+        SegmentationVolume outVol,
+        Action<double>? progress = null)
+    {
+        int w = maskVol.Width, h = maskVol.Height, d = maskVol.Depth;
+        int total = w * h * d;
+        var visited = new bool[total];
+        var queue = new Queue<int>();
+
+        // Initial frontier: every accepted seed voxel that lands on the mask.
+        for (int i = 0; i < total; i++)
+        {
+            byte lbl = outVol.Labels[i];
+            if (lbl == 0) continue;
+
+            if (maskVol.Labels[i] == maskLabel)
+            {
+                visited[i] = true;
+                queue.Enqueue(i);
+            }
+            else
+            {
+                outVol.Labels[i] = 0; // off-mask preview noise — discard
+            }
+        }
+
+        int plane = w * h;
+        int processed = 0;
+        int maxEstimate = Math.Max(1, total / 8);
+
+        while (queue.Count > 0)
+        {
+            int curr = queue.Dequeue();
+            byte label = outVol.Labels[curr];
+            processed++;
+            if (progress != null && (processed & 0xFFFF) == 0)
+                progress(Math.Min(1.0, (double)processed / maxEstimate));
+
+            int cz = curr / plane;
+            int rem = curr - cz * plane;
+            int cy = rem / w;
+            int cx = rem - cy * w;
+
+            // 6-connectivity with explicit per-axis bounds (prevents row/plane wraparound).
+            if (cx + 1 < w) TryClaim(curr + 1);
+            if (cx - 1 >= 0) TryClaim(curr - 1);
+            if (cy + 1 < h) TryClaim(curr + w);
+            if (cy - 1 >= 0) TryClaim(curr - w);
+            if (cz + 1 < d) TryClaim(curr + plane);
+            if (cz - 1 >= 0) TryClaim(curr - plane);
+
+            void TryClaim(int nIdx)
+            {
+                if (visited[nIdx]) return;
+                if (maskVol.Labels[nIdx] != maskLabel) return;
+                visited[nIdx] = true;
+                outVol.Labels[nIdx] = label;
+                queue.Enqueue(nIdx);
+            }
+        }
+
+        progress?.Invoke(1.0);
+    }
+
+    /// <summary>
+    /// Fallback for <see cref="CompetitiveGrowLabelsWithinMask"/>: assigns every still-unlabeled
+    /// <paramref name="maskLabel"/> voxel of <paramref name="maskVol"/> the label of its nearest
+    /// already-labeled voxel in <paramref name="outVol"/>. Distance is the 6-connected grid
+    /// (geodesic) distance computed by a single multi-source BFS that is allowed to bridge across
+    /// non-mask space, so disconnected bone islands — unreachable by the constrained grow — are
+    /// still covered. Guarantees every mask voxel ends labeled (no holes, no unclassified bone).
+    /// Additive helper; existing Core methods are untouched.
+    /// </summary>
+    public static void FillNearestLabelWithinMask(
+        SegmentationVolume maskVol, byte maskLabel,
+        SegmentationVolume outVol,
+        Action<double>? progress = null)
+    {
+        int w = maskVol.Width, h = maskVol.Height, d = maskVol.Depth;
+        int total = w * h * d;
+
+        var prop = new byte[total]; // propagated nearest label (0 = not yet reached)
+        var queue = new Queue<int>();
+
+        int remaining = 0; // count of unlabeled mask voxels still needing a label
+        for (int i = 0; i < total; i++)
+        {
+            if (outVol.Labels[i] != 0)
+            {
+                prop[i] = outVol.Labels[i];
+                queue.Enqueue(i);
+            }
+            else if (maskVol.Labels[i] == maskLabel)
+            {
+                remaining++;
+            }
+        }
+
+        if (remaining == 0 || queue.Count == 0) { progress?.Invoke(1.0); return; }
+
+        int plane = w * h;
+        int processed = 0;
+        int maxEstimate = Math.Max(1, remaining);
+
+        while (queue.Count > 0 && remaining > 0)
+        {
+            int curr = queue.Dequeue();
+            byte lbl = prop[curr];
+
+            int cz = curr / plane;
+            int rem = curr - cz * plane;
+            int cy = rem / w;
+            int cx = rem - cy * w;
+
+            if (cx + 1 < w) Visit(curr + 1);
+            if (cx - 1 >= 0) Visit(curr - 1);
+            if (cy + 1 < h) Visit(curr + w);
+            if (cy - 1 >= 0) Visit(curr - w);
+            if (cz + 1 < d) Visit(curr + plane);
+            if (cz - 1 >= 0) Visit(curr - plane);
+
+            void Visit(int nIdx)
+            {
+                if (prop[nIdx] != 0) return; // already reached by a nearer source
+                prop[nIdx] = lbl;
+                queue.Enqueue(nIdx);
+
+                // Commit the label only into unlabeled mask voxels.
+                if (outVol.Labels[nIdx] == 0 && maskVol.Labels[nIdx] == maskLabel)
+                {
+                    outVol.Labels[nIdx] = lbl;
+                    remaining--;
+                    processed++;
+                    if (progress != null && (processed & 0xFFFF) == 0)
+                        progress(Math.Min(1.0, (double)processed / maxEstimate));
+                }
+            }
+        }
+
+        progress?.Invoke(1.0);
+    }
+}

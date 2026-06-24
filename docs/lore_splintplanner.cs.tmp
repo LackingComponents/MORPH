@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -15,55 +15,55 @@ namespace OrthoPlanner.App;
 
 public partial class SplintPlannerWindow : Window
 {
-    // ── Input ─────────────────────────────────────────────────────────────
+    // ÔöÇÔöÇ Input ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     private readonly float[] _upperMesh;  // maxilla / upper dental cast
     private readonly float[] _lowerMesh;  // mandible / lower dental cast
 
-    // ── Clinical config (pose/labelling carried from caller; geometry merged
-    //    from the sliders at Generate time) ─────────────────────────────────
+    // ÔöÇÔöÇ Clinical config (pose/labelling carried from caller; geometry merged
+    //    from the sliders at Generate time) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     private readonly SplintConfig _config;
 
-    // ── Arch curves ───────────────────────────────────────────────────────
+    // ÔöÇÔöÇ Arch curves ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     private readonly ArchCurve _upperArch = new();
     private readonly ArchCurve _lowerArch = new();
 
-    // ── Marker 3D models ─────────────────────────────────────────────────
+    // ÔöÇÔöÇ Marker 3D models ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     private readonly List<MeshGeometryModel3D> _upperMarkers = new();
     private readonly List<MeshGeometryModel3D> _lowerMarkers = new();
 
-    // ── Curve preview lines ───────────────────────────────────────────────
+    // ÔöÇÔöÇ Curve preview lines ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     private LineGeometryModel3D? _upperCurveLine;
     private LineGeometryModel3D? _lowerCurveLine;
 
-    // ── Ribbon preview (labio-lingual width footprint) ────────────────────
+    // ÔöÇÔöÇ Ribbon preview (labio-lingual width footprint) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     private MeshGeometryModel3D? _upperRibbon;
     private MeshGeometryModel3D? _lowerRibbon;
 
-    // ── Splint preview ────────────────────────────────────────────────────
+    // ÔöÇÔöÇ Splint preview ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     private MeshGeometryModel3D? _splintUpperPreview;
     private MeshGeometryModel3D? _splintLowerPreview;
     private MeshGeometryModel3D? _lowerReviewModel;
     private MeshGeometryModel3D? _upperBaseModel;
     private MeshGeometryModel3D? _lowerBaseModel;
 
-    // ── Headlamp handler ────────────────────────────────────────────────────
+    // ÔöÇÔöÇ Headlamp handler ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     private EventHandler? _renderingHandler;
     private bool _reviewCastTogglesReady;
     private bool _isReviewMode;
     private bool _pointEditingHandlersAttached = true;
 
-    // ── Drag state ────────────────────────────────────────────────────────
+    // ÔöÇÔöÇ Drag state ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     private bool _draggingUpper, _draggingLower;
     private int  _dragIdxUpper = -1, _dragIdxLower = -1;
 
-    // ── Result ────────────────────────────────────────────────────────────
+    // ÔöÇÔöÇ Result ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     public bool   Accepted       { get; private set; }
     public float[]? SplintVertices { get; private set; }
     /// <summary>The surgical sequence chosen by the radio buttons at generation time
     /// (maxilla-first vs mandible-first), so the caller can label the produced wafer.</summary>
     public MobileJaw ChosenFirstOperated { get; private set; } = MobileJaw.Maxilla;
 
-    // ─────────────────────────────────────────────────────────────────────
+    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     public SplintPlannerWindow(float[] upperMesh, float[] lowerMesh, MainViewModel _,
         SplintConfig? config = null)
     {
@@ -84,9 +84,9 @@ public partial class SplintPlannerWindow : Window
         MandibleFirstRadio.IsChecked = _config.FirstOperated == MobileJaw.Mandible;
 
         // Drive the title from the clinical config (no hard-coded "Final Occlusion").
-        Title = $"Splint Planner — {_config.DisplayName}";
+        Title = $"Splint Planner ÔÇö {_config.DisplayName}";
 
-        // EffectsManagers — set directly, not via binding
+        // EffectsManagers ÔÇö set directly, not via binding
         UpperViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
         LowerViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
 
@@ -121,9 +121,9 @@ public partial class SplintPlannerWindow : Window
         }
     }
 
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     //  LOAD / CLOSE
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         // Load meshes into viewports
@@ -141,7 +141,7 @@ public partial class SplintPlannerWindow : Window
         float us = SplintEngine.WatertightScore(_upperMesh);
         float ls = SplintEngine.WatertightScore(_lowerMesh);
         if (us > 0.02f || ls > 0.02f)
-            QualityText.Text = $"⚠ Mesh quality: Upper {us:P0} open | Lower {ls:P0} open — tooth imprint may vary";
+            QualityText.Text = $"ÔÜá Mesh quality: Upper {us:P0} open | Lower {ls:P0} open ÔÇö tooth imprint may vary";
 
         UpdateUI();
     }
@@ -159,9 +159,9 @@ public partial class SplintPlannerWindow : Window
         if (LowerViewport.EffectsManager is IDisposable l) { l.Dispose(); LowerViewport.EffectsManager = null!; }
     }
 
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     //  CAMERA
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     private static void CenterCamera(Viewport3DX vp, float[] mesh, bool lookFromBelow)
     {
         if (mesh.Length < 3 || vp.Camera is not HelixToolkit.Wpf.SharpDX.PerspectiveCamera cam) return;
@@ -197,9 +197,9 @@ public partial class SplintPlannerWindow : Window
         vp.FixedRotationPoint = new Point3D(cx, cy, cz);
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  MOUSE — LEFT CLICK (add point) / DRAG (move point)
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+    //  MOUSE ÔÇö LEFT CLICK (add point) / DRAG (move point)
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     private void UpperViewport_MouseLeft(object sender, MouseButtonEventArgs e)
     {
         if (_isReviewMode) return;
@@ -207,7 +207,7 @@ public partial class SplintPlannerWindow : Window
         var hits = UpperViewport.FindHits(e.GetPosition(UpperViewport));
         if (hits == null || hits.Count == 0) return;
 
-        // Clicked on an existing marker? → start drag
+        // Clicked on an existing marker? ÔåÆ start drag
         foreach (var hit in hits)
         {
             if (hit.ModelHit is MeshGeometryModel3D marker)
@@ -217,7 +217,7 @@ public partial class SplintPlannerWindow : Window
             }
         }
 
-        // Clicked on the mesh → add new point
+        // Clicked on the mesh ÔåÆ add new point
         var pt = hits[0].PointHit;
         _upperArch.AddPoint((float)pt.X, (float)pt.Y, (float)pt.Z);
         AddMarker(UpperGroup, _upperMarkers, pt, isUpper: true);
@@ -250,9 +250,9 @@ public partial class SplintPlannerWindow : Window
         e.Handled = true;
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  MOUSE — DRAG (move existing point)
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+    //  MOUSE ÔÇö DRAG (move existing point)
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     private void UpperViewport_MouseMove(object sender, MouseEventArgs e)
     {
         if (_isReviewMode) { _draggingUpper = false; _dragIdxUpper = -1; return; }
@@ -296,9 +296,9 @@ public partial class SplintPlannerWindow : Window
     private void LowerViewport_MouseLeftUp(object sender, MouseButtonEventArgs e)
     { _draggingLower = false; _dragIdxLower = -1; }
 
-    // ═══════════════════════════════════════════════════════════
-    //  MOUSE — RIGHT CLICK (remove nearest point)
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+    //  MOUSE ÔÇö RIGHT CLICK (remove nearest point)
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     private void UpperViewport_MouseRight(object sender, MouseButtonEventArgs e)
     {
         if (_isReviewMode) return;
@@ -344,9 +344,9 @@ public partial class SplintPlannerWindow : Window
         return best;
     }
 
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     //  MARKERS
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     private static MeshGeometryModel3D CreateSphere(System.Numerics.Vector3 pos,
         System.Windows.Media.Color color)
     {
@@ -375,9 +375,9 @@ public partial class SplintPlannerWindow : Window
         group.Children.Add(sphere);
     }
 
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     //  CURVE PREVIEW
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     private void RefreshUpperCurve()
     {
         if (_upperCurveLine != null) { UpperGroup.Children.Remove(_upperCurveLine); _upperCurveLine = null; }
@@ -435,9 +435,9 @@ public partial class SplintPlannerWindow : Window
         return new LineGeometryModel3D { Geometry = lb.ToLineGeometry3D(), Color = color, Thickness = 2.5 };
     }
 
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     //  SLIDERS
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     private void ThicknessSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
     {
         if (ThicknessLabel != null) ThicknessLabel.Text = $"{e.NewValue:F1} mm";
@@ -469,9 +469,9 @@ public partial class SplintPlannerWindow : Window
         if (_lowerArch?.ControlPointCount >= 2) RefreshLowerRibbon();
     }
 
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     //  CLEAR
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     private void ClearUpper_Click(object s, RoutedEventArgs e)
     {
         foreach (var m in _upperMarkers) UpperGroup.Children.Remove(m);
@@ -490,9 +490,9 @@ public partial class SplintPlannerWindow : Window
         UpdateUI();
     }
 
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     //  UI STATE
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     private void UpdateUI()
     {
         int u = _upperArch.ControlPointCount;
@@ -501,21 +501,21 @@ public partial class SplintPlannerWindow : Window
         GenerateBtn.IsEnabled = u >= 3 && l >= 3;
 
         if (u < 3)
-            StepInstructions.Text = $"Place ≥ 3 points on the UPPER arch ({u} placed). Click from molar to molar, front of arch.";
+            StepInstructions.Text = $"Place ÔëÑ 3 points on the UPPER arch ({u} placed). Click from molar to molar, front of arch.";
         else if (l < 3)
-            StepInstructions.Text = $"Place ≥ 3 points on the LOWER arch ({l} placed). Click from molar to molar, front of arch.";
+            StepInstructions.Text = $"Place ÔëÑ 3 points on the LOWER arch ({l} placed). Click from molar to molar, front of arch.";
         else
             StepInstructions.Text = $"Both arches defined ({u} upper / {l} lower). Adjust sliders then click Generate.";
     }
 
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     //  GENERATE
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     private async void GenerateBtn_Click(object s, RoutedEventArgs e)
     {
         GenerateBtn.IsEnabled = false;
         AcceptBtn.Visibility  = Visibility.Collapsed;
-        StatusText.Text = "Generating…";
+        StatusText.Text = "GeneratingÔÇª";
 
         var upperSampled  = _upperArch.Sample(160);
         var lowerSampled  = _lowerArch.Sample(160);
@@ -536,7 +536,7 @@ public partial class SplintPlannerWindow : Window
 
             // (sequence is also surfaced to the caller via ChosenFirstOperated)
 
-            // Clinical-fit controls (steps 4–6).
+            // Clinical-fit controls (steps 4ÔÇô6).
             BlockoutUndercuts   = BlockoutCheck.IsChecked == true,
             EngagementDepthMm   = (float)EngagementDepthSlider.Value,
             EnforceMinThickness = false,
@@ -606,16 +606,16 @@ public partial class SplintPlannerWindow : Window
 
         StepTitle.Text = "Step 2: Review Splint";
         StepInstructions.Text = lowerWasAutorotated
-            ? $"Blue solid = splint. Mandible autorotated {autorotation.RotationDegrees:F1}°. Rotate to inspect. Click Accept."
+            ? $"Blue solid = splint. Mandible autorotated {autorotation.RotationDegrees:F1}┬░. Rotate to inspect. Click Accept."
             : "Blue solid = splint. Grey = opposing arch. Rotate to inspect. Click Accept.";
 
         StatusText.Text = $"{splint.Length / 9:N0} triangles";
         if (result.IsManifold)
-            QualityText.Text = "✔ Splint is a closed, printable manifold";
+            QualityText.Text = "Ô£ö Splint is a closed, printable manifold";
         else
-            QualityText.Text = $"⚠ Splint: {result.OpenEdgeFraction:P0} open edges — review before printing";
+            QualityText.Text = $"ÔÜá Splint: {result.OpenEdgeFraction:P0} open edges ÔÇö review before printing";
 
-        // Surface any clinical/repair warnings (scan fallback, residual open edges, …).
+        // Surface any clinical/repair warnings (scan fallback, residual open edges, ÔÇª).
         var allWarnings = preGenerationWarnings.Concat(result.Warnings).ToList();
         if (allWarnings.Count > 0)
             MessageBox.Show(string.Join("\n\n", allWarnings),
@@ -633,7 +633,7 @@ public partial class SplintPlannerWindow : Window
         ViewportSplitter.Visibility = Visibility.Collapsed;
         LowerViewportBorder.Visibility = Visibility.Collapsed;
         ReviewVisibilityPanel.Visibility = Visibility.Visible;
-        UpperViewportTitle.Text = "Splint Review — superior cast + inferior cast + splint";
+        UpperViewportTitle.Text = "Splint Review ÔÇö superior cast + inferior cast + splint";
         UpperViewportHint.Text = "Use the cast toggles to hide/show dental casts";
         RemoveArchAnnotationsFromScene();
 
@@ -650,7 +650,7 @@ public partial class SplintPlannerWindow : Window
         ViewportSplitter.Visibility = Visibility.Visible;
         LowerViewportBorder.Visibility = Visibility.Visible;
         ReviewVisibilityPanel.Visibility = Visibility.Collapsed;
-        UpperViewportTitle.Text = "🦷 Upper Arch (Maxilla) — Occlusal from below";
+        UpperViewportTitle.Text = "­ƒªÀ Upper Arch (Maxilla) ÔÇö Occlusal from below";
         UpperViewportHint.Text = "Left-click = add point  |  Right-click = remove last";
         RestoreArchAnnotationsToScene();
 
@@ -753,13 +753,13 @@ public partial class SplintPlannerWindow : Window
             LowerGroup.Children.Add(_lowerRibbon);
     }
 
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     //  ACCEPT / CANCEL
-    // ═══════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     private void AcceptBtn_Click(object s, RoutedEventArgs e)
     {
         Accepted = true;
-        Close();  // window was opened with Show(), not ShowDialog() — no DialogResult
+        Close();  // window was opened with Show(), not ShowDialog() ÔÇö no DialogResult
     }
 
     private void CancelBtn_Click(object s, RoutedEventArgs e)
@@ -776,7 +776,7 @@ public partial class SplintPlannerWindow : Window
             ExitCombinedReviewMode();
             SplintVertices = null;
             AcceptBtn.Visibility = Visibility.Collapsed;
-            StepTitle.Text = "Step 1: Place ≥ 3 points on each arch";
+            StepTitle.Text = "Step 1: Place ÔëÑ 3 points on each arch";
             StepInstructions.Text = "Adjust points or sliders then click Generate again.";
             return;
         }

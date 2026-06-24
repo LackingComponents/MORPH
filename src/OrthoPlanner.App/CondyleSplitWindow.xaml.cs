@@ -18,10 +18,12 @@ public partial class CondyleSplitWindow : Window
 {
     // Input
     private readonly List<float[]> _boneVerts;
+    private readonly HelixToolkit.SharpDX.Geometry3D? _boneGeometry;
     private readonly VolumeData? _ctVolume;
     private readonly SegmentationVolume? _segVolume;
     private readonly byte _boneLabel;
     private readonly double _boneMinHu;
+    private readonly bool _landmarkOnlyMode;
 
     // 3 user-picked points defining the split plane
     private readonly List<Point3D> _planePoints = new(); // Used to be list of 3
@@ -74,6 +76,8 @@ public partial class CondyleSplitWindow : Window
     public List<float[]>? MandibleResult { get; private set; }
     public (double X, double Y, double Z)? LeftCondyleCenter { get; private set; }
     public (double X, double Y, double Z)? RightCondyleCenter { get; private set; }
+    public (double X, double Y, double Z)? LeftCondyleHalfExtents { get; private set; }
+    public (double X, double Y, double Z)? RightCondyleHalfExtents { get; private set; }
     public (double X, double Y, double Z)? DentalMidlinePoint { get; private set; }
 
     private void CenterViewportOnBone(System.Windows.Media.Media3D.Vector3D? lookDir = null)
@@ -112,7 +116,9 @@ public partial class CondyleSplitWindow : Window
 
     public CondyleSplitWindow(
         List<float[]> boneVerts,
-        VolumeData? ctVolume = null, SegmentationVolume? segVolume = null, byte boneLabel = 1, double boneMinHu = 400.0)
+        VolumeData? ctVolume = null, SegmentationVolume? segVolume = null, byte boneLabel = 1, double boneMinHu = 400.0,
+        bool landmarkOnlyMode = false,
+        HelixToolkit.SharpDX.Geometry3D? boneGeometry = null)
     {
         InitializeComponent();
         
@@ -127,10 +133,12 @@ public partial class CondyleSplitWindow : Window
         System.Windows.Media.CompositionTarget.Rendering += _renderingHandler;
 
         _boneVerts = boneVerts.Select(v => new float[] { v[0], v[1], v[2] }).ToList();
+        _boneGeometry = boneGeometry;
         _ctVolume = ctVolume;
         _segVolume = segVolume;
         _boneLabel = boneLabel;
         _boneMinHu = boneMinHu;
+        _landmarkOnlyMode = landmarkOnlyMode;
         Loaded += (_, _) => SetupStep1();
         Closed += OnWindowClosed;
     }
@@ -180,14 +188,30 @@ public partial class CondyleSplitWindow : Window
 
         MainGroup.Children.Clear();
 
-        // Build bone model with 255 alpha (fully opaque) and exact MainViewport default color 245,245,230
-        var boneModel = MeshHelper.BuildModel3D(_boneVerts, 245, 245, 230, 255);
+        // Prefer the already-validated viewport geometry from the main scene when available.
+        MeshGeometryModel3D boneModel;
+        if (_boneGeometry is HelixToolkit.SharpDX.MeshGeometry3D prefab
+            && prefab.Positions != null && prefab.Positions.Count > 0
+            && prefab.Indices != null && prefab.Indices.Count >= 3)
+        {
+            boneModel = new MeshGeometryModel3D
+            {
+                Geometry = prefab,
+                Material = MeshHelper.CreatePhongMaterial(245, 245, 230, 255)
+            };
+        }
+        else
+        {
+            boneModel = MeshHelper.BuildModel3D(_boneVerts, 245, 245, 230, 255);
+        }
         MainGroup.Children.Add(boneModel);
 
         // Start: look from right profile (Vector3D(1, 0, 0))
         CenterViewportOnBone(new System.Windows.Media.Media3D.Vector3D(1, 0, 0));
 
-        StepTitle.Text = "Step 1: Define Plane & Condyles";
+        StepTitle.Text = _landmarkOnlyMode
+            ? "Step 1: Define Mandible Fulcrum"
+            : "Step 1: Define Plane & Condyles";
         UpdateStep1Instructions();
         
         SplitBtn.Visibility = Visibility.Visible;
@@ -195,10 +219,18 @@ public partial class CondyleSplitWindow : Window
         SplitBtn.IsEnabled = false; // Need 5 points
         ConfirmBtn.Visibility = Visibility.Collapsed;
         AcceptBtn.Visibility = Visibility.Collapsed;
+        HardSeparationCheck.Visibility = _landmarkOnlyMode ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private int GetNextEmptySlot()
     {
+        if (_landmarkOnlyMode)
+        {
+            if (_splitPoints[0] == null) return 0;
+            if (_splitPoints[4] == null) return 4;
+            return -1;
+        }
+
         for (int i = 0; i < 5; i++)
             if (_splitPoints[i] == null) return i;
         return -1;
@@ -206,20 +238,28 @@ public partial class CondyleSplitWindow : Window
 
     private void UpdateStep1Instructions()
     {
-        int total = 0;
-        for (int i = 0; i < 5; i++) if (_splitPoints[i] != null) total++;
+        int total = _landmarkOnlyMode
+            ? (_splitPoints[0] != null ? 1 : 0) + (_splitPoints[4] != null ? 1 : 0)
+            : _splitPoints.Count(p => p != null);
 
         int nextSlot = GetNextEmptySlot();
         if (nextSlot != -1)
         {
-            StatusText.Text = $"Placed {total}/5. Please click: {_pointNames[nextSlot]}";
-            StepInstructions.Text = "Click sequence: (1) Right Condyle, (2) Right Posterior, (3) Interincisal, (4) Left Posterior, (5) Left Condyle. Right-click points to delete.";
+            int required = _landmarkOnlyMode ? 2 : 5;
+            StatusText.Text = $"Placed {total}/{required}. Please click: {_pointNames[nextSlot]}";
+            StepInstructions.Text = _landmarkOnlyMode
+                ? "Click only the two condyle fulcrums: (1) Right Condyle, then (2) Left Condyle. Right-click a point to delete it."
+                : "Click sequence: (1) Right Condyle, (2) Right Posterior, (3) Interincisal, (4) Left Posterior, (5) Left Condyle. Right-click points to delete.";
             SplitBtn.IsEnabled = false;
         }
         else
         {
-            StatusText.Text = "All 5 points placed.";
-            StepInstructions.Text = "Click 'Next: Review' to view and adjust bounding boxes and the separation plane.";
+            StatusText.Text = _landmarkOnlyMode
+                ? "Both condyle fulcrums placed."
+                : "All 5 points placed.";
+            StepInstructions.Text = _landmarkOnlyMode
+                ? "Click 'Next: Review' to view and adjust the condyle bounding boxes."
+                : "Click 'Next: Review' to view and adjust bounding boxes and the separation plane.";
             SplitBtn.IsEnabled = true;
         }
     }
@@ -324,7 +364,10 @@ public partial class CondyleSplitWindow : Window
     {
         if (GetNextEmptySlot() != -1)
         {
-            MessageBox.Show("Please place all 5 points first.", "Need Points",
+            string message = _landmarkOnlyMode
+                ? "Please place the right and left condyle fulcrum points first."
+                : "Please place all 5 points first.";
+            MessageBox.Show(message, "Need Points",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
@@ -332,12 +375,15 @@ public partial class CondyleSplitWindow : Window
         _currentStep = 2;
         _dragPointIndex = -1;
 
-        // Compute and draw the plane
-        ComputePlane();
+        // Compute and draw the occlusal split plane only in the full split workflow.
+        if (!_landmarkOnlyMode)
+            ComputePlane();
 
         // Populate condylar boxes
         // 10mm medial shift: right side (+x) shifts -10, left side (-x) shifts +10 (assuming X origin near midline)
-        float midlineX = (float)(_splitPoints[2]!.Value.X);
+        float midlineX = _landmarkOnlyMode
+            ? (float)((_splitPoints[0]!.Value.X + _splitPoints[4]!.Value.X) * 0.5)
+            : (float)(_splitPoints[2]!.Value.X);
 
         if (_splitPoints[0] != null)
         {
@@ -361,11 +407,42 @@ public partial class CondyleSplitWindow : Window
 
         CenterViewportOnBone(new System.Windows.Media.Media3D.Vector3D(0, 1, 0)); // Resnap to anterior
 
-        StepTitle.Text = "Step 2: Review Condylar Bounding Boxes & Plane";
-        StepInstructions.Text =
-            "Review the bounding boxes and cut plane. Drag the box center to move, drag corners to resize. Then click 'Split'.";
-        StatusText.Text = "Ready to split";
-        SplitBtn.Content = "Split";
+        StepTitle.Text = _landmarkOnlyMode
+            ? "Step 2: Review Condylar Bounding Boxes"
+            : "Step 2: Review Condylar Bounding Boxes & Plane";
+        StepInstructions.Text = _landmarkOnlyMode
+            ? "Review the condyle boxes. Drag the box center to move, drag corners to resize. Then click 'Save Condyles'."
+            : "Review the bounding boxes and cut plane. Drag the box center to move, drag corners to resize. Then click 'Split'.";
+        StatusText.Text = _landmarkOnlyMode ? "Ready to save condyle fulcrums" : "Ready to split";
+        SplitBtn.Content = _landmarkOnlyMode ? "Save Condyles" : "Split";
+    }
+
+    private void SaveCondyleLandmarksOnly()
+    {
+        if (_leftCondyleCenter == null || _rightCondyleCenter == null)
+        {
+            MessageBox.Show("Place both condylar bounding boxes first.",
+                "Missing Condyles", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var leftC = _leftCondyleCenter.ToArray();
+        var rightC = _rightCondyleCenter.ToArray();
+        var leftHE = _leftHalfExtents.ToArray();
+        var rightHE = _rightHalfExtents.ToArray();
+
+        LeftCondyleCenter = (leftC[0], leftC[1], leftC[2]);
+        RightCondyleCenter = (rightC[0], rightC[1], rightC[2]);
+        LeftCondyleHalfExtents = (leftHE[0], leftHE[1], leftHE[2]);
+        RightCondyleHalfExtents = (rightHE[0], rightHE[1], rightHE[2]);
+        if (_splitPoints[2].HasValue)
+        {
+            DentalMidlinePoint = (_splitPoints[2]!.Value.X, _splitPoints[2]!.Value.Y, _splitPoints[2]!.Value.Z);
+        }
+
+        Accepted = true;
+        DialogResult = true;
+        Close();
     }
 
     // ═══════════════════════════════════
@@ -436,6 +513,8 @@ public partial class CondyleSplitWindow : Window
                 MandibleResult = _mandibleVerts;
                 LeftCondyleCenter = (leftC[0], leftC[1], leftC[2]);
                 RightCondyleCenter = (rightC[0], rightC[1], rightC[2]);
+                LeftCondyleHalfExtents = (leftHE[0], leftHE[1], leftHE[2]);
+                RightCondyleHalfExtents = (rightHE[0], rightHE[1], rightHE[2]);
                 if (_splitPoints[2].HasValue)
                 {
                     DentalMidlinePoint = (_splitPoints[2]!.Value.X, _splitPoints[2]!.Value.Y, _splitPoints[2]!.Value.Z);
@@ -1035,7 +1114,11 @@ public partial class CondyleSplitWindow : Window
     private void Split_Click(object sender, RoutedEventArgs e)
     {
         if (_currentStep == 1) GoToCondyleStep();
-        else if (_currentStep == 2) PerformSplit();
+        else if (_currentStep == 2)
+        {
+            if (_landmarkOnlyMode) SaveCondyleLandmarksOnly();
+            else PerformSplit();
+        }
     }
 
     private void Confirm_Click(object sender, RoutedEventArgs e) { }

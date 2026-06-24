@@ -24,7 +24,7 @@
 
         <!-- 3D Viewport -->
         <Border Grid.Row="1" Margin="0,8" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
-            <hx:Viewport3DX ShowCameraTarget="False" x:Name="MainViewport" BackgroundColor="#FF080C14"
+            <hx:Viewport3DX x:Name="MainViewport" BackgroundColor="#FF080C14"
                             ShowCoordinateSystem="True" CoordinateSystemLabelForeground="#00000000"
                             ZoomExtentsWhenLoaded="False"
                             IsRotationEnabled="True" IsPanEnabled="True" IsZoomEnabled="True"
