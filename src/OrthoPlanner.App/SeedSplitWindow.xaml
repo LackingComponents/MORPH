@@ -1,0 +1,165 @@
+<Window x:Class="OrthoPlanner.App.SeedSplitWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ctrl="clr-namespace:OrthoPlanner.App.Controls"
+        Title="Seed Split Wizard" Width="1180" Height="760"
+        WindowStartupLocation="CenterOwner"
+        Background="#FF0E1420" Foreground="White" FontFamily="Segoe UI">
+
+    <Window.Resources>
+        <Style x:Key="ToolButton" TargetType="Button">
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Padding" Value="10,2"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+            <Setter Property="Background" Value="#20FFFFFF"/>
+            <Setter Property="BorderBrush" Value="#40FFFFFF"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource ToolButton}">
+            <Setter Property="Background" Value="#3060A0"/>
+            <Setter Property="BorderBrush" Value="#4080C0"/>
+        </Style>
+        <Style x:Key="AcceptButton" TargetType="Button" BasedOn="{StaticResource ToolButton}">
+            <Setter Property="Background" Value="#308040"/>
+            <Setter Property="BorderBrush" Value="#40A060"/>
+        </Style>
+        <Style x:Key="PanelHeader" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#FFA0AAB5"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,8,0,4"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0">
+            <TextBlock Text="Seed Split Wizard" FontSize="16" FontWeight="SemiBold" Foreground="#EAECF0"/>
+            <TextBlock Text="Scroll to the coronal slice of interest, choose Cranium/Mandible/Exclude, then click the CT to place competing seeds. The colored overlay is the live mask preview."
+                       FontSize="11" Foreground="#88AABB" Margin="0,4,0,0" TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <Grid Grid.Row="1" Margin="0,10,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="330"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" BorderBrush="#30FFFFFF" BorderThickness="1" CornerRadius="4" ClipToBounds="True" Background="#FF05080D">
+                <Grid x:Name="CoronalHost" MouseWheel="CoronalHost_MouseWheel" MouseLeftButtonDown="CoronalHost_MouseLeftButtonDown"
+                      SizeChanged="CoronalHost_SizeChanged">
+                    <Image x:Name="CoronalImageView" Source="{Binding CoronalImage, Mode=OneWay}" Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                    <Canvas x:Name="SeedOverlay" IsHitTestVisible="False"/>
+                    <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8" Padding="6,3"
+                            Background="#AA000000" CornerRadius="3">
+                        <TextBlock FontSize="11" Foreground="#DDE7F0">
+                            <Run Text="Coronal: "/><Run Text="{Binding CoronalIndex, Mode=OneWay}"/><Run Text=" / "/><Run Text="{Binding CoronalMax, Mode=OneWay}"/>
+                        </TextBlock>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="1" Margin="10,0,0,0" Padding="10" BorderBrush="#30FFFFFF"
+                    BorderThickness="1" CornerRadius="4" Background="#FF141922">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0">
+                        <TextBlock Text="SEED POINT SELECTION" Style="{StaticResource PanelHeader}" Margin="0,0,0,4"/>
+                        <UniformGrid Columns="3" Margin="0,0,0,8">
+                            <RadioButton x:Name="CraniumRadio" Content="Cranium" GroupName="SeedClass" IsChecked="True"
+                                         Checked="SeedClass_Checked" Foreground="#FFAAB6FF" FontSize="11"/>
+                            <RadioButton x:Name="MandibleRadio" Content="Mandible" GroupName="SeedClass"
+                                         Checked="SeedClass_Checked" Foreground="#FFFFB36B" FontSize="11"/>
+                            <RadioButton x:Name="ExcludeRadio" Content="Exclude" GroupName="SeedClass"
+                                         Checked="SeedClass_Checked" Foreground="#FFFF7777" FontSize="11"/>
+                        </UniformGrid>
+
+                        <TextBlock Text="{Binding SeedThresholdText, Mode=OneWay}" Foreground="#FFC7D0DC" FontSize="10" Margin="0,0,0,4"/>
+                    </StackPanel>
+
+                    <DataGrid Grid.Row="1" Height="230" ItemsSource="{Binding Seeds}" SelectedItem="{Binding SelectedSeed, Mode=TwoWay}"
+                              AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column"
+                              Background="#FF0E1420" Foreground="White" BorderBrush="#30343D"
+                              RowBackground="#FF171D28" AlternatingRowBackground="#FF121821"
+                              GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#25313B"
+                              FontSize="11" Margin="0,0,0,8">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Class" Binding="{Binding ClassName}" Width="80"/>
+                            <DataGridTextColumn Header="HU" Binding="{Binding Hu}" Width="55"/>
+                            <DataGridTextColumn Header="Coordinates" Binding="{Binding Coordinates}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <StackPanel Grid.Row="2">
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Content="Delete Selected" Click="DeleteSeed_Click" Style="{StaticResource ToolButton}"/>
+                            <Button Grid.Column="1" Content="Clear Seeds" Click="ClearSeeds_Click" Style="{StaticResource ToolButton}" Margin="0"/>
+                        </Grid>
+
+                        <TextBlock Text="SEED SENSITIVITY" Style="{StaticResource PanelHeader}"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="56"/>
+                            </Grid.ColumnDefinitions>
+                            <Slider Minimum="25" Maximum="1500" TickFrequency="25" IsSnapToTickEnabled="True"
+                                    Value="{Binding SeedTolerance, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            <TextBox Grid.Column="1" Margin="6,0,0,0" TextAlignment="Center" Padding="2"
+                                     Background="#FF30343D" Foreground="White" BorderThickness="0"
+                                     Text="{Binding SeedTolerance, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"/>
+                        </Grid>
+
+                        <TextBlock Text="BONE MASK THRESHOLD (HU)" Style="{StaticResource PanelHeader}"/>
+                        <Border Margin="0,0,0,2" CornerRadius="3" ClipToBounds="True" Background="#FF101418" Height="48">
+                            <Image Source="{Binding MaskHistogramImage, Mode=OneWay}" Stretch="Fill"
+                                   RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                        </Border>
+                        <ctrl:RangeSlider Minimum="{Binding IsoMin, Mode=OneWay}" Maximum="{Binding IsoMax, Mode=OneWay}" Height="20"
+                                          LowerValue="{Binding MaskMinHu, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          UpperValue="{Binding MaskMaxHu, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <DockPanel Margin="0,2,0,0">
+                            <TextBox Width="45" FontSize="10" TextAlignment="Center" Padding="2,0" VerticalContentAlignment="Center"
+                                     Background="#FF30343D" Foreground="White" BorderThickness="0"
+                                     Text="{Binding MaskMinHu, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"/>
+                            <TextBox DockPanel.Dock="Right" Width="45" FontSize="10" TextAlignment="Center" Padding="2,0"
+                                     VerticalContentAlignment="Center" Background="#FF30343D" Foreground="White" BorderThickness="0"
+                                     Text="{Binding MaskMaxHu, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"/>
+                            <TextBlock/>
+                        </DockPanel>
+
+                        <ProgressBar Height="6" Minimum="0" Maximum="100" Value="{Binding Progress, Mode=OneWay}" Margin="0,14,0,4"/>
+                        <TextBlock Text="{Binding StatusText, Mode=OneWay}" Foreground="#FFAAB6C6" FontSize="10" TextWrapping="Wrap"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+                        <Button Content="Preview" Click="Preview_Click" Style="{StaticResource ToolButton}" Width="80"/>
+                        <Button x:Name="ComputeBtn" Content="Compute Split" Click="Compute_Click" Style="{StaticResource PrimaryButton}" Width="110"/>
+                        <Button x:Name="AcceptBtn" Content="Accept" Click="Accept_Click" Style="{StaticResource AcceptButton}" Width="80" IsEnabled="False"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Grid Grid.Row="2">
+            <Button Content="Cancel" Click="Cancel_Click" Style="{StaticResource ToolButton}" Width="86" HorizontalAlignment="Left"/>
+        </Grid>
+    </Grid>
+</Window>
