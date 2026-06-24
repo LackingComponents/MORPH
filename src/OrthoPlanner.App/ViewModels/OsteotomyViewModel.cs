@@ -47,7 +47,7 @@ public partial class MainViewModel
             // Add upper maxilla piece
             var upperVm = new SegmentViewModel
             {
-                Label = (byte)(Segments.Count + 1),
+                Label = NextSegmentLabel(),
                 Name = "Cranium (LeFort Upper)",
                 Vertices = MeshHelper.ToFlatArray(wizard.UpperMaxillaResult),
                 ColorR = 220, ColorG = 200, ColorB = 170,
@@ -349,11 +349,21 @@ public partial class MainViewModel
 
             if (splitTargetVolume == null)
             {
-                System.Windows.MessageBox.Show(
-                    "No valid bone segmentation mask found. Please run bone segmentation before splitting.",
-                    "Bone Segmentation Required", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
-                StatusText = "Cranium/Mandible split requires a valid bone segmentation mask.";
-                return;
+                StatusText = "Bone mask is out of date after NHP. Recomputing bone model...";
+                await RunSegmentInternalAsync("Bone", BoneMinHU, BoneMaxHU, 230, 210, 180,
+                    HardTissueModel, enhanceThinBone: EnhanceSegmentation, confirmOverwrite: false);
+
+                boneSegment = HardTissueModel;
+                splitTargetVolume = boneSegment != null ? GetValidSplitTargetVolume(boneSegment.Label) : null;
+
+                if (boneSegment?.Vertices == null || boneSegment.Vertices.Length < 100 || splitTargetVolume == null)
+                {
+                    System.Windows.MessageBox.Show(
+                        "The current bone segmentation mask could not be regenerated for the NHP CT volume. Please recompute the bone model manually before splitting.",
+                        "Bone Segmentation Required", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+                    StatusText = "Cranium/Mandible split requires a valid bone segmentation for the current NHP volume.";
+                    return;
+                }
             }
 
 
@@ -371,6 +381,8 @@ public partial class MainViewModel
                 // land in the same space as the already-committed mesh vertices.
                 LeftCondyleCenter  = TransformTuple(wizard.LeftCondyleCenter,  _cumulativeNhpMatrix);
                 RightCondyleCenter = TransformTuple(wizard.RightCondyleCenter, _cumulativeNhpMatrix);
+                LeftCondyleHalfExtents = wizard.LeftCondyleHalfExtents;
+                RightCondyleHalfExtents = wizard.RightCondyleHalfExtents;
                 DentalMidlinePoint = TransformTuple(wizard.DentalMidlinePoint, _cumulativeNhpMatrix);
 
                 // Create Cranium segment
@@ -411,7 +423,6 @@ public partial class MainViewModel
                 }
 
                 RefreshCombinedModel();
-                GC.Collect(2, GCCollectionMode.Optimized, false);
                 StatusText = $"Split complete. Points saved: L=({LeftCondyleCenter?.X:F1},{LeftCondyleCenter?.Y:F1}), R=({RightCondyleCenter?.X:F1},{RightCondyleCenter?.Y:F1}), Mid=({DentalMidlinePoint?.X:F1},{DentalMidlinePoint?.Y:F1})";
             }
             else
@@ -427,8 +438,8 @@ public partial class MainViewModel
             StatusText = "Cranium/Mandible split failed.";
         }
 
-        // Force cleanup of wizard window's freed resources (EffectsManager, viewport geometry, mesh data)
-        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-        GC.Collect(2, GCCollectionMode.Aggressive, true, true);
+        // Nudge cleanup of wizard window's freed resources without blocking the UI
+        // thread - the previous blocking compacting collect froze the app for seconds.
+        GC.Collect(2, GCCollectionMode.Optimized, blocking: false);
     }
 }

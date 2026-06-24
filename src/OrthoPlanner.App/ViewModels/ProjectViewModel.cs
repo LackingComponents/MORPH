@@ -83,8 +83,12 @@ public partial class MainViewModel
                 {
                     Left    = LeftCondyleCenter  == null ? null : (object)new { LeftCondyleCenter.Value.X,  LeftCondyleCenter.Value.Y,  LeftCondyleCenter.Value.Z },
                     Right   = RightCondyleCenter == null ? null : (object)new { RightCondyleCenter.Value.X, RightCondyleCenter.Value.Y, RightCondyleCenter.Value.Z },
+                    LeftHalfExtents  = LeftCondyleHalfExtents  == null ? null : (object)new { LeftCondyleHalfExtents.Value.X,  LeftCondyleHalfExtents.Value.Y,  LeftCondyleHalfExtents.Value.Z },
+                    RightHalfExtents = RightCondyleHalfExtents == null ? null : (object)new { RightCondyleHalfExtents.Value.X, RightCondyleHalfExtents.Value.Y, RightCondyleHalfExtents.Value.Z },
                     Midline = DentalMidlinePoint == null ? null : (object)new { DentalMidlinePoint.Value.X, DentalMidlinePoint.Value.Y, DentalMidlinePoint.Value.Z }
-                }
+                },
+                // Surgery plan persistence (Lore): save active movements so they survive project round-trip
+                CurrentSurgeryPlan = SnapshotCurrentPlan("Current")
             };
             var jsonEntry = zip.CreateEntry("project.json");
             using (var sw = new StreamWriter(jsonEntry.Open()))
@@ -384,6 +388,8 @@ public partial class MainViewModel
                         }
                         LeftCondyleCenter  = ReadPoint(ccNode, "Left");
                         RightCondyleCenter = ReadPoint(ccNode, "Right");
+                        LeftCondyleHalfExtents  = ReadPoint(ccNode, "LeftHalfExtents");
+                        RightCondyleHalfExtents = ReadPoint(ccNode, "RightHalfExtents");
                         DentalMidlinePoint = ReadPoint(ccNode, "Midline");
                     }
 
@@ -545,6 +551,78 @@ public partial class MainViewModel
             }
 
             RefreshCombinedModel();
+
+            // 7. Restore saved surgery plan (Lore): re-apply active surgical movements
+            if (root.TryGetProperty("CurrentSurgeryPlan", out var planMeta))
+            {
+                static double ReadPlanDouble(System.Text.Json.JsonElement node, string key, double fallback = 0.0)
+                {
+                    if (!node.TryGetProperty(key, out var prop)) return fallback;
+                    return prop.ValueKind == System.Text.Json.JsonValueKind.Number ? prop.GetDouble() : fallback;
+                }
+                static bool ReadPlanBool(System.Text.Json.JsonElement node, string key, bool fallback = false)
+                {
+                    if (!node.TryGetProperty(key, out var prop)) return fallback;
+                    return prop.ValueKind switch
+                    {
+                        System.Text.Json.JsonValueKind.True => true,
+                        System.Text.Json.JsonValueKind.False => false,
+                        _ => fallback
+                    };
+                }
+                var plan = new OcclusionPlanViewModel
+                {
+                    Name = "Current",
+                    IsMaxillaBasedSurgery  = ReadPlanBool(planMeta, nameof(OcclusionPlanViewModel.IsMaxillaBasedSurgery), true),
+                    IsMandibleBasedSurgery = ReadPlanBool(planMeta, nameof(OcclusionPlanViewModel.IsMandibleBasedSurgery)),
+                    IsManualOcclusionSurgery = ReadPlanBool(planMeta, nameof(OcclusionPlanViewModel.IsManualOcclusionSurgery)),
+                    IsKeepOcclusionSurgery = ReadPlanBool(planMeta, nameof(OcclusionPlanViewModel.IsKeepOcclusionSurgery)),
+                    MaxillaLat   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.MaxillaLat)),
+                    MaxillaAnt   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.MaxillaAnt)),
+                    MaxillaVert  = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.MaxillaVert)),
+                    MaxillaRoll  = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.MaxillaRoll)),
+                    MaxillaPitch = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.MaxillaPitch)),
+                    MaxillaYaw   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.MaxillaYaw)),
+                    MandibleLat   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.MandibleLat)),
+                    MandibleAnt   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.MandibleAnt)),
+                    MandibleVert  = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.MandibleVert)),
+                    MandibleRoll  = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.MandibleRoll)),
+                    MandiblePitch = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.MandiblePitch)),
+                    MandibleYaw   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.MandibleYaw)),
+                    RightRamusLat   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.RightRamusLat)),
+                    RightRamusAnt   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.RightRamusAnt)),
+                    RightRamusVert  = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.RightRamusVert)),
+                    RightRamusRoll  = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.RightRamusRoll)),
+                    RightRamusPitch = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.RightRamusPitch)),
+                    RightRamusYaw   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.RightRamusYaw)),
+                    LeftRamusLat   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.LeftRamusLat)),
+                    LeftRamusAnt   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.LeftRamusAnt)),
+                    LeftRamusVert  = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.LeftRamusVert)),
+                    LeftRamusRoll  = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.LeftRamusRoll)),
+                    LeftRamusPitch = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.LeftRamusPitch)),
+                    LeftRamusYaw   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.LeftRamusYaw)),
+                    ChinLat   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.ChinLat)),
+                    ChinAnt   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.ChinAnt)),
+                    ChinVert  = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.ChinVert)),
+                    ChinRoll  = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.ChinRoll)),
+                    ChinPitch = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.ChinPitch)),
+                    ChinYaw   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.ChinYaw)),
+                    SavedMaxillaLat   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMaxillaLat)),
+                    SavedMaxillaAnt   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMaxillaAnt)),
+                    SavedMaxillaVert  = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMaxillaVert)),
+                    SavedMaxillaRoll  = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMaxillaRoll)),
+                    SavedMaxillaPitch = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMaxillaPitch)),
+                    SavedMaxillaYaw   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMaxillaYaw)),
+                    SavedMandibleLat   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMandibleLat)),
+                    SavedMandibleAnt   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMandibleAnt)),
+                    SavedMandibleVert  = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMandibleVert)),
+                    SavedMandibleRoll  = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMandibleRoll)),
+                    SavedMandiblePitch = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMandiblePitch)),
+                    SavedMandibleYaw   = ReadPlanDouble(planMeta, nameof(OcclusionPlanViewModel.SavedMandibleYaw)),
+                };
+                ApplyPlan(plan);
+            }
+
             StatusText = $"Project loaded: {Path.GetFileName(dialog.FileName)}";
         }
         catch (Exception ex)

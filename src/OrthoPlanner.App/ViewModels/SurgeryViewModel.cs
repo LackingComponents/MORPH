@@ -154,6 +154,9 @@ public partial class MainViewModel
     [RelayCommand]
     private void AdjustSurgery(string param)
     {
+        if (NeedsCondyleFulcrum(param) && !EnsureCondyleFulcrum())
+            return;
+
         double step = 0.5;
         if (param.StartsWith("Maxilla"))
         {
@@ -201,6 +204,119 @@ public partial class MainViewModel
             else if (param.Contains("Yaw"))   SurgChinYaw   += param.EndsWith("+") ? step : -step;
         }
         UpdateSurgeryTransform();
+    }
+
+    private bool NeedsCondyleFulcrum(string param)
+    {
+        bool isRamusRotation =
+            (param.StartsWith("RightRamus") || param.StartsWith("LeftRamus")) &&
+            (param.Contains("Roll") || param.Contains("Pitch") || param.Contains("Yaw"));
+
+        if (!isRamusRotation) return false;
+        if (param.StartsWith("RightRamus")) return RightCondyleCenter == null;
+        if (param.StartsWith("LeftRamus")) return LeftCondyleCenter == null;
+        return false;
+    }
+
+    private bool EnsureCondyleFulcrum()
+    {
+        if (LeftCondyleCenter != null && RightCondyleCenter != null)
+            return true;
+
+        var res = System.Windows.MessageBox.Show(
+            "Mandible rotation fulcrums are not defined yet.\n\nOpen the condyle selection wizard now and save the left/right condyle bounding boxes?",
+            "Condyle Fulcrum Required",
+            System.Windows.MessageBoxButton.OKCancel,
+            System.Windows.MessageBoxImage.Information);
+        if (res != System.Windows.MessageBoxResult.OK)
+            return false;
+
+        var (referenceVerts, referenceGeometry) = ResolveCondyleReference();
+        if (referenceVerts.Count < 100)
+        {
+            System.Windows.MessageBox.Show(
+                "No suitable bone surface is available for condyle selection. Please generate or load a cranium/mandible split first.",
+                "Missing Bone Surface",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Warning);
+            return false;
+        }
+
+        var wizard = new CondyleSplitWindow(referenceVerts, boneGeometry: referenceGeometry, landmarkOnlyMode: true)
+        {
+            Owner = System.Windows.Application.Current.MainWindow,
+            Title = "Select Mandible Rotation Fulcrums"
+        };
+
+        if (wizard.ShowDialog() != true || !wizard.Accepted)
+        {
+            StatusText = "Condyle fulcrum selection cancelled.";
+            return false;
+        }
+
+        SaveStateForUndo();
+        LeftCondyleCenter = wizard.LeftCondyleCenter;
+        RightCondyleCenter = wizard.RightCondyleCenter;
+        LeftCondyleHalfExtents = wizard.LeftCondyleHalfExtents;
+        RightCondyleHalfExtents = wizard.RightCondyleHalfExtents;
+        DentalMidlinePoint = wizard.DentalMidlinePoint ?? DentalMidlinePoint;
+        StatusText = $"Condyle fulcrums saved: L=({LeftCondyleCenter?.X:F1},{LeftCondyleCenter?.Y:F1},{LeftCondyleCenter?.Z:F1}), R=({RightCondyleCenter?.X:F1},{RightCondyleCenter?.Y:F1},{RightCondyleCenter?.Z:F1}).";
+        return LeftCondyleCenter != null && RightCondyleCenter != null;
+    }
+
+    private (List<float[]> vertices, HelixToolkit.SharpDX.Geometry3D? geometry) ResolveCondyleReference()
+    {
+        var source = ResolveCondyleReferenceSegment();
+        if (source?.Vertices is not { Length: >= 300 } verts)
+            return (new List<float[]>(), null);
+
+        // Always rebuild so secondary viewports get validated indexed geometry.
+        source.BuildModel();
+
+        return (MeshHelper.ToVertexList(verts), source.Geometry);
+    }
+
+    private SegmentViewModel? ResolveCondyleReferenceSegment()
+    {
+        static bool HasVertices(SegmentViewModel s) => s.Vertices is { Length: >= 300 };
+
+        static bool IsSeedSplitMandible(SegmentViewModel s) =>
+            HasVertices(s)
+            && s.Name != null
+            && s.Name.Contains("Seed Split", StringComparison.OrdinalIgnoreCase)
+            && s.Name.Contains("Mandible", StringComparison.OrdinalIgnoreCase)
+            && !s.Name.Contains("Cranium", StringComparison.OrdinalIgnoreCase);
+
+        static bool IsBoneSegment(SegmentViewModel s) =>
+            s.IsVisible
+            && HasVertices(s)
+            && s.Name != null
+            && (s.Name.Contains("Cranium", StringComparison.OrdinalIgnoreCase)
+                || s.Name.Contains("Mandible", StringComparison.OrdinalIgnoreCase)
+                || s.Name.Contains("Ramus", StringComparison.OrdinalIgnoreCase)
+                || s.Name.Contains("Bone", StringComparison.OrdinalIgnoreCase));
+
+        static bool IsMandibleSegment(SegmentViewModel s) =>
+            IsBoneSegment(s)
+            && s.Name!.Contains("Mandible", StringComparison.OrdinalIgnoreCase)
+            && !s.Name.Contains("Cranium", StringComparison.OrdinalIgnoreCase);
+
+        // Splint / ramus rotation fulcrums must use the seed-split mandible when present.
+        var seedSplitMandible = Segments.LastOrDefault(IsSeedSplitMandible);
+        if (seedSplitMandible != null)
+            return seedSplitMandible;
+
+        var mandible = Segments.LastOrDefault(IsMandibleSegment);
+        if (mandible != null)
+            return mandible;
+
+        if (HardTissueModel?.Vertices is { Length: >= 300 })
+            return HardTissueModel;
+
+        return Segments
+            .Where(IsBoneSegment)
+            .OrderByDescending(s => s.Vertices!.Length)
+            .FirstOrDefault();
     }
 
     private System.Windows.Media.Media3D.Transform3D BuildSurgeryTransform(
@@ -431,6 +547,7 @@ public partial class MainViewModel
         Name = name,
         IsMaxillaBasedSurgery  = IsMaxillaBasedSurgery,
         IsMandibleBasedSurgery = IsMandibleBasedSurgery,
+        IsManualOcclusionSurgery = IsManualOcclusionSurgery,
         IsKeepOcclusionSurgery = IsKeepOcclusionSurgery,
         MaxillaLat   = SurgMaxillaLat,   MaxillaAnt   = SurgMaxillaAnt,   MaxillaVert  = SurgMaxillaVert,
         MaxillaRoll  = SurgMaxillaRoll,  MaxillaPitch = SurgMaxillaPitch, MaxillaYaw   = SurgMaxillaYaw,
@@ -455,6 +572,7 @@ public partial class MainViewModel
         var snap = SnapshotCurrentPlan(plan.Name);
         plan.IsMaxillaBasedSurgery  = snap.IsMaxillaBasedSurgery;
         plan.IsMandibleBasedSurgery = snap.IsMandibleBasedSurgery;
+        plan.IsManualOcclusionSurgery = snap.IsManualOcclusionSurgery;
         plan.IsKeepOcclusionSurgery = snap.IsKeepOcclusionSurgery;
         plan.MaxillaLat = snap.MaxillaLat; plan.MaxillaAnt = snap.MaxillaAnt; plan.MaxillaVert = snap.MaxillaVert;
         plan.MaxillaRoll = snap.MaxillaRoll; plan.MaxillaPitch = snap.MaxillaPitch; plan.MaxillaYaw = snap.MaxillaYaw;
@@ -476,6 +594,13 @@ public partial class MainViewModel
 
     private void ApplyPlan(OcclusionPlanViewModel plan)
     {
+        // Let mode properties update UI state first; movement values are restored after
+        // so mode-switch zero/restore logic cannot erase the saved plan.
+        IsManualOcclusionSurgery = plan.IsManualOcclusionSurgery;
+        IsMaxillaBasedSurgery  = plan.IsMaxillaBasedSurgery;
+        IsMandibleBasedSurgery = plan.IsMandibleBasedSurgery;
+        IsKeepOcclusionSurgery = plan.IsKeepOcclusionSurgery;
+
         // Restore saved backups first (so mode switches don't clobber them)
         _savedMaxilla  = (plan.SavedMaxillaLat, plan.SavedMaxillaAnt, plan.SavedMaxillaVert, plan.SavedMaxillaRoll, plan.SavedMaxillaPitch, plan.SavedMaxillaYaw);
         _savedMandible = (plan.SavedMandibleLat, plan.SavedMandibleAnt, plan.SavedMandibleVert, plan.SavedMandibleRoll, plan.SavedMandiblePitch, plan.SavedMandibleYaw);
@@ -490,13 +615,6 @@ public partial class MainViewModel
         SurgLeftRamusRoll = plan.LeftRamusRoll; SurgLeftRamusPitch = plan.LeftRamusPitch; SurgLeftRamusYaw = plan.LeftRamusYaw;
         SurgChinLat = plan.ChinLat; SurgChinAnt = plan.ChinAnt; SurgChinVert = plan.ChinVert;
         SurgChinRoll = plan.ChinRoll; SurgChinPitch = plan.ChinPitch; SurgChinYaw = plan.ChinYaw;
-        // Restore mode flags via properties (generated setters handle notification)
-        IsMaxillaBasedSurgery  = plan.IsMaxillaBasedSurgery;
-        IsMandibleBasedSurgery = plan.IsMandibleBasedSurgery;
-        IsKeepOcclusionSurgery = plan.IsKeepOcclusionSurgery;
-        OnPropertyChanged(nameof(IsMaxillaBasedSurgery));
-        OnPropertyChanged(nameof(IsMandibleBasedSurgery));
-        OnPropertyChanged(nameof(IsKeepOcclusionSurgery));
         UpdateMoveableStates();
     }
 

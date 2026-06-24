@@ -41,6 +41,8 @@ public partial class MainViewModel
         // Anatomical landmarks (DICOM or NHP space depending on commit state)
         public (double X, double Y, double Z)? LeftCondyleCenter { get; init; }
         public (double X, double Y, double Z)? RightCondyleCenter { get; init; }
+        public (double X, double Y, double Z)? LeftCondyleHalfExtents { get; init; }
+        public (double X, double Y, double Z)? RightCondyleHalfExtents { get; init; }
         public (double X, double Y, double Z)? DentalMidlinePoint { get; init; }
 
         // Cephalometric 3D coordinates
@@ -159,6 +161,8 @@ public partial class MainViewModel
             // Landmarks
             LeftCondyleCenter  = LeftCondyleCenter,
             RightCondyleCenter = RightCondyleCenter,
+            LeftCondyleHalfExtents  = LeftCondyleHalfExtents,
+            RightCondyleHalfExtents = RightCondyleHalfExtents,
             DentalMidlinePoint = DentalMidlinePoint,
 
             // Ceph landmarks (records are immutable — safe to copy list)
@@ -196,6 +200,8 @@ public partial class MainViewModel
             // Restore landmarks
             LeftCondyleCenter  = snapshot.LeftCondyleCenter;
             RightCondyleCenter = snapshot.RightCondyleCenter;
+            LeftCondyleHalfExtents  = snapshot.LeftCondyleHalfExtents;
+            RightCondyleHalfExtents = snapshot.RightCondyleHalfExtents;
             DentalMidlinePoint = snapshot.DentalMidlinePoint;
 
             // Restore ceph landmarks

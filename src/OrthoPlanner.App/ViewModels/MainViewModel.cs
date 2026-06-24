@@ -72,6 +72,8 @@ public partial class MainViewModel : ObservableObject
     // ÔöÇÔöÇÔöÇ Condylar Axis (set by Split Cranium/Mandible wizard) ÔöÇÔöÇÔöÇ
     public (double X, double Y, double Z)? LeftCondyleCenter { get; set; }
     public (double X, double Y, double Z)? RightCondyleCenter { get; set; }
+    public (double X, double Y, double Z)? LeftCondyleHalfExtents { get; set; }
+    public (double X, double Y, double Z)? RightCondyleHalfExtents { get; set; }
     public (double X, double Y, double Z)? DentalMidlinePoint { get; set; }
 
     // ÔöÇÔöÇÔöÇ Segmentation Internal Volumes ÔöÇÔöÇÔöÇ
