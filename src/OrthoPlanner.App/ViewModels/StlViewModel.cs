@@ -150,19 +150,25 @@ public partial class MainViewModel
                 return;
             }
 
-            // Prefer an already split Mandible or Maxilla, then fallback to general bone
-            var mandible = Segments.FirstOrDefault(s => s.Name.Contains("Mandible"));
-            var maxilla = Segments.FirstOrDefault(s => s.Name.Contains("Maxilla"));
+            // Prefer an already split Mandible or Maxilla/Cranium segment.
+            // The cranium/mandible split wizard names the upper piece "Cranium (Split)" or
+            // "Cranium (Seed Split)" / "Isolated Cranium" — none of which contain "Maxilla".
+            // Accept any of those as the upper-jaw target.
+            var mandible = Segments.FirstOrDefault(s =>
+                s.Name.Contains("Mandible", StringComparison.OrdinalIgnoreCase));
+            var maxilla = Segments.FirstOrDefault(s =>
+                s.Name.Contains("Maxilla",  StringComparison.OrdinalIgnoreCase) ||
+                s.Name.Contains("Cranium",  StringComparison.OrdinalIgnoreCase));
 
-            // Guard: clean-and-merge requires separated cranium and mandible segments.
+            // Guard: clean-and-merge requires separated jaw segments.
             // Merging into the unsplit HardTissueModel (whole bone) produces malformed geometry
             // because the boolean subtraction carves the wrong surface.
             if (mandible == null || maxilla == null)
             {
                 System.Windows.MessageBox.Show(
-                    "Clean & Merge requires separated Mandible and Maxilla (Cranium) segments.\n\n"
-                    + "Run segmentation first (split the cranium into upper and lower jaw segments) "
-                    + "before merging dental casts into the bone.",
+                    "Clean & Merge requires separated jaw segments.\n\n"
+                    + "Run the Cranium/Mandible split first so that a Mandible segment and a "
+                    + "Cranium (or Maxilla) segment both exist before merging dental casts.",
                     "Separated Segments Required",
                     System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
                 return;
