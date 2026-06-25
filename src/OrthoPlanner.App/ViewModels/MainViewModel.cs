@@ -247,6 +247,11 @@ public partial class SegmentViewModel : ObservableObject
     /// <summary>The surgical movement component of this segment's transform (NHP-independent).</summary>
     public System.Windows.Media.Media3D.Transform3D SurgicalTransform { get; set; } = System.Windows.Media.Media3D.Transform3D.Identity;
 
+    /// <summary>True when dental scan geometry has been merged into this segment's vertices
+    /// (via clean-and-merge or alignment wizard). Used by splint generation to suppress
+    /// the false "CT bone only" warning.</summary>
+    public bool HasMergedDental { get; set; }
+
     /// <summary>Callback so the parent ViewModel can refresh 3D when visibility toggles.</summary>
     public Action? OnVisibilityChanged { get; set; }
 
