@@ -586,13 +586,21 @@ public partial class BssoOsteotomyWindow : Window
             return;
         }
 
-        ProximalResult = proximal;
-        DistalResult   = distal;
+        ProximalResult = FilterDegenerate(proximal);
+        DistalResult   = FilterDegenerate(distal);
         MainGroup.Children.Remove(_boneMesh);
         MainGroup.Children.Add(MkBone(ProximalResult, new HelixToolkit.Maths.Color4(120/255f, 160/255f, 240/255f, 1f)));
         MainGroup.Children.Add(MkBone(DistalResult,   new HelixToolkit.Maths.Color4(220/255f, 140/255f, 120/255f, 1f)));
+        // Clear plane visuals
         _lingualVis.Children.Clear(); _sagittalVis.Children.Clear();
         _postArmVis.Children.Clear(); _buccalVis.Children.Clear();
+        // Remove all handle spheres
+        foreach (var d in _rawDots) MainGroup.Children.Remove(d); _rawDots.Clear();
+        for (int i = 0; i < 4; i++) { if (_lHandles[i] != null) { MainGroup.Children.Remove(_lHandles[i]); _lHandles[i] = null!; } }
+        for (int i = 0; i < 4; i++) { if (_bHandles[i] != null) { MainGroup.Children.Remove(_bHandles[i]); _bHandles[i] = null!; } }
+        for (int i = 0; i < 2; i++) { if (_sagBotH[i] != null) { MainGroup.Children.Remove(_sagBotH[i]); _sagBotH[i] = null!; } }
+        if (_sagMidH != null) { MainGroup.Children.Remove(_sagMidH); _sagMidH = null; }
+        if (_armBotH != null) { MainGroup.Children.Remove(_armBotH); _armBotH = null; }
         AcceptBtn.Visibility = Visibility.Visible;
         CutBtn.Visibility    = Visibility.Collapsed;
         StatusText.Text = $"Done — Ramus (blue): {proximal.Count/3} tris | Mandible (red): {distal.Count/3} tris";
@@ -603,6 +611,23 @@ public partial class BssoOsteotomyWindow : Window
 
 
     private void Cancel_Click(object s, RoutedEventArgs e) { DialogResult=false; Close(); }
+
+    private static List<float[]> FilterDegenerate(List<float[]> soup, float minAreaSq = 1e-6f)
+    {
+        var result = new List<float[]>(soup.Count);
+        for (int i = 0; i + 2 < soup.Count; i += 3)
+        {
+            var a = soup[i]; var b = soup[i+1]; var c = soup[i+2];
+            float abX = b[0]-a[0], abY = b[1]-a[1], abZ = b[2]-a[2];
+            float acX = c[0]-a[0], acY = c[1]-a[1], acZ = c[2]-a[2];
+            float cx = abY*acZ - abZ*acY;
+            float cy = abZ*acX - abX*acZ;
+            float cz = abX*acY - abY*acX;
+            if (cx*cx + cy*cy + cz*cz >= minAreaSq * 4f) // |cross|^2 = (2*area)^2
+            { result.Add(a); result.Add(b); result.Add(c); }
+        }
+        return result;
+    }
 
     // ── Utilities ────────────────────────────────────────────────────────────
     private MeshGeometryModel3D MkBone(List<float[]> v, HelixToolkit.Maths.Color4 c) {

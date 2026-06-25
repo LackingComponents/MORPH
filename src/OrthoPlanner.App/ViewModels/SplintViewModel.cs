@@ -11,14 +11,15 @@ public partial class MainViewModel
     /// Resolves the best available upper and lower dental meshes.
     /// Priority: aligned ImportedMeshes (ScanType Upper/Lower) → Split bone segments.
     /// Also detects whether fallback segments carry dental anatomy (fused CT+dental
-    /// osteotomies like "LeFort 1 Separated") to suppress false CT-bone warnings.
+    /// via clean-and-merge, or osteotomy segments with "LeFort"/"Separated") to
+    /// suppress false CT-bone warnings.
     /// </summary>
     private (float[]? upper, float[]? lower, bool upperHasDental, bool lowerHasDental) ResolveDentalMeshes()
     {
         // ── UPPER (maxilla / upper dental cast) ─────────────────────────────
-        // A registered intraoral scan (classified Upper) is the clinical-grade
-        // surface. Everything below it is a CT-bone fallback (flagged, not blocked).
         var upperScan = ImportedMeshes.FirstOrDefault(m => m.ScanType == DentalScanType.Upper && m.Vertices != null)?.Vertices;
+        // Also check hidden scans — if a scan exists (even hidden), the segment it was merged into has dental anatomy
+        bool anyUpperScanExists = ImportedMeshes.Any(m => m.ScanType == DentalScanType.Upper);
         SegmentViewModel? upperSeg = null;
         float[]? upper =
             upperScan
@@ -28,6 +29,7 @@ public partial class MainViewModel
 
         // ── LOWER (mandible / lower dental cast) ────────────────────────────
         var lowerScan = ImportedMeshes.FirstOrDefault(m => m.ScanType == DentalScanType.Lower && m.Vertices != null)?.Vertices;
+        bool anyLowerScanExists = ImportedMeshes.Any(m => m.ScanType == DentalScanType.Lower);
         SegmentViewModel? lowerSeg = null;
         float[]? lower =
             lowerScan
@@ -35,12 +37,17 @@ public partial class MainViewModel
 
         // Determine dental-anatomy quality:
         //  - Intraoral scans always have dental anatomy
-        //  - Osteotomized segments with "LeFort" or "Separated" in the name
-        //    are fused CT+dental — they carry dental surfaces too
+        //  - Segments that went through clean-and-merge have dental anatomy (HasMergedDental flag)
+        //  - If a hidden Upper/Lower scan exists, it was merged into the segment at some point
+        //  - Osteotomized segments with "LeFort" or "Separated" carry dental surfaces
         bool upperHasDental = upperScan != null
+            || anyUpperScanExists
+            || (upperSeg?.HasMergedDental == true)
             || (upperSeg?.Name.Contains("LeFort") == true)
             || (upperSeg?.Name.Contains("Separated") == true);
         bool lowerHasDental = lowerScan != null
+            || anyLowerScanExists
+            || (lowerSeg?.HasMergedDental == true)
             || (lowerSeg?.Name.Contains("Separated") == true);
 
         return (upper, lower, upperHasDental, lowerHasDental);

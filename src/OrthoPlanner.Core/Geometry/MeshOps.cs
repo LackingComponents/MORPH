@@ -228,6 +228,14 @@ public static class MeshOps
                 }
             }
 
+            // Final floater pass: the per-component largest-sub-piece extraction above
+            // preserves each original component's main body, but disconnected bone fragments
+            // from the segmentation still survive as separate components. Keep only the
+            // largest connected component of the entire remaining bone to eliminate floaters.
+            var allBoneComps = LabelConnectedComponents(remainingBone);
+            if (allBoneComps.Count > 1)
+                remainingBone = allBoneComps[0];
+
             // "Keep this plane, move it 0.1mm above and generate a bridging between the mandibular/maxillary bone model and teeth scan"
             // We use the flatPlane triangles, shift them 0.1mm into the teeth (-N), and flip winding.
             var bridgingPolys = new List<float[]>();

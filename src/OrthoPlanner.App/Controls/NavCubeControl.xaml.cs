@@ -53,7 +53,11 @@ public sealed partial class NavCubeControl : UserControl
     private readonly DiffuseMaterial   _sHov;
     private int                        _hovered = -1;
 
-    public HelixToolkit.Wpf.SharpDX.PerspectiveCamera? MainCamera { get; set; }
+    /// <summary>
+    /// The main viewport camera to mirror. Accepts both PerspectiveCamera and
+    /// OrthographicCamera — the cube only reads LookDirection / UpDirection.
+    /// </summary>
+    public HelixToolkit.Wpf.SharpDX.ProjectionCamera? MainCamera { get; set; }
     public event Action<int>?           FaceClicked;
     public event Action<double,double>? RotateRequested;
 

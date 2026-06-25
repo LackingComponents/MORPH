@@ -152,7 +152,21 @@ public partial class MainViewModel
 
             // Prefer an already split Mandible or Maxilla, then fallback to general bone
             var mandible = Segments.FirstOrDefault(s => s.Name.Contains("Mandible"));
-            var maxilla = Segments.FirstOrDefault(s => s.Name.Contains("Maxilla") || s.Name.Contains("Cranium"));
+            var maxilla = Segments.FirstOrDefault(s => s.Name.Contains("Maxilla"));
+
+            // Guard: clean-and-merge requires separated cranium and mandible segments.
+            // Merging into the unsplit HardTissueModel (whole bone) produces malformed geometry
+            // because the boolean subtraction carves the wrong surface.
+            if (mandible == null || maxilla == null)
+            {
+                System.Windows.MessageBox.Show(
+                    "Clean & Merge requires separated Mandible and Maxilla (Cranium) segments.\n\n"
+                    + "Run segmentation first (split the cranium into upper and lower jaw segments) "
+                    + "before merging dental casts into the bone.",
+                    "Separated Segments Required",
+                    System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+                return;
+            }
 
             bool modifiedAny = false;
 
@@ -160,8 +174,8 @@ public partial class MainViewModel
             {
                 SegmentViewModel? targetBone = null;
 
-                if (scan.ScanType == DentalScanType.Lower) targetBone = mandible ?? HardTissueModel;
-                else if (scan.ScanType == DentalScanType.Upper) targetBone = maxilla ?? HardTissueModel;
+                if (scan.ScanType == DentalScanType.Lower) targetBone = mandible;
+                else if (scan.ScanType == DentalScanType.Upper) targetBone = maxilla;
 
                 if (targetBone?.Vertices == null || targetBone.Vertices.Length == 0)
                 {

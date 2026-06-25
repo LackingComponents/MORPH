@@ -599,8 +599,16 @@ public partial class LeFortOsteotomyWindow : Window
         CutBtn.IsEnabled     = false;
         ClearBtn.Content     = "Undo Cut";
 
+        // Remove cutting plane visuals: filled mesh, outline contour and control-point spheres
         MainGroup.Children.Remove(_polyplaneMesh);
+        _polyplaneVis.Children.Clear();
         foreach (var p in _pointVisuals) MainGroup.Children.Remove(p);
+
+        // Remove posterior handle spheres
+        if (_lpVis != null) { MainGroup.Children.Remove(_lpVis); _lpVis = null; }
+        if (_ldVis != null) { MainGroup.Children.Remove(_ldVis); _ldVis = null; }
+        if (_rpVis != null) { MainGroup.Children.Remove(_rpVis); _rpVis = null; }
+        if (_rdVis != null) { MainGroup.Children.Remove(_rdVis); _rdVis = null; }
 
         StatusText.Text = $"Done — Upper (bone): {upper.Count/3} tris | Lower (teal): {lower.Count/3} tris";
         Cursor = Cursors.Arrow;

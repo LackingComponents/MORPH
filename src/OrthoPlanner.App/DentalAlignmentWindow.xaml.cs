@@ -151,7 +151,7 @@ public partial class DentalAlignmentWindow : Window
         double diagonal = Math.Sqrt((maxX - minX) * (maxX - minX) + (maxY - minY) * (maxY - minY) + (maxZ - minZ) * (maxZ - minZ));
         double distance = Math.Max(diagonal * zoomMultiplier, 10);
 
-        var dir = new Vector3D(0, 1, -0.3); // Model is viewed from anterior/superior
+        var dir = new Vector3D(0, 1, 0); // Neutral frontal view
         dir.Normalize();
         
         var cam = viewport.Camera as HelixToolkit.Wpf.SharpDX.PerspectiveCamera;

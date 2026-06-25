@@ -142,7 +142,7 @@
 
                 <!-- Upper controls -->
                 <TextBlock Text="UPPER ARCH" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,0,0,6"/>
-                <TextBlock Text="Upper crown envelope:" FontSize="11" Foreground="#AABBCC" ToolTip="How far the wafer wraps up around the maxillary crowns (tooth-socket depth on the top face)."/>
+                <TextBlock Text="Upper crown envelope:" FontSize="11" Foreground="#AABBCC" ToolTip="Vertical extent of the wafer above the upper arch curve.&#x0a;+2 mm (default): the splint wraps 2 mm up around the maxillary crowns, creating a deep tooth pocket.&#x0a;0 mm: the top surface is flush with the arch curve at the cusp tips.&#x0a;−2 mm: the top is trimmed 2 mm inside the cusp line — use only for a thin bite- registration rim.&#x0a;In the SDF pipeline this sets the upper Z-clip plane. The tooth pocket is always carved by the actual tooth SDF regardless of this value."/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,20">
                     <Slider x:Name="UpperPenetrationSlider" Minimum="-5" Maximum="10" Value="2" Width="170" SmallChange="0.5" ValueChanged="UpperPenetrationSlider_ValueChanged"/>
                     <TextBlock x:Name="UpperPenetrationLabel" Text="2.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
@@ -150,7 +150,7 @@
 
                 <!-- Lower controls -->
                 <TextBlock Text="LOWER ARCH" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,0,0,6"/>
-                <TextBlock Text="Lower crown envelope:" FontSize="11" Foreground="#AABBCC" ToolTip="How far the wafer wraps down around the mandibular crowns (tooth-socket depth on the bottom face)."/>
+                <TextBlock Text="Lower crown envelope:" FontSize="11" Foreground="#AABBCC" ToolTip="Vertical extent of the wafer below the lower arch curve.&#x0a;+2 mm (default): the splint wraps 2 mm down around the mandibular crowns.&#x0a;0 mm: the bottom surface is flush with the arch curve at the cusp tips.&#x0a;−2 mm: the bottom is trimmed 2 mm inside the cusp line.&#x0a;Same as the upper envelope, but for the lower arch. Sets the lower Z-clip plane."/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,20">
                     <Slider x:Name="LowerPenetrationSlider" Minimum="-5" Maximum="10" Value="2" Width="170" SmallChange="0.5" ValueChanged="LowerPenetrationSlider_ValueChanged"/>
                     <TextBlock x:Name="LowerPenetrationLabel" Text="2.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
@@ -158,20 +158,20 @@
 
                 <!-- General controls -->
                 <TextBlock Text="GENERAL" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,0,0,6"/>
-                
-                <TextBlock Text="Labio-lingual width:" FontSize="11" Foreground="#AABBCC"/>
+
+                <TextBlock Text="Labio-lingual width:" FontSize="11" Foreground="#AABBCC" ToolTip="Total thickness of the splint wall from the lingual (tongue-side) to the buccal (cheek-side) surface.&#x0a;8 mm (default): standard surgical wafer width that fully covers the occlusal table.&#x0a;Smaller values produce a narrower, lighter wafer but may not engage all cusps.&#x0a;This sets the XY clip-pad radius around the arch curve, so the SDF blank only extends this far from the arch center."/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
                     <Slider x:Name="ThicknessSlider" Minimum="2" Maximum="20" Value="8" Width="170" SmallChange="0.5" ValueChanged="ThicknessSlider_ValueChanged"/>
                     <TextBlock x:Name="ThicknessLabel" Text="8.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
 
-                <TextBlock Text="Lingual-Buccal bias:" FontSize="11" Foreground="#AABBCC" ToolTip="Shifts the splint center buccally (+) or lingually (−)"/>
+                <TextBlock Text="Lingual-Buccal bias:" FontSize="11" Foreground="#AABBCC" ToolTip="Shifts the splint center outward (buccally, +) or inward (lingually, −) while keeping the total labio-lingual width constant.&#x0a;0 mm (default): the splint is centered on the arch curve.&#x0a;+2 mm: the splint wall is 2 mm thicker on the buccal side and 2 mm thinner on the lingual side — useful when the buccal flange needs more material for screw fixation.&#x0a;Negative values shift toward the tongue."/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
                     <Slider x:Name="LingualBuccalBiasSlider" Minimum="-5" Maximum="5" Value="0" Width="170" SmallChange="0.25" ValueChanged="LingualBuccalBiasSlider_ValueChanged"/>
                     <TextBlock x:Name="LingualBuccalBiasLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
 
-                <TextBlock Text="Extra bridge thickness:" FontSize="11" Foreground="#AABBCC" ToolTip="Adds extra vertical padding to the connection between upper and lower arches"/>
+                <TextBlock Text="Extra bridge thickness:" FontSize="11" Foreground="#AABBCC" ToolTip="Additional dilation applied after GPU morphological closing to thicken the bridge between the upper and lower arch portions.&#x0a;0 mm (default): only the standard 1 mm wall-thickness dilation and morphological closing — the bridge is as thin as the closing radius allows.&#x0a;+2 mm: the gap region gets an extra 2 mm of material — use when a thin bridge would be too fragile for handling or screw retention.&#x0a;In the pipeline this applies an extra GPU dilate pass after closing."/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
                     <Slider x:Name="BridgeThicknessSlider" Minimum="0" Maximum="10" Value="0" Width="170" SmallChange="0.5" ValueChanged="BridgeThicknessSlider_ValueChanged"/>
                     <TextBlock x:Name="BridgeThicknessLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
@@ -182,15 +182,15 @@
 
                 <CheckBox x:Name="BlockoutCheck" Content="Block out undercuts (seatability)" IsChecked="False"
                           Foreground="#AABBCC" Margin="0,0,0,8"
-                          ToolTip="Straightens each tooth pocket into a vertical pull-out path so the splint can seat and release."/>
+                          ToolTip="When ON, forces every tooth pocket to go vertical past the engagement depth — eliminating undercuts that would prevent the splint from seating or being removed.&#x0a;OFF by default: pockets follow natural tooth anatomy (including undercuts), giving maximum retention but making insertion/removal harder.&#x0a;Turn ON for a splint that must seat and release easily (e.g. intraoperative wafer).&#x0a;In the pipeline this clamps SDF voxels below the arch-Z engagement plane to splint material before pocket subtraction."/>
 
-                <TextBlock Text="Engagement depth:" FontSize="11" Foreground="#AABBCC" ToolTip="How far past the height of contour each pocket may engage before it is blocked out."/>
+                <TextBlock Text="Engagement depth:" FontSize="11" Foreground="#AABBCC" ToolTip="Only used when 'Block out undercuts' is ON.&#x0a;How far below the arch-curve Z-plane the pocket is allowed to engage the tooth before being blocked out.&#x0a;1.5 mm (default): pockets engage 1.5 mm past the height of contour, then go vertical.&#x0a;0 mm: no engagement at all — pockets are vertical from the arch plane down.&#x0a;3 mm: deep undercut engagement for maximum retention (harder to insert)."/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
                     <Slider x:Name="EngagementDepthSlider" Minimum="0" Maximum="5" Value="1.5" Width="170" SmallChange="0.25" ValueChanged="EngagementDepthSlider_ValueChanged"/>
                     <TextBlock x:Name="EngagementDepthLabel" Text="1.5 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
 
-                <TextBlock Text="Buccal flange depth:" FontSize="11" Foreground="#AABBCC" ToolTip="Apical fixation skirt down the buccal wall (0 = none). Screw holes can be carved through it."/>
+                <TextBlock Text="Buccal flange depth:" FontSize="11" Foreground="#AABBCC" ToolTip="Apical extension of the splint skirt down (or up) the buccal wall of the jaw.&#x0a;0 mm (default): no flange — the splint covers only the occlusal table.&#x0a;5 mm: a 5 mm tall buccal skirt for rigid fixation with screws through the flange.&#x0a;Combine with the 'on upper' / 'on lower' radio buttons to choose which arch gets the flange.&#x0a;(Currently a placeholder — flange geometry is not yet implemented in the SDF pipeline.)"/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,4">
                     <Slider x:Name="FlangeDepthSlider" Minimum="0" Maximum="15" Value="0" Width="170" SmallChange="0.5" ValueChanged="FlangeDepthSlider_ValueChanged"/>
                     <TextBlock x:Name="FlangeDepthLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>

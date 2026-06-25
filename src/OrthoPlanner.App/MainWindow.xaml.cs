@@ -226,26 +226,44 @@ public partial class MainWindow : Window
 
         if (isOrtho && currentCam is HelixToolkit.Wpf.SharpDX.PerspectiveCamera pc)
         {
-            // Switch to orthographic, preserving orientation
+            // Compute ortho Width that matches the perspective frustum width at the
+            // look-at point distance, so the scene appears at the same scale:
+            //   Width = 2 × dist × tan(FOV/2)
+            double dist = pc.LookDirection.Length;
+            if (dist < 0.001) dist = 300;
+            double fovRad = pc.FieldOfView * Math.PI / 180.0;
+            double orthoWidth = 2.0 * dist * Math.Tan(fovRad / 2.0);
+
             var newOrtho = new HelixToolkit.Wpf.SharpDX.OrthographicCamera {
                 Position = pc.Position,
                 LookDirection = pc.LookDirection,
                 UpDirection = pc.UpDirection,
-                Width = 300, // default orthographic width in mm
+                Width = orthoWidth,
                 NearPlaneDistance = pc.NearPlaneDistance,
                 FarPlaneDistance = pc.FarPlaneDistance
             };
             Viewport3D.Camera = newOrtho;
-            NavCube.MainCamera = null; // NavCube only supports PerspectiveCamera
+            NavCube.MainCamera = newOrtho; // ProjectionCamera base — cube reads LookDirection/UpDirection only
         }
         else if (!isOrtho && currentCam is HelixToolkit.Wpf.SharpDX.OrthographicCamera oc)
         {
-            // Switch back to perspective
+            // Adjust camera distance so perspective at FOV=45° shows the same scene width:
+            //   dist_new = (orthoWidth / 2) / tan(45° / 2)
+            const double newFov = 45.0;
+            double newFovRad = newFov * Math.PI / 180.0;
+            double newDist = (oc.Width / 2.0) / Math.Tan(newFovRad / 2.0);
+            if (newDist < 0.001) newDist = 300;
+
+            var lookDir = oc.LookDirection;
+            double oldDist = lookDir.Length;
+            if (oldDist > 0.001) lookDir = lookDir / oldDist * newDist;
+
+            var lookAt = oc.Position + oc.LookDirection; // preserve pivot
             var newPersp = new HelixToolkit.Wpf.SharpDX.PerspectiveCamera {
-                Position = oc.Position,
-                LookDirection = oc.LookDirection,
+                Position = lookAt - lookDir,
+                LookDirection = lookDir,
                 UpDirection = oc.UpDirection,
-                FieldOfView = 45,
+                FieldOfView = newFov,
                 NearPlaneDistance = oc.NearPlaneDistance,
                 FarPlaneDistance = oc.FarPlaneDistance
             };
@@ -256,6 +274,7 @@ public partial class MainWindow : Window
         // Force viewport to refresh with the new camera
         Viewport3D.InvalidateRender();
     }
+
 
     // ═══ Grid overlay ═══
     private System.Windows.Point _gridCenter = new System.Windows.Point(-1, -1);
