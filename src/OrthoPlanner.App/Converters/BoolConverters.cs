@@ -22,20 +22,15 @@ public class InverseBoolToVisibilityConverter : IValueConverter
         => value is Visibility.Collapsed;
 }
 
-public class InverseNullToVisibilityConverter : IValueConverter
+/// <summary>Null-to-Visibility. Set Invert=true for "visible when NOT null".</summary>
+public class NullToVisibilityConverter : IValueConverter
 {
-    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-        => value == null ? Visibility.Visible : Visibility.Collapsed;  // Visible when NULL
+    public bool Invert { get; set; }
 
-    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-        => throw new NotImplementedException();
-}
-
-/// <summary>Visible when value is NOT null. (Opposite of InverseNullToVisibilityConverter)</summary>
-public class NotNullToVisibilityConverter : IValueConverter
-{
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-        => value != null ? Visibility.Visible : Visibility.Collapsed;  // Visible when NOT null
+        => Invert
+            ? (value != null ? Visibility.Visible : Visibility.Collapsed)
+            : (value == null ? Visibility.Visible : Visibility.Collapsed);
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
         => throw new NotImplementedException();

@@ -1,4 +1,16 @@
-﻿namespace OrthoPlanner.Core.Imaging;
+namespace OrthoPlanner.Core.Imaging;
+
+public enum CephTool
+{
+    Select,
+    CustomPoint,
+    Line,
+    InfinitePlane,
+    AnglePlanes,
+    Angle3Points,
+    DistancePoints,
+    DistancePointPlane
+}
 
 /// <summary>
 /// Tracks the active cephalometric tool, pending multi-click points, and all completed measurements.
@@ -29,7 +41,7 @@ public class CephToolState
     /// <summary>
     /// Returns the next auto-label for the given tool type.
     /// For CustomPoint: uses "CP{n}" where n = max existing CP index + 1.
-    /// This handles deletions correctly ÔÇö the next number is always max+1,
+    /// This handles deletions correctly — the next number is always max+1,
     /// never a simple count that would repeat after a delete.
     /// </summary>
     public string NextLabel(CephTool tool) => tool switch

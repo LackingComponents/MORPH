@@ -10,8 +10,8 @@
 
     <UserControl.Resources>
         <BooleanToVisibilityConverter    x:Key="BoolToVis" />
-        <conv:InverseNullToVisibilityConverter x:Key="NullToVis" />     <!-- Visible when NULL  -->
-        <conv:NotNullToVisibilityConverter     x:Key="NotNullToVis" />  <!-- Visible when NOT NULL -->
+        <conv:NullToVisibilityConverter x:Key="NullToVis" />          <!-- Visible when NULL  -->
+        <conv:NullToVisibilityConverter x:Key="NotNullToVis" Invert="True" />  <!-- Visible when NOT NULL -->
         <conv:EnumToBoolConverter        x:Key="EnumToBool" />
 
         <!-- Section label -->

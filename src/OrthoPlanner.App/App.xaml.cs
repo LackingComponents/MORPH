@@ -1,7 +1,6 @@
 using System.Configuration;
 using System.Data;
 using System.Windows;
-using OrthoPlanner.Core;
 using FellowOakDicom;
 using FellowOakDicom.Imaging.NativeCodec;
 using System;
@@ -36,7 +35,17 @@ public partial class App : Application
 
         splash.Status = "Initializing file storage...";
         await System.Threading.Tasks.Task.Run(() => {
-            AppTempStorage.Initialize();
+            var tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "OrthoPlanner");
+            try
+            {
+                if (System.IO.Directory.Exists(tempDir))
+                {
+                    foreach (var f in System.IO.Directory.GetFiles(tempDir))
+                        try { System.IO.File.Delete(f); } catch { }
+                }
+                else System.IO.Directory.CreateDirectory(tempDir);
+            }
+            catch { /* best-effort cleanup */ }
         });
 
         // Register global Loaded handler for Windows to apply dark title bar
