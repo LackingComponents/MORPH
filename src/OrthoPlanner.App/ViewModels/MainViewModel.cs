@@ -278,6 +278,10 @@ public partial class MeshViewModel : ObservableObject
     public HelixToolkit.Wpf.SharpDX.Material? Material { get; set; }
     [ObservableProperty] private System.Windows.Media.Media3D.Transform3D _transform = System.Windows.Media.Media3D.Transform3D.Identity;
 
+    /// <summary>True when vertices already have cumulative NHP baked in (set before
+    /// adding to ImportedMeshes to prevent double-baking by the NHP ledger).</summary>
+    public bool NhpBaked { get; set; }
+
     // Relative transforms based on occlusion
     [ObservableProperty] private System.Windows.Media.Media3D.Matrix3D _maxillaOcclusionTransform = System.Windows.Media.Media3D.Matrix3D.Identity;
     [ObservableProperty] private System.Windows.Media.Media3D.Matrix3D _mandibleOcclusionTransform = System.Windows.Media.Media3D.Matrix3D.Identity;

@@ -103,7 +103,7 @@ public sealed record SplintConfig
     /// <summary>How far past each tooth's height of contour the pocket is allowed to
     /// engage. The pocket below this is blocked out so the wafer can seat.</summary>
     public float EngagementDepthMm  { get; init; } = 1.5f;
-    public bool  BlockoutUndercuts  { get; init; } = true;
+    public bool  BlockoutUndercuts  { get; init; } = false;
 
     // ── Incidental-perforation policy ──────────────────────────────────────
     // Splints may intentionally include holes/windows, so thickness is not

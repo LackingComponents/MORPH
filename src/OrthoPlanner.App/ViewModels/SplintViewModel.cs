@@ -10,26 +10,40 @@ public partial class MainViewModel
     /// <summary>
     /// Resolves the best available upper and lower dental meshes.
     /// Priority: aligned ImportedMeshes (ScanType Upper/Lower) → Split bone segments.
+    /// Also detects whether fallback segments carry dental anatomy (fused CT+dental
+    /// osteotomies like "LeFort 1 Separated") to suppress false CT-bone warnings.
     /// </summary>
-    private (float[]? upper, float[]? lower, bool upperFromScan, bool lowerFromScan) ResolveDentalMeshes()
+    private (float[]? upper, float[]? lower, bool upperHasDental, bool lowerHasDental) ResolveDentalMeshes()
     {
         // ── UPPER (maxilla / upper dental cast) ─────────────────────────────
         // A registered intraoral scan (classified Upper) is the clinical-grade
         // surface. Everything below it is a CT-bone fallback (flagged, not blocked).
         var upperScan = ImportedMeshes.FirstOrDefault(m => m.ScanType == DentalScanType.Upper && m.Vertices != null)?.Vertices;
+        SegmentViewModel? upperSeg = null;
         float[]? upper =
             upperScan
-            ?? Segments.FirstOrDefault(s => s.IsVisible && s.Name.Contains("Maxilla (LeFort 1 Separated)"))?.Vertices
-            ?? Segments.FirstOrDefault(s => s.IsVisible && s.Name.Contains("Maxilla"))?.Vertices
-            ?? Segments.FirstOrDefault(s => s.IsVisible && s.Name == "Cranium (Split)")?.Vertices;
+            ?? (upperSeg = Segments.FirstOrDefault(s => s.IsVisible && s.Name.Contains("Maxilla (LeFort 1 Separated)")))?.Vertices
+            ?? (upperSeg = Segments.FirstOrDefault(s => s.IsVisible && s.Name.Contains("Maxilla")))?.Vertices
+            ?? (upperSeg = Segments.FirstOrDefault(s => s.IsVisible && s.Name == "Cranium (Split)"))?.Vertices;
 
         // ── LOWER (mandible / lower dental cast) ────────────────────────────
         var lowerScan = ImportedMeshes.FirstOrDefault(m => m.ScanType == DentalScanType.Lower && m.Vertices != null)?.Vertices;
+        SegmentViewModel? lowerSeg = null;
         float[]? lower =
             lowerScan
-            ?? Segments.FirstOrDefault(s => s.IsVisible && s.Name.Contains("Mandible"))?.Vertices;
+            ?? (lowerSeg = Segments.FirstOrDefault(s => s.IsVisible && s.Name.Contains("Mandible")))?.Vertices;
 
-        return (upper, lower, upperScan != null, lowerScan != null);
+        // Determine dental-anatomy quality:
+        //  - Intraoral scans always have dental anatomy
+        //  - Osteotomized segments with "LeFort" or "Separated" in the name
+        //    are fused CT+dental — they carry dental surfaces too
+        bool upperHasDental = upperScan != null
+            || (upperSeg?.Name.Contains("LeFort") == true)
+            || (upperSeg?.Name.Contains("Separated") == true);
+        bool lowerHasDental = lowerScan != null
+            || (lowerSeg?.Name.Contains("Separated") == true);
+
+        return (upper, lower, upperHasDental, lowerHasDental);
     }
 
     [RelayCommand]
@@ -37,7 +51,7 @@ public partial class MainViewModel
     {
         try
         {
-            var (upper, lower, upperFromScan, lowerFromScan) = ResolveDentalMeshes();
+            var (upper, lower, upperHasDental, lowerHasDental) = ResolveDentalMeshes();
 
             if (upper == null || lower == null)
             {
@@ -54,14 +68,14 @@ public partial class MainViewModel
                 return;
             }
 
-            // Step 3: registered intraoral scans are the clinical surface. Warn — but
-            // don't block — when either arch falls back to CT-segmented bone.
-            bool fromScans = upperFromScan && lowerFromScan;
+            // Step 3: warn only when a mesh truly lacks dental anatomy
+            // (i.e., it's raw CT bone, not a fused CT+dental osteotomy segment).
+            bool fromScans = upperHasDental && lowerHasDental;
             if (!fromScans)
             {
                 var src = new System.Text.StringBuilder();
-                if (!upperFromScan) src.AppendLine("• Upper arch is using CT-segmented bone, not a registered intraoral scan.");
-                if (!lowerFromScan) src.AppendLine("• Lower arch is using CT-segmented bone, not a registered intraoral scan.");
+                if (!upperHasDental) src.AppendLine("• Upper arch is using CT-segmented bone, not a registered intraoral scan.");
+                if (!lowerHasDental) src.AppendLine("• Lower arch is using CT-segmented bone, not a registered intraoral scan.");
                 var choice = MessageBox.Show(
                     "For a clinically accurate splint, both arches should come from registered "
                     + "intraoral scans (classified Upper / Lower):\n\n" + src.ToString()
@@ -145,6 +159,7 @@ public partial class MainViewModel
                         {
                             Name              = labelledConfig.DisplayName,
                             Vertices          = verts,
+                            NhpBaked          = true,  // vertices already in NHP space (generated from NHP-baked dental meshes)
                             ColorR            = 200,
                             ColorG            = 230,
                             ColorB            = 255,

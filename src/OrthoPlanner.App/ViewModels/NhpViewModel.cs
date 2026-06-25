@@ -331,7 +331,7 @@ public partial class MainViewModel
         {
             foreach (MeshViewModel mesh in e.NewItems)
             {
-                if (!SuppressLedgerBake && mesh.Vertices != null && !_cumulativeNhpMatrix.IsIdentity)
+                if (!SuppressLedgerBake && !mesh.NhpBaked && mesh.Vertices != null && !_cumulativeNhpMatrix.IsIdentity)
                 {
                     BakeTransformIntoVertices(mesh.Vertices, _cumulativeNhpMatrix);
                     mesh.BuildModel();

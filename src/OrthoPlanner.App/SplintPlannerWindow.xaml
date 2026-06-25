@@ -180,7 +180,7 @@
                 <!-- Clinical fit & printability -->
                 <TextBlock Text="CLINICAL FIT" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,8,0,6"/>
 
-                <CheckBox x:Name="BlockoutCheck" Content="Block out undercuts (seatability)" IsChecked="True"
+                <CheckBox x:Name="BlockoutCheck" Content="Block out undercuts (seatability)" IsChecked="False"
                           Foreground="#AABBCC" Margin="0,0,0,8"
                           ToolTip="Straightens each tooth pocket into a vertical pull-out path so the splint can seat and release."/>
 
