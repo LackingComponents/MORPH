@@ -111,6 +111,7 @@ public partial class MainViewModel
                 if (wizard.CleanMerged && wizard.CleanMergedVertices != null)
                 {
                     ctSegment.Vertices = MeshHelper.ToFlatArray(wizard.CleanMergedVertices);
+                    ctSegment.HasMergedDental = true;
                     ctSegment.BuildModel();
                     scan.IsVisible = false; // Hide the separate STL cast since it is now part of the bone body
                 }
@@ -180,6 +181,7 @@ public partial class MainViewModel
                 if (mergedList.Count > 0)
                 {
                     targetBone.Vertices = MeshHelper.ToFlatArray(mergedList);
+                    targetBone.HasMergedDental = true;
                     targetBone.BuildModel();
                     scan.IsVisible = false; // Hide original cast
                     modifiedAny = true;
