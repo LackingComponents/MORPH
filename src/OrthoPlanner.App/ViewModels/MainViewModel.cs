@@ -229,6 +229,21 @@ public partial class SegmentViewModel : ObservableObject
     public HelixToolkit.Wpf.SharpDX.Material? Material { get; set; }
     [ObservableProperty] private System.Windows.Media.Media3D.Transform3D _transform = System.Windows.Media.Media3D.Transform3D.Identity;
 
+    /// <summary>
+    /// When true, the segment's vertices already have the cumulative NHP transform baked in.
+    /// Managed by the NHP ledger — do NOT set manually. Use <see cref="DerivedFrom"/> instead
+    /// to declare parent-child lineage; the ledger infers bake state from the parent.
+    /// </summary>
+    public bool NhpBaked { get; internal set; }
+
+    /// <summary>
+    /// The parent segment this was derived from (e.g., Bone → Cranium/Mandible, Mandible → Ramus).
+    /// The NHP ledger checks this: if the parent is already NHP-baked, the child inherits that
+    /// state automatically and the ledger skips re-baking. Set this when creating a segment
+    /// whose vertices come from an already-existing segment's vertex data.
+    /// </summary>
+    public SegmentViewModel? DerivedFrom { get; set; }
+
     /// <summary>The surgical movement component of this segment's transform (NHP-independent).</summary>
     public System.Windows.Media.Media3D.Transform3D SurgicalTransform { get; set; } = System.Windows.Media.Media3D.Transform3D.Identity;
 

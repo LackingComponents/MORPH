@@ -24,6 +24,8 @@ public partial class CondyleSplitWindow : Window
     private readonly byte _boneLabel;
     private readonly double _boneMinHu;
     private readonly bool _landmarkOnlyMode;
+    private readonly Matrix3D? _inverseNhpMatrix;  // Baked-space → DICOM-space (for voxel ops)
+    private readonly MatrixTransform3D? _nhpDisplayTransform; // DICOM-space → Baked-space (for Step 3 display)
 
     // 3 user-picked points defining the split plane
     private readonly List<Point3D> _planePoints = new(); // Used to be list of 3
@@ -118,7 +120,8 @@ public partial class CondyleSplitWindow : Window
         List<float[]> boneVerts,
         VolumeData? ctVolume = null, SegmentationVolume? segVolume = null, byte boneLabel = 1, double boneMinHu = 400.0,
         bool landmarkOnlyMode = false,
-        HelixToolkit.SharpDX.Geometry3D? boneGeometry = null)
+        HelixToolkit.SharpDX.Geometry3D? boneGeometry = null,
+        Matrix3D? inverseNhpMatrix = null)
     {
         InitializeComponent();
         
@@ -139,6 +142,13 @@ public partial class CondyleSplitWindow : Window
         _boneLabel = boneLabel;
         _boneMinHu = boneMinHu;
         _landmarkOnlyMode = landmarkOnlyMode;
+        _inverseNhpMatrix = inverseNhpMatrix;
+        if (inverseNhpMatrix.HasValue && inverseNhpMatrix.Value.HasInverse)
+        {
+            var fwd = inverseNhpMatrix.Value;
+            fwd.Invert();
+            _nhpDisplayTransform = new MatrixTransform3D(fwd);
+        }
         Loaded += (_, _) => SetupStep1();
         Closed += OnWindowClosed;
     }
@@ -481,9 +491,32 @@ public partial class CondyleSplitWindow : Window
 
             bool hardSeparation = Dispatcher.Invoke(() => HardSeparationCheck.IsChecked == true);
 
+            // User picks points on the NHP-baked mesh. The voxel split operates in
+            // raw DICOM space (x*spacing). When NHP is non-identity we must transform
+            // all spatial parameters back to DICOM space.
+            var invM = _inverseNhpMatrix;
+            var splitLeftC = invM.HasValue ? TransformFloat3(leftC, invM.Value) : leftC;
+            var splitRightC = invM.HasValue ? TransformFloat3(rightC, invM.Value) : rightC;
+            var splitLeftAnchor = invM.HasValue ? TransformFloat3(_leftCondyleClickPoint ?? leftC, invM.Value) : (_leftCondyleClickPoint ?? leftC);
+            var splitRightAnchor = invM.HasValue ? TransformFloat3(_rightCondyleClickPoint ?? rightC, invM.Value) : (_rightCondyleClickPoint ?? rightC);
+
+            // Transform the plane: apply inverse to 3 coplanar points, recompute normal+D
+            var splitNormal = normal;
+            var splitPlaneD = planeD;
+            if (invM.HasValue)
+            {
+                // Transform the centroid and two offset points to get new normal
+                var c = invM.Value.Transform(new Point3D(_planeCentroid.X, _planeCentroid.Y, _planeCentroid.Z));
+                var pU = invM.Value.Transform(new Point3D(
+                    _planeCentroid.X + normal.X, _planeCentroid.Y + normal.Y, _planeCentroid.Z + normal.Z));
+                splitNormal = pU - c;
+                if (splitNormal.Length > 1e-10) splitNormal.Normalize();
+                splitPlaneD = -Vector3D.DotProduct(splitNormal, (Vector3D)c);
+            }
+
             var (cranium, mandible) = await Task.Run(() =>
-                SplitVoxelMask(normal, planeD, leftC, rightC,
-                    _leftCondyleClickPoint ?? leftC, _rightCondyleClickPoint ?? rightC,
+                SplitVoxelMask(splitNormal, splitPlaneD, splitLeftC, splitRightC,
+                    splitLeftAnchor, splitRightAnchor,
                     leftHE, rightHE, segVol, ctVol, boneLabel, hardSeparation));
 
             _craniumVerts = cranium;
@@ -496,11 +529,15 @@ public partial class CondyleSplitWindow : Window
                 if (_craniumVerts != null && _craniumVerts.Count > 0)
                 {
                     var cranModel = MeshHelper.BuildModel3D(_craniumVerts, 220, 200, 170);
+                    // Apply forward NHP so result appears in the same position as the
+                    // input bone (which was already in baked/NHP space in this viewport).
+                    if (_nhpDisplayTransform != null) cranModel.Transform = _nhpDisplayTransform;
                     MainGroup.Children.Add(cranModel);
                 }
                 if (_mandibleVerts != null && _mandibleVerts.Count > 0)
                 {
                     var mandModel = MeshHelper.BuildModel3D(_mandibleVerts, 220, 140, 120);
+                    if (_nhpDisplayTransform != null) mandModel.Transform = _nhpDisplayTransform;
                     MainGroup.Children.Add(mandModel);
                 }
 
@@ -737,6 +774,13 @@ public partial class CondyleSplitWindow : Window
     }
 
     private static float[] Clone(float[] v) => new float[] { v[0], v[1], v[2] };
+
+    /// <summary>Transforms a 3-element float[] through a Matrix3D (e.g. inverse NHP).</summary>
+    private static float[] TransformFloat3(float[] v, Matrix3D m)
+    {
+        var p = m.Transform(new Point3D(v[0], v[1], v[2]));
+        return new float[] { (float)p.X, (float)p.Y, (float)p.Z };
+    }
 
     // ═══════════════════════════════════
     // Mouse interaction

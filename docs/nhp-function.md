@@ -1,6 +1,6 @@
 ---
 name: nhp-function
-description: "Canonical spec for the Natural Head Position (NHP) function — architecture, vulnerabilities, hardening roadmap, and viewport behavior (Hybrid NHP: Bake-on-Commit model complete)."
+description: "Canonical spec for the Natural Head Position (NHP) function — architecture, vulnerabilities, hardening roadmap, and viewport behavior (Hybrid NHP: Bake-on-Commit model with NhpBaked ledger guard)."
 metadata: 
   node_type: memory
   type: project
@@ -9,8 +9,8 @@ metadata:
 
 # NHP (Natural Head Position) Function — Complete Context
 
-**Last updated:** 2026-06-19
-**Status:** Hybrid NHP Architecture fully implemented. Bake-on-commit, Deep-clone Undo/Redo, Cumulative Matrix, and Wizard Auto-Commit Guards deployed.
+**Last updated:** 2026-06-25
+**Status:** Hybrid NHP Architecture fully implemented. Bake-on-commit, Deep-clone Undo/Redo, Cumulative Matrix, Wizard Auto-Commit Guards, and `NhpBaked` ledger guard deployed.
 
 ---
 
@@ -38,12 +38,13 @@ As of 2026-06-19, the NHP system operates on a **Hybrid Model**:
 
 | File | Role |
 |---|---|
-| `ViewModels/NhpViewModel.cs` | 6 slider properties, `_cumulativeNhpMatrix`, `_nhpTransform` (delta), `CommitNhp` (bakes vertices, VolumePivot, landmarks), `UpdateNhpTransform`. Ledger `CollectionChanged` auto-bakes new objects. |
+| `ViewModels/NhpViewModel.cs` | 6 slider properties, `_cumulativeNhpMatrix`, `_nhpTransform` (delta), `CommitNhp` (bakes vertices, VolumePivot, landmarks), `UpdateNhpTransform`. **NHP Ledger:** `CollectionChanged` handlers auto-bake new objects, checking `seg.DerivedFrom` lineage and `seg.NhpBaked` to prevent double-baking. `InvertMatrix` helper for CondyleSplit. |
 | `ViewModels/DicomViewModel.cs` | Oblique MPR slice generation. Uses `GetInverseNhpTransform` and `GetNhpVolumeBounds`, which now compute the **total** transform (`_cumulativeNhpMatrix * _nhpTransform.Value`). |
-| `ViewModels/MainViewModel.cs` | `RefreshCombinedModel()`, `BoneOnlyBounds`, `VolumePivot`, `LeftCondyleCenter`, `RightCondyleCenter`, `DentalMidlinePoint`, `SavedCephLandmarks`. |
+| `ViewModels/MainViewModel.cs` | `RefreshCombinedModel()`, `BoneOnlyBounds`, `VolumePivot`, `LeftCondyleCenter`, `RightCondyleCenter`, `DentalMidlinePoint`, `SavedCephLandmarks`. `SegmentViewModel.NhpBaked` and `DerivedFrom` properties (see §2.3). |
 | `ViewModels/UndoRedoViewModel.cs` | **Deep-clone** undo system. Captures `_cumulativeNhpMatrix`, `VolumePivot`, NHP baseline, and deep copies of vertex arrays. Uses `SuppressLedgerBake` during restore to avoid double-baking. |
 | `ViewModels/ProjectViewModel.cs` | Persists/restores `CumulativeNhpMatrix` and landmarks. Provides backward compatibility (computes cumulative matrix from old visual-only baselines). Uses `SuppressLedgerBake` on load. |
-| `ViewModels/OsteotomyViewModel.cs` | `EnsureNhpCommittedForWizard()` guard. Auto-commits dirty NHP before opening wizards. Bakes CondyleSplit wizard results through `_cumulativeNhpMatrix` to align DICOM-space output with baked meshes. |
+| `ViewModels/OsteotomyViewModel.cs` | `EnsureNhpCommittedForWizard()` guard. All wizard-produced segments set `DerivedFrom = parentSeg` for lineage-based ledger bake inference. Passes inverse NHP matrix to CondyleSplitWindow. |
+| `CondyleSplitWindow.xaml.cs` | Accepts optional `inverseNhpMatrix`. Transforms baked-space plane/condyle coordinates to DICOM space before voxel split. Output meshes are DICOM-space (via `ExtractSegmentMesh`) and get baked by the ledger on `Segments.Add()`. |
 
 ### 2.2 Transform Stack & Math
 
@@ -68,10 +69,40 @@ seg.Transform = ComposeTransforms(_nhpTransform, seg.SurgicalTransform);
 5. `_cumulativeNhpMatrix *= deltaMatrix`.
 6. Reset delta (`_nhpTransform = Identity`) and set `IsNhpDirty = false`.
 
-**NHP Ledger:**
-When an object is added to the scene:
-- If `SuppressLedgerBake == false`, `_cumulativeNhpMatrix` is baked into its raw vertices.
-- `_nhpTransform` (the current delta preview) is applied to its `Transform` property.
+**NHP Ledger (`OnSegmentsChangedForNhp` / `OnMeshesChangedForNhp` / `OnOcclusionsChangedForNhp`):**
+When an object is added to a tracked collection, the ledger determines whether to bake the cumulative NHP transform using a three-level guard:
+
+1. **`SuppressLedgerBake` (global, coarse):** When `true`, *all* auto-baking is suppressed. Used by undo/redo restore and project load, where restored segments already carry the correct baked vertices.
+2. **`seg.DerivedFrom` (lineage):** If set and the parent's `NhpBaked` is `true`, the child inherits that state — its vertices are already in NHP-baked space (osteotomy children).
+3. **`seg.NhpBaked` (direct flag):** Managed by the ledger — set to `true` after a segment is processed (either baked or inherited). Do not set manually.
+
+The decision flow per added segment:
+```
+bool alreadyBaked = seg.NhpBaked || (seg.DerivedFrom?.NhpBaked == true);
+if (!SuppressLedgerBake && !alreadyBaked && seg.Vertices != null && !_cumulativeNhpMatrix.IsIdentity)
+    → BakeTransformIntoVertices(seg.Vertices, _cumulativeNhpMatrix)
+seg.NhpBaked = true   // mark as baked regardless of path
+seg.Transform = ComposeTransforms(_nhpTransform, seg.SurgicalTransform)
+```
+
+**Segment lineage tree (DerivedFrom):**
+```
+HardTissueModel (Bone)
+├── Cranium (Split)          DerivedFrom = boneSegment
+│   ├── Cranium (LeFort Upper)    DerivedFrom = cranium
+│   └── Maxilla (LeFort 1 Sep.)   DerivedFrom = cranium
+│       ├── Maxilla Left (2/3-Piece)   DerivedFrom = maxSeg
+│       ├── Maxilla Right (2/3-Piece)  DerivedFrom = maxSeg
+│       └── Premaxilla (3-Piece)       DerivedFrom = maxSeg
+└── Mandible (Split)         DerivedFrom = boneSegment
+    ├── Ramus Left            DerivedFrom = inputSeg (Mandible)
+    ├── Ramus Right           DerivedFrom = inputSeg (Mandible)
+    ├── Mandible (distal)     DerivedFrom = inputSeg
+    │   ├── Mandible (Chin Removed)  DerivedFrom = targetSeg
+    │   └── Chin Segment             DerivedFrom = targetSeg
+```
+
+The osteotomy code only declares `DerivedFrom = parentSegment` — the ledger does the rest. This eliminates the need for manual `NhpBaked = true` at every wizard call site and makes the parent-child relationship explicit in the data model.
 
 ---
 
@@ -103,6 +134,7 @@ When NHP values are non-zero (or when history exists in `_cumulativeNhpMatrix`),
 - **V-2.1 (Safety):** NHP NaN/Infinity Validation on Project Load resolved — guard code implemented during `ReadNhpDouble` and matrix restoration.
 - **V-3.1 (Correctness):** Replaced fragile `VolumePivot == (0,0,0)` with robust nullable `Point3D?`.
 - **V-3.3 (Safety):** Osteotomy Wizards Ignore NHP Dirty State resolved — `EnsureNhpCommittedForWizard()` guard implemented.
+- **V-3.5 (Correctness):** NHP Ledger Double-Bake & CondyleSplit Coordinate Mismatch resolved. Two issues: (a) Osteotomy-derived segments (cut-plane splits) whose vertices are subsets of an already-baked parent were double-baked by the ledger — fixed via `DerivedFrom` lineage on `SegmentViewModel`; ledger inherits bake state from parent. (b) CondyleSplit wizard regenerates meshes from raw DICOM volume (`ExtractSegmentMesh` outputs `x*spacing` coordinates) but used baked-space plane/condyle coordinates for the voxel split — fixed by passing `inverseNhpMatrix` to the wizard, which transforms spatial parameters back to DICOM space before the split. Output meshes are correctly baked by the ledger on `Segments.Add()`.
 - **Phase 0:** Undo vertex aliasing resolved via deep-clone in `UndoRedoViewModel`.
 - **Phase 4:** Reset/Zero commands explicitly force UI/3D updates.
 

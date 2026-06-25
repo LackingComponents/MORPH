@@ -307,12 +307,19 @@ public partial class MainViewModel
         {
             foreach (SegmentViewModel seg in e.NewItems)
             {
-                // Auto-bake cumulative NHP into new DICOM-space vertices (unless suppressed)
-                if (!SuppressLedgerBake && seg.Vertices != null && !_cumulativeNhpMatrix.IsIdentity)
+                // Determine if this segment's vertices are already in NHP-baked space:
+                //  1. DerivedFrom lineage: parent is baked → child inherits (osteotomy children)
+                //  2. Direct NhpBaked flag (set by undo/restore or prior ledger pass)
+                bool alreadyBaked = seg.NhpBaked || (seg.DerivedFrom?.NhpBaked == true);
+
+                // Bake cumulative NHP into fresh DICOM-space vertices only.
+                // Skip if: globally suppressed (undo/restore), or already in baked space.
+                if (!SuppressLedgerBake && !alreadyBaked && seg.Vertices != null && !_cumulativeNhpMatrix.IsIdentity)
                 {
                     BakeTransformIntoVertices(seg.Vertices, _cumulativeNhpMatrix);
                     seg.BuildModel();
                 }
+                seg.NhpBaked = true;
                 seg.Transform = ComposeTransforms(_nhpTransform, seg.SurgicalTransform);
             }
         }
@@ -373,6 +380,15 @@ public partial class MainViewModel
         if (pt == null) return null;
         var p = m.Transform(new Point3D(pt.Value.X, pt.Value.Y, pt.Value.Z));
         return (p.X, p.Y, p.Z);
+    }
+
+    /// <summary>Returns the inverse of a Matrix3D, or Identity if not invertible.</summary>
+    private static Matrix3D InvertMatrix(Matrix3D m)
+    {
+        if (!m.HasInverse) return Matrix3D.Identity;
+        var inv = m;
+        inv.Invert();
+        return inv;
     }
 
     /// <summary>Composes two transforms: applies <paramref name="first"/>, then <paramref name="second"/>.</summary>

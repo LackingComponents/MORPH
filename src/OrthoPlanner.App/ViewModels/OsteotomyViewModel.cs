@@ -51,7 +51,8 @@ public partial class MainViewModel
                 Name = "Cranium (LeFort Upper)",
                 Vertices = MeshHelper.ToFlatArray(wizard.UpperMaxillaResult),
                 ColorR = 220, ColorG = 200, ColorB = 170,
-                IsVisible = true
+                IsVisible = true,
+                DerivedFrom = cranium
             };
             upperVm.OnVisibilityChanged = RefreshCombinedModel;
             upperVm.BuildModel();
@@ -64,7 +65,8 @@ public partial class MainViewModel
                 Name = "Maxilla (LeFort 1 Separated)",
                 Vertices = MeshHelper.ToFlatArray(wizard.LowerMaxillaResult),
                 ColorR = 120, ColorG = 220, ColorB = 210,
-                IsVisible = true
+                IsVisible = true,
+                DerivedFrom = cranium
             };
             lowerVm.OnVisibilityChanged = RefreshCombinedModel;
             lowerVm.BuildModel();
@@ -102,7 +104,8 @@ public partial class MainViewModel
                 Label = (byte)(Segments.Count + 1),
                 Name  = "Maxilla Left (2-Piece)",
                 Vertices = MeshHelper.ToFlatArray(wizard.LeftResult),
-                ColorR = 100, ColorG = 200, ColorB = 255, IsVisible = true
+                ColorR = 100, ColorG = 200, ColorB = 255, IsVisible = true,
+                DerivedFrom = maxSeg
             };
             leftVm.OnVisibilityChanged = RefreshCombinedModel;
             leftVm.BuildModel();
@@ -113,7 +116,8 @@ public partial class MainViewModel
                 Label = (byte)(Segments.Count + 1),
                 Name  = "Maxilla Right (2-Piece)",
                 Vertices = MeshHelper.ToFlatArray(wizard.RightResult),
-                ColorR = 120, ColorG = 220, ColorB = 210, IsVisible = true
+                ColorR = 120, ColorG = 220, ColorB = 210, IsVisible = true,
+                DerivedFrom = maxSeg
             };
             rightVm.OnVisibilityChanged = RefreshCombinedModel;
             rightVm.BuildModel();
@@ -150,7 +154,8 @@ public partial class MainViewModel
                 Label = (byte)(Segments.Count + 1),
                 Name  = "Maxilla Left (3-Piece)",
                 Vertices = MeshHelper.ToFlatArray(wizard.LeftResult),
-                ColorR = 100, ColorG = 200, ColorB = 255, IsVisible = true
+                ColorR = 100, ColorG = 200, ColorB = 255, IsVisible = true,
+                DerivedFrom = maxSeg
             };
             leftVm.OnVisibilityChanged = RefreshCombinedModel;
             leftVm.BuildModel();
@@ -161,7 +166,8 @@ public partial class MainViewModel
                 Label = (byte)(Segments.Count + 1),
                 Name  = "Maxilla Right (3-Piece)",
                 Vertices = MeshHelper.ToFlatArray(wizard.RightResult),
-                ColorR = 120, ColorG = 220, ColorB = 210, IsVisible = true
+                ColorR = 120, ColorG = 220, ColorB = 210, IsVisible = true,
+                DerivedFrom = maxSeg
             };
             rightVm.OnVisibilityChanged = RefreshCombinedModel;
             rightVm.BuildModel();
@@ -172,7 +178,8 @@ public partial class MainViewModel
                 Label = (byte)(Segments.Count + 1),
                 Name  = "Maxilla Central / Premaxilla (3-Piece)",
                 Vertices = MeshHelper.ToFlatArray(wizard.CentralResult),
-                ColorR = 220, ColorG = 180, ColorB = 255, IsVisible = true
+                ColorR = 220, ColorG = 180, ColorB = 255, IsVisible = true,
+                DerivedFrom = maxSeg
             };
             centralVm.OnVisibilityChanged = RefreshCombinedModel;
             centralVm.BuildModel();
@@ -218,7 +225,8 @@ public partial class MainViewModel
                 Name = targetSeg.Name + " (Chin Removed)",
                 Vertices = MeshHelper.ToFlatArray(wizard.UpperMandibleResult),
                 ColorR = targetSeg.ColorR, ColorG = targetSeg.ColorG, ColorB = targetSeg.ColorB,
-                IsVisible = true
+                IsVisible = true,
+                DerivedFrom = targetSeg
             };
             upperVm.OnVisibilityChanged = RefreshCombinedModel;
             upperVm.BuildModel();
@@ -231,7 +239,8 @@ public partial class MainViewModel
                 Name = "Chin Segment",
                 Vertices = MeshHelper.ToFlatArray(wizard.ChinSegmentResult),
                 ColorR = 120, ColorG = 220, ColorB = 160,
-                IsVisible = true
+                IsVisible = true,
+                DerivedFrom = targetSeg
             };
             lowerVm.OnVisibilityChanged = RefreshCombinedModel;
             lowerVm.BuildModel();
@@ -277,7 +286,8 @@ public partial class MainViewModel
                 Name     = $"Ramus {sideName}",
                 Vertices = MeshHelper.ToFlatArray(wizard.ProximalResult),
                 ColorR = 120, ColorG = 160, ColorB = 240,
-                IsVisible = true
+                IsVisible = true,
+                DerivedFrom = inputSeg
             };
             proxVm.OnVisibilityChanged = RefreshCombinedModel;
             proxVm.BuildModel();
@@ -301,7 +311,8 @@ public partial class MainViewModel
                     Name     = "Mandible",
                     Vertices = MeshHelper.ToFlatArray(wizard.DistalResult),
                     ColorR = 220, ColorG = 140, ColorB = 120,
-                    IsVisible = true
+                    IsVisible = true,
+                    DerivedFrom = inputSeg
                 };
                 distVm.OnVisibilityChanged = RefreshCombinedModel;
                 distVm.BuildModel();
@@ -369,7 +380,10 @@ public partial class MainViewModel
 
             var wizard = new CondyleSplitWindow(
                 MeshHelper.ToVertexList(boneSegment.Vertices),
-                Volume, splitTargetVolume, boneSegment.Label, BoneMinHU);
+                Volume, splitTargetVolume, boneSegment.Label, BoneMinHU,
+                inverseNhpMatrix: _cumulativeNhpMatrix.IsIdentity
+                    ? (System.Windows.Media.Media3D.Matrix3D?)null
+                    : InvertMatrix(_cumulativeNhpMatrix));
             wizard.Owner = System.Windows.Application.Current.MainWindow;
 
             if (wizard.ShowDialog() == true && wizard.Accepted)
@@ -377,13 +391,13 @@ public partial class MainViewModel
                 SaveStateForUndo();
 
                 // Store condylar axis data & midline
-                // Wizard returns points in DICOM space. Bake cumulative NHP so they
-                // land in the same space as the already-committed mesh vertices.
-                LeftCondyleCenter  = TransformTuple(wizard.LeftCondyleCenter,  _cumulativeNhpMatrix);
-                RightCondyleCenter = TransformTuple(wizard.RightCondyleCenter, _cumulativeNhpMatrix);
+                // Wizard picks points on the baked mesh (NHP space) and returns
+                // them as-is. No additional transform needed.
+                LeftCondyleCenter  = wizard.LeftCondyleCenter;
+                RightCondyleCenter = wizard.RightCondyleCenter;
                 LeftCondyleHalfExtents = wizard.LeftCondyleHalfExtents;
                 RightCondyleHalfExtents = wizard.RightCondyleHalfExtents;
-                DentalMidlinePoint = TransformTuple(wizard.DentalMidlinePoint, _cumulativeNhpMatrix);
+                DentalMidlinePoint = wizard.DentalMidlinePoint;
 
                 // Create Cranium segment
                 if (wizard.CraniumResult != null && wizard.CraniumResult.Count > 0)
