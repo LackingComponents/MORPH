@@ -19,7 +19,9 @@ public partial class MainViewModel
 
     // ÔöÇÔöÇÔöÇ Segmentation Internal Volumes ÔöÇÔöÇÔöÇ
     private SegmentationVolume? _segVolume;
-    private SegmentationVolume? _boneOnlySegVolume; // A pristine backup purely for the Cranium/Mandible split
+    // ponytail: no more _boneOnlySegVolume — was a 100 MB eager copy held forever.
+    // Now we just record which label is "bone" and build the mask on-demand in OsteotomyViewModel.
+    private byte? _boneLabel;
 
     // ÔöÇÔöÇÔöÇ Live 3D Preview ÔöÇÔöÇÔöÇ
     [ObservableProperty] private HelixToolkit.SharpDX.Geometry3D? _livePreviewGeometry;
@@ -458,12 +460,9 @@ public partial class MainViewModel
         StatusText = $"Segmented {count:N0} voxels ({min}\u2013{max} HU)";
         LoadProgress = 100;
 
-        // Isolate the pure bone mask so that subsequent segmentations (e.g., Dental) do not overwrite and destroy it
+        // Record which label was bone (used on-demand by CondyleSplit), don't copy the 100 MB mask
         if (name.Contains("Bone"))
-        {
-            _boneOnlySegVolume = new SegmentationVolume(Volume);
-            Array.Copy(_segVolume.Labels, _boneOnlySegVolume.Labels, _segVolume.Labels.Length);
-        }
+            _boneLabel = label;
 
         IsLoading = false;
     }

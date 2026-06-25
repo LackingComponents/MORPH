@@ -67,7 +67,8 @@ public partial class MainViewModel
             SurgicalTransform = s.SurgicalTransform,
             OnVisibilityChanged = RefreshCombinedModel
         };
-        clone.BuildModel();
+        // ponytail: no BuildModel() here — snapshots are never rendered;
+        // geometry is built on restore in RestoreStateSnapshot()
         return clone;
     }
 
@@ -84,7 +85,6 @@ public partial class MainViewModel
             MandibleOcclusionTransform = m.MandibleOcclusionTransform,
             OnVisibilityChanged = RefreshCombinedModel
         };
-        clone.BuildModel();
         return clone;
     }
 
@@ -92,12 +92,13 @@ public partial class MainViewModel
     {
         _undoStack.Push(CreateStateSnapshot());
         _redoStack.Clear();
-        // Keep at most 5 undo entries to prevent stale mesh data accumulating in memory
-        if (_undoStack.Count > 5)
+        // ponytail: cap 3 undo entries (from 5) — each holds cloned vertex arrays
+        // that can be hundreds of MB; 3 is enough for normal surgical workflow
+        if (_undoStack.Count > 3)
         {
             var kept = _undoStack.ToArray(); // index 0 = newest
             _undoStack.Clear();
-            for (int i = 4; i >= 0; i--) _undoStack.Push(kept[i]);
+            for (int i = 2; i >= 0; i--) _undoStack.Push(kept[i]);
         }
     }
 
@@ -177,17 +178,17 @@ public partial class MainViewModel
         try
         {
             Segments.Clear();
-            foreach (var s in snapshot.Segments) Segments.Add(s);
+            foreach (var s in snapshot.Segments) { s.BuildModel(); Segments.Add(s); }
 
             ImportedMeshes.Clear();
-            foreach (var m in snapshot.ImportedMeshes) ImportedMeshes.Add(m);
+            foreach (var m in snapshot.ImportedMeshes) { m.BuildModel(); ImportedMeshes.Add(m); }
 
             LoadedOcclusions.Clear();
-            foreach (var o in snapshot.LoadedOcclusions) LoadedOcclusions.Add(o);
+            foreach (var o in snapshot.LoadedOcclusions) { o.BuildModel(); LoadedOcclusions.Add(o); }
 
-            HardTissueModel = snapshot.HardTissueModel;
-            SoftTissueModel = snapshot.SoftTissueModel;
-            DentalModel     = snapshot.DentalModel;
+            HardTissueModel = snapshot.HardTissueModel; HardTissueModel?.BuildModel();
+            SoftTissueModel = snapshot.SoftTissueModel; SoftTissueModel?.BuildModel();
+            DentalModel     = snapshot.DentalModel;     DentalModel?.BuildModel();
 
             // Restore NHP transform state
             _cumulativeNhpMatrix = snapshot.CumulativeNhpMatrix;

@@ -80,7 +80,7 @@ public partial class MainViewModel : ObservableObject
     // ÔöÇÔöÇÔöÇ Segmentation Internal Volumes ÔöÇÔöÇÔöÇ
     // BoneHistogramImage, SoftHistogramImage, DentalHistogramImage, CustomHistogramImage ÔåÆ DicomViewModel.cs
     // BoneMinHU/Max, SoftMinHU/Max, DentalMinHU/Max, CustomMinHU/Max, Show*Overlay, ShowSegmentation ÔåÆ DicomViewModel.cs
-    // _segVolume, _boneOnlySegVolumeTempPath ÔåÆ SegmentationViewModel.cs / OsteotomyViewModel.cs
+    // _segVolume, _boneLabel ÔåÆ SegmentationViewModel.cs / OsteotomyViewModel.cs
 
     // ÔöÇÔöÇÔöÇ Undo/Redo ÔåÆ UndoRedoViewModel.cs ÔöÇÔöÇÔöÇ
     // ÔöÇÔöÇÔöÇ Volume Rendering ÔåÆ VolumeRenderingViewModel.cs ÔöÇÔöÇÔöÇ

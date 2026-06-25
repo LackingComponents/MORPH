@@ -1,3 +1,4 @@
+using System.Collections;
 using OrthoPlanner.Core.Imaging;
 
 namespace OrthoPlanner.Core.Segmentation;
@@ -26,7 +27,7 @@ public static class SegmentationEngine
         int[][] n6 = [[1,0,0], [-1,0,0], [0,1,0], [0,-1,0], [0,0,1], [0,0,-1]];
         short airThreshold = -400; // Anything below this is definitively air/fat, providing high contrast
 
-        bool[]? externalAirMask = null;
+        BitArray? externalAirMask = null;
         if (enhanceThinBone)
         {
             if (progress != null) progress(0.05);
@@ -91,15 +92,21 @@ public static class SegmentationEngine
     /// <summary>
     /// Computes a boolean mask of "Room Air" by extracting the largest connected component of air voxels.
     /// Used to prevent the thin-bone edge-enhancer from wrapping onto the patient's external skin.
+    ///
+    /// ponytail: uses BitArray (12.5 MB) instead of bool[] (100 MB) for both the visited
+    /// set and result mask, and avoids the intermediate List&lt;int&gt; (up to 200 MB for 50M+
+    /// room-air voxels) by tracking only the seed of the largest component, then doing a
+    /// second BFS pass to fill the result mask. Total savings: ~375 MB per bone seg.
     /// </summary>
-    private static bool[] ComputeExternalAirMask(VolumeData volume, short maxAirHU)
+    private static BitArray ComputeExternalAirMask(VolumeData volume, short maxAirHU)
     {
         int w = volume.Width, h = volume.Height, d = volume.Depth;
         int totalVoxels = w * h * d;
-        var globalVisited = new bool[totalVoxels];
-        
-        List<int> largestComponent = new List<int>();
-        int maxSize = 0;
+        var globalVisited = new BitArray(totalVoxels);
+
+        // Pass 1: find every air component, but only keep the size + seed of the largest.
+        int largestSize = 0;
+        (int x, int y, int z) largestSeed = (0, 0, 0);
 
         int[][] n6 = [ [1,0,0], [-1,0,0], [0,1,0], [0,-1,0], [0,0,1], [0,0,-1] ];
         var queue = new Queue<(int x, int y, int z)>();
@@ -111,16 +118,15 @@ public static class SegmentationEngine
             int idx = x + y * w + z * w * h;
             if (!globalVisited[idx] && volume.Voxels[idx] <= maxAirHU)
             {
-                var currentComponent = new List<int>();
-                
+                int componentSize = 0;
+
                 globalVisited[idx] = true;
                 queue.Enqueue((x, y, z));
 
                 while (queue.Count > 0)
                 {
                     var (cx, cy, cz) = queue.Dequeue();
-                    int cIdx = cx + cy * w + cz * w * h;
-                    currentComponent.Add(cIdx);
+                    componentSize++;
 
                     foreach (var n in n6)
                     {
@@ -136,18 +142,40 @@ public static class SegmentationEngine
                     }
                 }
 
-                if (currentComponent.Count > maxSize)
+                if (componentSize > largestSize)
                 {
-                    maxSize = currentComponent.Count;
-                    largestComponent = currentComponent;
+                    largestSize = componentSize;
+                    largestSeed = (x, y, z);
                 }
             }
         }
 
-        var resultMask = new bool[totalVoxels];
-        foreach (int idx in largestComponent)
+        // Pass 2: BFS from the largest component's seed to fill the result mask.
+        // The resultMask itself doubles as the visited set for this pass.
+        var resultMask = new BitArray(totalVoxels);
+        if (largestSize > 0)
         {
-            resultMask[idx] = true;
+            int seedIdx = largestSeed.x + largestSeed.y * w + largestSeed.z * w * h;
+            resultMask[seedIdx] = true;
+            queue.Enqueue(largestSeed);
+
+            while (queue.Count > 0)
+            {
+                var (cx, cy, cz) = queue.Dequeue();
+
+                foreach (var n in n6)
+                {
+                    int nx = cx + n[0], ny = cy + n[1], nz = cz + n[2];
+                    if (nx < 0 || nx >= w || ny < 0 || ny >= h || nz < 0 || nz >= d) continue;
+
+                    int nIdx = nx + ny * w + nz * w * h;
+                    if (!resultMask[nIdx] && volume.Voxels[nIdx] <= maxAirHU)
+                    {
+                        resultMask[nIdx] = true;
+                        queue.Enqueue((nx, ny, nz));
+                    }
+                }
+            }
         }
 
         return resultMask;

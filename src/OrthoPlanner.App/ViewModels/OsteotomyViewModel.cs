@@ -351,10 +351,28 @@ public partial class MainViewModel
                 segVolume.Depth == Volume.Depth &&
                 segVolume.CountVoxels(boneLabel) > 0;
 
-            OrthoPlanner.Core.Segmentation.SegmentationVolume? GetValidSplitTargetVolume(byte boneLabel) =>
-                HasUsableBoneMask(_boneOnlySegVolume, boneLabel)
-                    ? _boneOnlySegVolume
-                    : HasUsableBoneMask(_segVolume, boneLabel) ? _segVolume : null;
+            // ponytail: build bone-only mask on-demand from _segVolume instead of
+            // keeping a 100 MB copy around forever. Released after the dialog closes.
+            OrthoPlanner.Core.Segmentation.SegmentationVolume? boneOnlyMask = null;
+            OrthoPlanner.Core.Segmentation.SegmentationVolume? GetValidSplitTargetVolume(byte boneLabel)
+            {
+                // First: try the live seg volume (fast path, no allocation)
+                if (HasUsableBoneMask(_segVolume, boneLabel))
+                    return _segVolume;
+                // Second: build a bone-only mask from _segVolume on-demand
+                if (_segVolume != null && Volume != null && _boneLabel.HasValue)
+                {
+                    boneOnlyMask = new OrthoPlanner.Core.Segmentation.SegmentationVolume(Volume);
+                    byte target = _boneLabel.Value;
+                    int n = _segVolume.Labels.Length;
+                    for (int i = 0; i < n; i++)
+                        if (_segVolume.Labels[i] == target)
+                            boneOnlyMask.Labels[i] = target;
+                    if (HasUsableBoneMask(boneOnlyMask, boneLabel))
+                        return boneOnlyMask;
+                }
+                return null;
+            }
 
             var splitTargetVolume = GetValidSplitTargetVolume(boneSegment.Label);
 
@@ -443,6 +461,9 @@ public partial class MainViewModel
             {
                 StatusText = "Cranium/Mandible split cancelled.";
             }
+
+            // ponytail: release the on-demand bone-only mask — ~100 MB freed
+            boneOnlyMask = null;
         }
         catch (Exception ex)
         {

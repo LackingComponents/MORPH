@@ -23,26 +23,28 @@ public partial class MainViewModel
         int w = Volume.Width;
         int h = Volume.Height;
         int d = Volume.Depth;
+        int voxelCount = Volume.Voxels.Length;
 
-        var pixels = new Half[Volume.Voxels.Length * 4];
+        // ponytail: write Half values directly to byte[] — skips the intermediate
+        // Half[pixelCount*4] array that doubled peak memory (1.6 GB → 800 MB).
+        // R16G16B16A16_Float = 8 bytes per voxel.
+        var texBytes = new byte[voxelCount * 8];
 
-        for (int i = 0; i < Volume.Voxels.Length; i++)
+        for (int i = 0; i < voxelCount; i++)
         {
             float hu = Volume.Voxels[i];
-            float val = (hu + 1024f) / 4000f;
-            val = Math.Clamp(val, 0f, 1f);
-
+            float val = Math.Clamp((hu + 1024f) / 4000f, 0f, 1f);
             float alpha = (hu > 200) ? 0.3f : 0f;
 
-            pixels[i*4 + 0] = (Half)val;
-            pixels[i*4 + 1] = (Half)val;
-            pixels[i*4 + 2] = (Half)val;
-            pixels[i*4 + 3] = (Half)alpha;
+            int off = i * 8;
+            WriteHalf(texBytes, off,   (Half)val);
+            WriteHalf(texBytes, off+2, (Half)val);
+            WriteHalf(texBytes, off+4, (Half)val);
+            WriteHalf(texBytes, off+6, (Half)alpha);
         }
 
         var texParams = new HelixToolkit.SharpDX.Model.VolumeTextureParams(
-            System.Runtime.InteropServices.MemoryMarshal.AsBytes(pixels.AsSpan()).ToArray(),
-            w, h, d, SharpDX.DXGI.Format.R16G16B16A16_Float
+            texBytes, w, h, d, SharpDX.DXGI.Format.R16G16B16A16_Float
         );
 
         // Creates a 1D gradient texture for the lookup map
@@ -83,5 +85,14 @@ public partial class MainViewModel
         // scope; a non-blocking hint is enough. A blocking compacting Gen2 collect
         // here froze the UI for seconds on large volumes.
         GC.Collect(2, GCCollectionMode.Optimized, blocking: false);
+    }
+
+    /// <summary>Write a Half (16-bit float) as 2 bytes into a byte buffer at the given offset.</summary>
+    private static unsafe void WriteHalf(byte[] buf, int offset, Half value)
+    {
+        // ponytail: reinterpret the 16-bit float as raw bytes — avoids BitConverter.GetBytes allocation
+        ushort bits = *(ushort*)&value;
+        buf[offset]     = (byte)(bits & 0xFF);
+        buf[offset + 1] = (byte)((bits >> 8) & 0xFF);
     }
 }

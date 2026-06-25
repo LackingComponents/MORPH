@@ -11,6 +11,8 @@
     <RootNamespace>OrthoPlanner.App</RootNamespace>
     <!-- Required for ManifoldNET native DLL targets to activate on x64 -->
     <Prefer32Bit>false</Prefer32Bit>
+    <!-- Required for pointer-based WriteHalf in VolumeRenderingViewModel -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <!-- Explicitly copy ManifoldNET native DLLs to output (targets file requires Prefer32Bit=false) -->
