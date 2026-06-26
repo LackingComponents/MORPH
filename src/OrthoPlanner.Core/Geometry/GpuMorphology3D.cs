@@ -27,7 +27,7 @@ public sealed class GpuMorphology3D : IDisposable
         _erodeKernel  = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView1D<byte, Stride1D.Dense>, ArrayView1D<byte, Stride1D.Dense>, int, int, int, int>(ErodeKernel);
     }
 
-    /// <summary>3D binary dilation: expand '1' voxels by radius r (box structuring element).</summary>
+    /// <summary>3D binary dilation: expand '1' voxels by radius r (sphere structuring element).</summary>
     public byte[] Dilate(byte[] input, int nx, int ny, int nz, int radius)
     {
         var output = new byte[input.Length];
@@ -35,7 +35,7 @@ public sealed class GpuMorphology3D : IDisposable
         return output;
     }
 
-    /// <summary>3D binary erosion: shrink '1' regions by radius r (box structuring element).</summary>
+    /// <summary>3D binary erosion: shrink '1' regions by radius r (sphere structuring element).</summary>
     public byte[] Erode(byte[] input, int nx, int ny, int nz, int radius)
     {
         var output = new byte[input.Length];
@@ -45,9 +45,15 @@ public sealed class GpuMorphology3D : IDisposable
 
     /// <summary>Morphological closing: dilate then erode. Bridges small gaps.</summary>
     public byte[] Close(byte[] input, int nx, int ny, int nz, int radius)
+        => Close(input, nx, ny, nz, radius, radius);
+
+    /// <summary>Asymmetric closing: dilate by <paramref name="dilateRadius"/>, then
+    /// erode by <paramref name="erodeRadius"/>. Use erodeRadius &lt; dilateRadius to
+    /// preserve thin bridge regions that symmetric closing would punch through.</summary>
+    public byte[] Close(byte[] input, int nx, int ny, int nz, int dilateRadius, int erodeRadius)
     {
-        var dilated = Dilate(input, nx, ny, nz, radius);
-        return Erode(dilated, nx, ny, nz, radius);
+        var dilated = Dilate(input, nx, ny, nz, dilateRadius);
+        return Erode(dilated, nx, ny, nz, erodeRadius);
     }
 
     /// <summary>Morphological opening: erode then dilate. Removes thin protrusions.</summary>
@@ -72,7 +78,7 @@ public sealed class GpuMorphology3D : IDisposable
 
     // ── GPU Kernels ──────────────────────────────────────────────────────────
 
-    /// <summary>Dilation kernel: output=1 if ANY voxel in [x±r, y±r, z±r] is 1.</summary>
+    /// <summary>Dilation kernel: output=1 if ANY voxel in sphere of radius r is 1.</summary>
     static void DilateKernel(
         Index1D index,
         ArrayView1D<byte, Stride1D.Dense> input,
@@ -86,6 +92,7 @@ public sealed class GpuMorphology3D : IDisposable
         int x = rem % nx;
 
         byte result = 0;
+        int r2 = radius * radius;
         int zLo = z - radius; if (zLo < 0) zLo = 0;
         int zHi = z + radius; if (zHi >= nz) zHi = nz - 1;
         int yLo = y - radius; if (yLo < 0) yLo = 0;
@@ -95,13 +102,16 @@ public sealed class GpuMorphology3D : IDisposable
 
         for (int kz = zLo; kz <= zHi && result == 0; kz++)
             for (int ky = yLo; ky <= yHi && result == 0; ky++)
-                for (int kx = xLo; kx <= xHi && result == 0; kx++)
+                for (int kx = xLo; kx <= xHi && result == 0; kx++) {
+                    int ddx = kx - x, ddy = ky - y, ddz = kz - z;
+                    if (ddx*ddx + ddy*ddy + ddz*ddz > r2) continue;  // sphere structuring element
                     if (input[kz * nx * ny + ky * nx + kx] != 0) result = 1;
+                }
 
         output[idx] = result;
     }
 
-    /// <summary>Erosion kernel: output=1 only if ALL voxels in [x±r, y±r, z±r] are 1.</summary>
+    /// <summary>Erosion kernel: output=1 only if ALL voxels in sphere of radius r are 1.</summary>
     static void ErodeKernel(
         Index1D index,
         ArrayView1D<byte, Stride1D.Dense> input,
@@ -115,6 +125,7 @@ public sealed class GpuMorphology3D : IDisposable
         int x = rem % nx;
 
         byte result = 1;
+        int r2 = radius * radius;
         int zLo = z - radius; if (zLo < 0) zLo = 0;
         int zHi = z + radius; if (zHi >= nz) zHi = nz - 1;
         int yLo = y - radius; if (yLo < 0) yLo = 0;
@@ -124,8 +135,11 @@ public sealed class GpuMorphology3D : IDisposable
 
         for (int kz = zLo; kz <= zHi && result == 1; kz++)
             for (int ky = yLo; ky <= yHi && result == 1; ky++)
-                for (int kx = xLo; kx <= xHi && result == 1; kx++)
+                for (int kx = xLo; kx <= xHi && result == 1; kx++) {
+                    int ddx = kx - x, ddy = ky - y, ddz = kz - z;
+                    if (ddx*ddx + ddy*ddy + ddz*ddz > r2) continue;  // sphere structuring element
                     if (input[kz * nx * ny + ky * nx + kx] == 0) result = 0;
+                }
 
         output[idx] = result;
     }

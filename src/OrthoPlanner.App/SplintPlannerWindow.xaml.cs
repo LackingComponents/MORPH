@@ -469,6 +469,15 @@ public partial class SplintPlannerWindow : Window
         if (_lowerArch?.ControlPointCount >= 2) RefreshLowerRibbon();
     }
 
+    private void VestibularTrimSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
+    { if (VestibularTrimLabel != null) VestibularTrimLabel.Text = $"{e.NewValue:F1} mm"; }
+
+    private void CloseErodeSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
+    { if (CloseErodeLabel != null) CloseErodeLabel.Text = $"{(int)e.NewValue}%"; }
+
+    private void BridgeSdfBaseSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
+    { if (BridgeSdfBaseLabel != null) BridgeSdfBaseLabel.Text = $"{e.NewValue:F1} mm"; }
+
     // ═══════════════════════════════════════════════════════════
     //  CLEAR
     // ═══════════════════════════════════════════════════════════
@@ -528,7 +537,10 @@ public partial class SplintPlannerWindow : Window
             UpperPenetrationMm  = (float)UpperPenetrationSlider.Value,
             LowerPenetrationMm  = (float)LowerPenetrationSlider.Value,
             LingualBuccalBiasMm = (float)LingualBuccalBiasSlider.Value,
+            VestibularTrimMm    = (float)VestibularTrimSlider.Value,
             BridgeThicknessMm   = (float)BridgeThicknessSlider.Value,
+            CloseErodeFraction  = (float)CloseErodeSlider.Value / 100f,
+            BridgeSdfBaseMm     = (float)BridgeSdfBaseSlider.Value,
             SampleCount         = 160,
             FirstOperated       = MaxillaFirstRadio.IsChecked == true
                 ? MobileJaw.Maxilla
@@ -589,6 +601,7 @@ public partial class SplintPlannerWindow : Window
             if (slot != null) grp.Children.Remove(slot);
             if (mesh == null || mesh.Length < 9) { slot = null; return; }
             slot = MeshHelper.BuildModel3D(mesh, r, g, b, a);
+            slot.CullMode = SharpDX.Direct3D11.CullMode.None;
             grp.Children.Add(slot);
         }
         SetUpperCastAlpha(170);

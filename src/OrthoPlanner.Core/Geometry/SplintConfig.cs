@@ -97,6 +97,16 @@ public sealed record SplintConfig
     public float LowerPenetrationMm { get; init; } = 0f;   // + = deeper into lower teeth
     public float LingualBuccalBiasMm{ get; init; } = 0f;   // + buccal, − lingual
     public float BridgeThicknessMm  { get; init; } = 0f;
+    /// <summary>Erosion radius as fraction of dilation radius in morphological closing.
+    /// 1.0 = symmetric (sharp outer walls, thin bridge). Lower = thicker bridge, puffier walls.</summary>
+    public float CloseErodeFraction  { get; init; } = 0.45f;
+    /// <summary>Base SDF depth for bridge voxels (mm). Deeper = bridge survives more blur
+    /// but the splint gets thicker. Shallow = blur can punch holes in the bridge.</summary>
+    public float BridgeSdfBaseMm     { get; init; } = 0.5f;
+    /// <summary>Extra vestibular clip margin (mm). 0 = clip at natural footprint
+    /// (halfWidth + |bias| + 1mm dilation). Negative = trim more (removes bracket
+    /// wrapping). Positive = allow wider vestibular walls.</summary>
+    public float VestibularTrimMm   { get; init; } = 0f;
     public int   SampleCount        { get; init; } = 160;
 
     // ── Step 4: engagement depth / undercut blockout ───────────────────────

@@ -171,10 +171,28 @@
                     <TextBlock x:Name="LingualBuccalBiasLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
 
-                <TextBlock Text="Extra bridge thickness:" FontSize="11" Foreground="#AABBCC" ToolTip="Additional dilation applied after GPU morphological closing to thicken the bridge between the upper and lower arch portions.&#x0a;0 mm (default): only the standard 1 mm wall-thickness dilation and morphological closing — the bridge is as thin as the closing radius allows.&#x0a;+2 mm: the gap region gets an extra 2 mm of material — use when a thin bridge would be too fragile for handling or screw retention.&#x0a;In the pipeline this applies an extra GPU dilate pass after closing."/>
+                <TextBlock Text="Vestibular trim:" FontSize="11" Foreground="#AABBCC" ToolTip="Controls how far the vestibular (buccal) wall extends beyond the arch outline.&#x0a;0 (default): the wall preserves the full natural tooth anatomy including molar walls.&#x0a;−3: trim 3 mm — actively clips bracket wrapping that protrudes beyond the tooth outline.&#x0a;+2: allow 2 mm wider vestibular walls — use for wider buccal flanges or screw fixation."/>
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
+                    <Slider x:Name="VestibularTrimSlider" Minimum="-5" Maximum="10" Value="0" Width="170" SmallChange="0.25" ValueChanged="VestibularTrimSlider_ValueChanged"/>
+                    <TextBlock x:Name="VestibularTrimLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <TextBlock Text="Thickness:" FontSize="11" Foreground="#AABBCC" ToolTip="Extra material in the bridge region between upper and lower arch halves.&#x0a;0 mm (default): only the standard 1 mm wall-thickness dilation and morphological closing — the bridge is as thin as the closing radius allows.&#x0a;+2 mm: the bridge region gets an extra 2 mm of material — use when a thin bridge would be too fragile for handling or screw retention.&#x0a;Applied as a continuous SDF bias (any value works, not rounded to grid steps). Also counteracts erosion that thins the bridge during morphological closing."/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
                     <Slider x:Name="BridgeThicknessSlider" Minimum="0" Maximum="10" Value="0" Width="170" SmallChange="0.5" ValueChanged="BridgeThicknessSlider_ValueChanged"/>
                     <TextBlock x:Name="BridgeThicknessLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <TextBlock Text="Closing erosion:" FontSize="11" Foreground="#AABBCC" ToolTip="How aggressively the morphological closing step erodes after dilation.&#x0a;100% (symmetric): clean outer walls but thin bridge.&#x0a;45% (default, asymmetric): thicker bridge, slightly rounder outer walls.&#x0a;Lower = more material preserved everywhere, especially the bridge."/>
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
+                    <Slider x:Name="CloseErodeSlider" Minimum="10" Maximum="100" Value="45" Width="170" SmallChange="5" ValueChanged="CloseErodeSlider_ValueChanged"/>
+                    <TextBlock x:Name="CloseErodeLabel" Text="45%" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <TextBlock Text="Bridge SDF depth:" FontSize="11" Foreground="#AABBCC" ToolTip="Base SDF depth for bridge voxels (mm).&#x0a;0.5 (default): minimal interior margin — bridge is thin but may get holes from blur.&#x0a;1.0–2.0: deeper bridge that survives aggressive blur, but the splint thickens slightly in the bridge region."/>
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
+                    <Slider x:Name="BridgeSdfBaseSlider" Minimum="0" Maximum="5" Value="0.5" Width="170" SmallChange="0.1" ValueChanged="BridgeSdfBaseSlider_ValueChanged"/>
+                    <TextBlock x:Name="BridgeSdfBaseLabel" Text="0.5 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
 
                 <!-- Clinical fit & printability -->

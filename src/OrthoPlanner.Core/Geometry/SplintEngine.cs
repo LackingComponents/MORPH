@@ -367,6 +367,7 @@ public static class SplintEngine
         float lowerPenetrationMm  = config.LowerPenetrationMm;
         float lingualBuccalBiasMm = config.LingualBuccalBiasMm;
         float bridgeThicknessMm   = config.BridgeThicknessMm;
+        float vestibularTrimMm    = config.VestibularTrimMm;
         int sampleCount           = Math.Max(2, config.SampleCount);
         var generationWarnings    = new List<string>();
 
@@ -493,10 +494,11 @@ public static class SplintEngine
             const double CrownMm = 10.0;
             const double Dil1    = 1.0;    // blank dilation: guarantees ≥1mm wall thickness
             const double Dil01   = 0.1;    // pocket dilation: tight 0.1mm clearance for tooth seating
+            const float VestBaseMargin = 3.0f; // teeth (esp. molars) extend ~3mm beyond horseshoe half-width
             float engagementDepthMm = config.EngagementDepthMm;
             bool blockoutUndercuts  = config.BlockoutUndercuts;
 
-            int blurR = 2, blurPasses = 3;   // proper SDF smoothing (not the weak r=1 from before)
+            int blurR = 3, blurPasses = 5;  // SDF blank smoothing (pockets carved AFTER blur stay sharp)
 
             SplintTrace($"carve params: engagement={engagementDepthMm:F2} blockout={blockoutUndercuts}");
             System.Diagnostics.Debug.WriteLine($"[Splint] upperPen={upperPenetrationMm:F1} lowerPen={lowerPenetrationMm:F1} bias={lingualBuccalBiasMm:F1} engagement={engagementDepthMm:F1} blockout={blockoutUndercuts}");
@@ -553,16 +555,19 @@ public static class SplintEngine
                 return new DenseGridTrilinearImplicit(sdf.Grid,sdf.GridOrigin,(float)VS_SDF);
             }
 
-            // ── Nearest-arch-Z lookup (used Z-clip in PHASE 1 and undercut blockout only) ──
-            float NearestUpperZ(double px, double py){
-                float bestD=float.MaxValue, bestZ=0f;
-                foreach(var pt in upper){float dx=(float)px-pt.x,dy=(float)py-pt.y,d=dx*dx+dy*dy;if(d<bestD){bestD=d;bestZ=pt.z;}}
-                return bestZ;
+            // ── Nearest-arch lookup (Z-clip + vestibular XY clip + undercut blockout) ──
+            float NearestUpperZ(double px, double py) => NearestUpperInfo(px, py).z;
+            float NearestLowerZ(double px, double py) => NearestLowerInfo(px, py).z;
+
+            (float z, float ax, float ay, float nx, float ny) NearestUpperInfo(double px, double py){
+                float bestD=float.MaxValue, bestZ=0, bestAx=0, bestAy=0, bestNx=0, bestNy=0;
+                for(int i=0;i<upper.Count;i++){var pt=upper[i];float dx=(float)px-pt.x,dy=(float)py-pt.y,d=dx*dx+dy*dy;if(d<bestD){bestD=d;bestZ=pt.z;bestAx=pt.x;bestAy=pt.y;bestNx=norU[i].x;bestNy=norU[i].y;}}
+                return (bestZ, bestAx, bestAy, bestNx, bestNy);
             }
-            float NearestLowerZ(double px, double py){
-                float bestD=float.MaxValue, bestZ=0f;
-                foreach(var pt in lower){float dx=(float)px-pt.x,dy=(float)py-pt.y,d=dx*dx+dy*dy;if(d<bestD){bestD=d;bestZ=pt.z;}}
-                return bestZ;
+            (float z, float ax, float ay, float nx, float ny) NearestLowerInfo(double px, double py){
+                float bestD=float.MaxValue, bestZ=0, bestAx=0, bestAy=0, bestNx=0, bestNy=0;
+                for(int i=0;i<lower.Count;i++){var pt=lower[i];float dx=(float)px-pt.x,dy=(float)py-pt.y,d=dx*dx+dy*dy;if(d<bestD){bestD=d;bestZ=pt.z;bestAx=pt.x;bestAy=pt.y;bestNx=norL[i].x;bestNy=norL[i].y;}}
+                return (bestZ, bestAx, bestAy, bestNx, bestNy);
             }
 
             // ── Posterior limit: curved boundary from horseshoe end-caps ──
@@ -646,10 +651,23 @@ public static class SplintEngine
                     if (!IsAnteriorToPosteriorLimit(px, py))
                     { bakedGrid[vIdx] = 1.0f; continue; }
 
-                    // Raw blank = upper_1mm ∪ lower_1mm — continuous SDF values
+                    // Vestibular XY clip — applied per-arch independently so that
+                    // differing arch widths (maxilla wider than mandible) don't cause
+                    // one arch's footprint check to clip the other arch's walls.
+                    float maxVest = half + MathF.Abs(lingualBuccalBiasMm) + (float)Dil1 + VestBaseMargin + vestibularTrimMm;
+                    var (uZ2, uax, uay, unx, uny) = NearestUpperInfo(px, py);
+                    float uPerpDist = MathF.Abs(((float)px - uax) * unx + ((float)py - uay) * uny);
+                    var (lZ2, lax, lay, lnx, lny) = NearestLowerInfo(px, py);
+                    float lPerpDist = MathF.Abs(((float)px - lax) * lnx + ((float)py - lay) * lny);
+                    if (uPerpDist > maxVest && lPerpDist > maxVest)
+                    { bakedGrid[vIdx] = 1.0f; continue; }
+
+                    // Each arch's SDF is only included when the voxel is within that
+                    // arch's footprint — bracket wrapping on one arch can't leak through
+                    // the other arch's more permissive footprint.
                     var pt = new Vector3d(px, py, pz);
-                    float upVal1 = (float)upImpl1.Value(ref pt);
-                    float loVal1 = (float)loImpl1.Value(ref pt);
+                    float upVal1 = uPerpDist <= maxVest ? (float)upImpl1.Value(ref pt) : 1.0f;
+                    float loVal1 = lPerpDist <= maxVest ? (float)loImpl1.Value(ref pt) : 1.0f;
                     bakedGrid[vIdx] = MathF.Min(upVal1, loVal1);
                 }
             });
@@ -722,8 +740,12 @@ public static class SplintEngine
             const float coarseVS = 0.5f;
             int closeR = (int)MathF.Ceiling(maxGap * 0.55f / coarseVS);
             closeR = Math.Clamp(closeR, 2, 30);
-            System.Diagnostics.Debug.WriteLine($"[Splint] PHASE2 GPU closing: maxGap={maxGap:F1}mm closeR={closeR} coarseVS={coarseVS}");
-            SplintTrace($"PHASE2 maxGap={maxGap:F1} closeR={closeR}");
+            // Erode less aggressively than dilate: full dilation bridges the gap,
+            // but symmetric erosion punches through thin bridge areas. Asymmetric
+            // erosion (45% of closeR) preserves bridge connectivity.
+            int erodeR = Math.Max(1, (int)MathF.Round(closeR * config.CloseErodeFraction));
+            System.Diagnostics.Debug.WriteLine($"[Splint] PHASE2 GPU closing: maxGap={maxGap:F1}mm closeR={closeR} erodeR={erodeR} coarseVS={coarseVS}");
+            SplintTrace($"PHASE2 maxGap={maxGap:F1} closeR={closeR} erodeR={erodeR}");
 
             // Coarse grid with padding so dilation never hits the boundary
             int pad = closeR + 1;
@@ -746,20 +768,23 @@ public static class SplintEngine
                     coarse[(ciz+pad)*cnx*cny + (ciy+pad)*cnx + (cix+pad)] = 1;
             }
 
-            // GPU close → bridge the inter-arch gap
+            // GPU close → bridge the inter-arch gap (asymmetric: erode < dilate)
             byte[] closed;
             using (var gpu = new GpuMorphology3D()) {
-                closed = gpu.Close(coarse, cnx, cny, cnz, closeR);
-                if (bridgeThicknessMm > 0.01f) {
-                    int dilateR = (int)MathF.Ceiling(bridgeThicknessMm / coarseVS);
-                    closed = gpu.Dilate(closed, cnx, cny, cnz, dilateR);
-                    SplintTrace($"PHASE2 bridge dilateR={dilateR} for {bridgeThicknessMm:F1}mm");
-                }
+                closed = gpu.Close(coarse, cnx, cny, cnz, closeR, erodeR);
+                // Bridge thickness is now applied as an SDF bias in the write-back loop
+                // (continuous, bridge-only) instead of coarse-grid binary dilation.
+                if (bridgeThicknessMm > 0.01f)
+                    SplintTrace($"PHASE2 bridge SDF bias={bridgeThicknessMm:F1}mm (not coarse dilate)");
             }
             System.Diagnostics.Debug.WriteLine("[Splint] PHASE2 GPU closing done");
             SplintTrace("PHASE2 GPU closing done");
 
-            // Write closed result back to fine grid
+            // Write closed result back to fine grid.
+            // Bridge voxels get -(0.5 + bridgeThicknessMm) SDF depth so they survive
+            // the aggressive blur (r=3, 5 passes). Combined with 45% erosion, this
+            // keeps the bridge intact without thickening the outer walls.
+            float bridgeSdfBias = -(config.BridgeSdfBaseMm + bridgeThicknessMm);
             System.Threading.Tasks.Parallel.For(0, gnz, iz => {
                 for (int iy = 0; iy < gny; iy++) for (int ix = 0; ix < gnx; ix++) {
                     int vIdx = iz*gnx*gny + iy*gnx + ix;
@@ -768,7 +793,7 @@ public static class SplintEngine
                     int ciy = Math.Clamp((int)(iy * VS_MC / coarseVS), 0, cnyBase-1) + pad;
                     int ciz = Math.Clamp((int)(iz * VS_MC / coarseVS), 0, cnzBase-1) + pad;
                     if (closed[ciz*cnx*cny + ciy*cnx + cix] == 1)
-                        bakedGrid[vIdx] = -0.5f;
+                        bakedGrid[vIdx] = MathF.Min(bakedGrid[vIdx], bridgeSdfBias);
                 }
             });
 
@@ -822,7 +847,6 @@ public static class SplintEngine
                 }
                 SplintTrace("PHASE2b done");
             }
-
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             //  PHASE 3: Undercut blockout (optional)
             //
@@ -967,6 +991,7 @@ public static class SplintEngine
             SplintTrace(finalVerts.Length >= 9
                 ? $"SUCCESS: {finalVerts.Length/9} tris"
                 : "EARLY-RETURN final mesh <9 floats → flat blank emitted");
+
             return Result(finalVerts.Length >= 9 ? finalVerts : horseshoeFlat,
                 finalVerts.Length >= 9 ? null : "Generated mesh was empty; emitted the flat horseshoe blank.");
         }
