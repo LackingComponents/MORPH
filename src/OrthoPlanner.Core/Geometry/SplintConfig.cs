@@ -107,6 +107,10 @@ public sealed record SplintConfig
     /// (halfWidth + |bias| + 1mm dilation). Negative = trim more (removes bracket
     /// wrapping). Positive = allow wider vestibular walls.</summary>
     public float VestibularTrimMm   { get; init; } = 0f;
+    /// <summary>When true, an additional one-sided XY clip runs after PHASE 2 closing
+    /// (before blur) that removes splint material on the buccal side of the more-
+    /// anterior arch only. Uses the same VestibularTrimMm threshold.</summary>
+    public bool  VestibularOneSided { get; init; } = false;
     public int   SampleCount        { get; init; } = 160;
 
     // ── Step 4: engagement depth / undercut blockout ───────────────────────

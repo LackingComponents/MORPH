@@ -538,6 +538,7 @@ public partial class SplintPlannerWindow : Window
             LowerPenetrationMm  = (float)LowerPenetrationSlider.Value,
             LingualBuccalBiasMm = (float)LingualBuccalBiasSlider.Value,
             VestibularTrimMm    = (float)VestibularTrimSlider.Value,
+            VestibularOneSided  = VestibularOneSidedCheck.IsChecked == true,
             BridgeThicknessMm   = (float)BridgeThicknessSlider.Value,
             CloseErodeFraction  = (float)CloseErodeSlider.Value / 100f,
             BridgeSdfBaseMm     = (float)BridgeSdfBaseSlider.Value,

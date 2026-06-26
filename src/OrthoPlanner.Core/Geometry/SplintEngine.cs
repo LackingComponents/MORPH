@@ -798,7 +798,60 @@ public static class SplintEngine
             });
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            //  PHASE 2b: SDF smoothing (separable box blur)
+            //  PHASE 2a: One-sided vestibular clip (buccal side of more-anterior arch)
+            //
+            //  After closing, bridge material may extend beyond the dental arch on
+            //  the vestibular (buccal) side. This clip removes that material, but
+            //  only on the outward side of the more-anterior arch. Lingual walls
+            //  are untouched. Uses the same vestibularTrimMm margin as PHASE 1.
+            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            if (config.VestibularOneSided)
+            {
+                // Determine which arch is more vestibular (typically upper/maxilla).
+                // The arch whose points are, on average, further from the combined
+                // centroid in their own outward-normal direction is the more vestibular one.
+                float midX = 0, midY = 0;
+                for (int i = 0; i < n; i++) { midX += upper[i].x + lower[i].x; midY += upper[i].y + lower[i].y; }
+                midX /= (2 * n); midY /= (2 * n);
+
+                float uOut = 0, lOut = 0;
+                for (int i = 0; i < n; i++) {
+                    uOut += (upper[i].x - midX) * norU[i].x + (upper[i].y - midY) * norU[i].y;
+                    lOut += (lower[i].x - midX) * norL[i].x + (lower[i].y - midY) * norL[i].y;
+                }
+                // true = upper is more vestibular
+                bool clipUpper = uOut >= lOut;
+
+                float oneSidedMaxVest = half + MathF.Abs(lingualBuccalBiasMm) + (float)Dil1 + VestBaseMargin + vestibularTrimMm;
+                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE2a one-sided vestibular clip: arch={(clipUpper?"upper":"lower")} maxVest={oneSidedMaxVest:F1}");
+                SplintTrace($"PHASE2a one-sided vestibular clip arch={(clipUpper?"upper":"lower")}");
+
+                System.Threading.Tasks.Parallel.For(0, gnz, iz => {
+                    for (int iy = 0; iy < gny; iy++) for (int ix = 0; ix < gnx; ix++) {
+                        int vIdx = iz*gnx*gny + iy*gnx + ix;
+                        if (bakedGrid[vIdx] >= 0) continue; // already air
+                        float px = gox + ix * (float)VS_MC;
+                        float py = goy + iy * (float)VS_MC;
+
+                        // Signed perpendicular distance to the more-vestibular arch
+                        // positive = buccal/outward, negative = lingual/inward
+                        float sd;
+                        if (clipUpper) {
+                            var (z, ax, ay, nx, ny) = NearestUpperInfo(px, py);
+                            sd = (px - ax) * nx + (py - ay) * ny;
+                        } else {
+                            var (z, ax, ay, nx, ny) = NearestLowerInfo(px, py);
+                            sd = (px - ax) * nx + (py - ay) * ny;
+                        }
+
+                        // Only clip on the buccal side; lingual side is untouched
+                        if (sd > oneSidedMaxVest)
+                            bakedGrid[vIdx] = 1.0f;
+                    }
+                });
+            }
+
+            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             //
             //  Smooth the continuous SDF blank BEFORE pocket subtraction so
             //  pockets stay precisely defined against the tooth surface.

@@ -172,10 +172,13 @@
                 </StackPanel>
 
                 <TextBlock Text="Vestibular trim:" FontSize="11" Foreground="#AABBCC" ToolTip="Controls how far the vestibular (buccal) wall extends beyond the arch outline.&#x0a;0 (default): the wall preserves the full natural tooth anatomy including molar walls.&#x0a;−3: trim 3 mm — actively clips bracket wrapping that protrudes beyond the tooth outline.&#x0a;+2: allow 2 mm wider vestibular walls — use for wider buccal flanges or screw fixation."/>
-                <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,4">
                     <Slider x:Name="VestibularTrimSlider" Minimum="-5" Maximum="10" Value="0" Width="170" SmallChange="0.25" ValueChanged="VestibularTrimSlider_ValueChanged"/>
                     <TextBlock x:Name="VestibularTrimLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
+                <CheckBox x:Name="VestibularOneSidedCheck" Content="One-sided (buccal only)" IsChecked="False"
+                          Foreground="#AABBCC" Margin="0,0,0,12"
+                          ToolTip="When ON, after the bridge is closed, remove material that extends beyond the most-anterior arch on the buccal side only (using the same vestibular trim margin). This cuts unwanted splint wall that protrudes past the dental arch vestibularly."/>
 
                 <TextBlock Text="Thickness:" FontSize="11" Foreground="#AABBCC" ToolTip="Extra material in the bridge region between upper and lower arch halves.&#x0a;0 mm (default): only the standard 1 mm wall-thickness dilation and morphological closing — the bridge is as thin as the closing radius allows.&#x0a;+2 mm: the bridge region gets an extra 2 mm of material — use when a thin bridge would be too fragile for handling or screw retention.&#x0a;Applied as a continuous SDF bias (any value works, not rounded to grid steps). Also counteracts erosion that thins the bridge during morphological closing."/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
