@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -9,8 +9,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OrthoPlanner.App", "src\Ort
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OrthoPlanner.Core", "src\OrthoPlanner.Core\OrthoPlanner.Core.csproj", "{EB35FF53-46B8-41D5-BBC9-03C3853637E6}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OrthoPlanner.Infrastructure", "src\OrthoPlanner.Infrastructure\OrthoPlanner.Infrastructure.csproj", "{8D94166C-0E97-49DE-ABEE-03013D0D0001}"
-EndProject
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{81E8D651-2ACC-4088-882E-B976770CED48}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{81E8D651-2ACC-4088-882E-B976770CED48}.Debug|Any CPU.Build.0 = Debug|Any CPU
@@ -20,14 +18,9 @@ EndProject
 		{EB35FF53-46B8-41D5-BBC9-03C3853637E6}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{EB35FF53-46B8-41D5-BBC9-03C3853637E6}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{EB35FF53-46B8-41D5-BBC9-03C3853637E6}.Release|Any CPU.Build.0 = Release|Any CPU
-		{8D94166C-0E97-49DE-ABEE-03013D0D0001}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{8D94166C-0E97-49DE-ABEE-03013D0D0001}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{8D94166C-0E97-49DE-ABEE-03013D0D0001}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{8D94166C-0E97-49DE-ABEE-03013D0D0001}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{81E8D651-2ACC-4088-882E-B976770CED48} = {2C62A94A-8A3F-4D76-A943-002D5C7D20DF}
 		{EB35FF53-46B8-41D5-BBC9-03C3853637E6} = {2C62A94A-8A3F-4D76-A943-002D5C7D20DF}
-		{8D94166C-0E97-49DE-ABEE-03013D0D0001} = {2C62A94A-8A3F-4D76-A943-002D5C7D20DF}
 	EndGlobalSection
 EndGlobal

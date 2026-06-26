@@ -6,7 +6,6 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using OrthoPlanner.Core.Imaging;
-using OrthoPlanner.Infrastructure;
 using OrthoPlanner.App.ViewModels;
 using HelixToolkit.Wpf.SharpDX;
 using HxGeom = HelixToolkit.SharpDX;

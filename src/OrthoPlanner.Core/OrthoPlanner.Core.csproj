@@ -15,7 +15,6 @@
     <PackageReference Include="ManifoldNET" Version="1.0.7-alpha" />
     <!-- GPU acceleration via ILGPU: CUDA (NVIDIA) → OpenCL (AMD/Intel) → CPU fallback -->
     <PackageReference Include="ILGPU" Version="1.5.1" />
-    <PackageReference Include="ILGPU.Algorithms" Version="1.5.1" />
   </ItemGroup>
 
 </Project>

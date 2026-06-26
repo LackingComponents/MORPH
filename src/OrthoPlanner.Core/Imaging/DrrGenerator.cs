@@ -1,6 +1,4 @@
-﻿using OrthoPlanner.Core.Imaging;
-
-namespace OrthoPlanner.Infrastructure;
+﻿namespace OrthoPlanner.Core.Imaging;
 
 /// <summary>
 /// Generates Digitally Reconstructed Radiographs (DRR) from a <see cref="VolumeData"/>.

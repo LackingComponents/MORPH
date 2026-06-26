@@ -29,7 +29,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\OrthoPlanner.Core\OrthoPlanner.Core.csproj" />
-    <ProjectReference Include="..\OrthoPlanner.Infrastructure\OrthoPlanner.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>
