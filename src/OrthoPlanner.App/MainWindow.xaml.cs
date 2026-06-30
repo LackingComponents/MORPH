@@ -972,6 +972,43 @@ public partial class MainWindow : Window
         }
     }
 
+    private void NumericTextBox_PreviewTextInput(object sender, System.Windows.Input.TextCompositionEventArgs e)
+    {
+        if (sender is not TextBox tb) return;
+        // Allow digits, one minus at start, one dot
+        string proposed = tb.Text.Remove(tb.SelectionStart, tb.SelectionLength).Insert(tb.SelectionStart, e.Text);
+        e.Handled = !double.TryParse(proposed, System.Globalization.NumberStyles.AllowLeadingSign | System.Globalization.NumberStyles.AllowDecimalPoint,
+            System.Globalization.CultureInfo.InvariantCulture, out _);
+    }
+
+    private void NumericTextBox_Pasting(object sender, System.Windows.DataObjectPastingEventArgs e)
+    {
+        if (e.DataObject.GetDataPresent(typeof(string)))
+        {
+            string pasted = (string)e.DataObject.GetData(typeof(string));
+            if (sender is TextBox tb)
+            {
+                string proposed = tb.Text.Remove(tb.SelectionStart, tb.SelectionLength).Insert(tb.SelectionStart, pasted);
+                if (!double.TryParse(proposed, System.Globalization.NumberStyles.AllowLeadingSign | System.Globalization.NumberStyles.AllowDecimalPoint,
+                    System.Globalization.CultureInfo.InvariantCulture, out _))
+                    e.CancelCommand();
+            }
+        }
+        else e.CancelCommand();
+    }
+
+    private void NumericTextBox_LostFocus(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (sender is TextBox tb)
+        {
+            if (!double.TryParse(tb.Text, System.Globalization.NumberStyles.AllowLeadingSign | System.Globalization.NumberStyles.AllowDecimalPoint,
+                System.Globalization.CultureInfo.InvariantCulture, out double val))
+                tb.Text = "0.0";
+            else if (tb.Text.Trim() == "" || tb.Text == "-")
+                tb.Text = "0.0";
+        }
+    }
+
     // ═══ NavCube: Orbital arrow rotation ═══
 
     private void OrbitCamera(double dAzimuthDeg, double dElevationDeg)

@@ -157,7 +157,7 @@ public partial class MainViewModel
         if (NeedsCondyleFulcrum(param) && !EnsureCondyleFulcrum())
             return;
 
-        double step = 0.5;
+        double step = 0.1;
         if (param.StartsWith("Maxilla"))
         {
             if (param.Contains("Lat"))        SurgMaxillaLat   += param.EndsWith("+") ? step : -step;
