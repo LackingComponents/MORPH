@@ -25,6 +25,7 @@ public partial class MainViewModel : ObservableObject
 
         // NHP Ledger: auto-apply NHP transform to any object entering the viewport collections
         InitNhpLedger();
+        InitNhpProfiles();
         InitializeThreeDModelsPanel();
     }
 

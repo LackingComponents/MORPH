@@ -1,7 +1,10 @@
+using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.Windows;
 using System.Windows.Media.Media3D;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OrthoPlanner.App.Helpers;
 
 namespace OrthoPlanner.App.ViewModels;
 
@@ -21,6 +24,14 @@ public partial class MainViewModel
     [ObservableProperty] private double _nhpRoll = 0.0;
     [ObservableProperty] private double _nhpPitch = 0.0;
     [ObservableProperty] private double _nhpYaw = 0.0;
+
+    // ━━━ NHP Profiles (NHP 1, NHP 2, …) ━━━
+    public ObservableCollection<NhpProfileViewModel> NhpProfiles { get; } = new();
+    private NhpProfileViewModel? _activeNhpProfile;
+
+    public string ActiveNhpProfileName => _activeNhpProfile?.Name ?? "NHP 1";
+
+    public bool CanDeleteAnyNhpProfile => NhpProfiles.Count > 1;
 
     // ━━━ NHP Committed State (Baseline) ━━━
     private double _cLat, _cAnt, _cVert, _cRoll, _cPitch, _cYaw;
@@ -170,7 +181,48 @@ public partial class MainViewModel
         ApplyNhpToAllTrackedObjects();
         RefreshCombinedModel();
         UpdateAllSlices();
-        StatusText = "NHP committed and baked into geometry.";
+        StatusText = $"{_activeNhpProfile?.Name ?? "NHP"} committed and baked into geometry.";
+
+        SaveActiveNhpProfileFromUi();
+        if (_activeNhpProfile != null)
+            _activeNhpProfile.IsCommitted = true;
+    }
+
+    /// <summary>Apply camera pitch/roll/yaw to the live NHP rotation fields (preview only).</summary>
+    public void ApplyCameraAnglesToNhp(double pitch, double roll, double yaw)
+    {
+        NhpPitch = ClampNhp(pitch, true);
+        NhpRoll  = ClampNhp(roll, true);
+        NhpYaw   = ClampNhp(yaw, true);
+    }
+
+    /// <summary>Capture current viewport camera orientation into NHP rotation fields.</summary>
+    public void SetNhpRotationsFromCamera(Vector3D lookDir, Vector3D upDir)
+    {
+        var (pitch, roll, yaw) = NhpCameraAngles.FromCamera(lookDir, upDir);
+        ApplyCameraAnglesToNhp(pitch, roll, yaw);
+        StatusText = "Camera orientation applied to NHP rotations. Press DONE to commit.";
+    }
+
+    /// <summary>Reset every NHP translation and rotation to zero (with confirmation).</summary>
+    [RelayCommand]
+    private void ZeroAllNhp()
+    {
+        if (MessageBox.Show(
+                "Reset all Natural Head Position parameters (translations and rotations) to zero?",
+                "Reset NHP",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        NhpLateral = 0;
+        NhpAnteroposterior = 0;
+        NhpVertical = 0;
+        NhpRoll = 0;
+        NhpPitch = 0;
+        NhpYaw = 0;
+        SaveActiveNhpProfileFromUi();
+        StatusText = "NHP parameters reset to zero.";
     }
 
     /// <summary>Reset all NHP parameters to the committed baseline.</summary>
@@ -272,6 +324,7 @@ public partial class MainViewModel
             BoneOnlyBounds.Y + BoneOnlyBounds.SizeY / 2,
             BoneOnlyBounds.Z + BoneOnlyBounds.SizeZ / 2);
         ModelCenter = deltaMatrix.Transform(center);
+        SaveActiveNhpProfileFromUi();
     }
 
     /// <summary>
@@ -401,5 +454,166 @@ public partial class MainViewModel
         g.Children.Add(first);
         g.Children.Add(second);
         return g;
+    }
+
+    // ━━━ NHP profile list (NHP 1, NHP 2, …) ━━━
+
+    private void InitNhpProfiles()
+    {
+        NhpProfiles.CollectionChanged += (_, _) => RefreshNhpProfileFlags();
+        if (NhpProfiles.Count == 0)
+            EnsureDefaultNhpProfile();
+        else
+            RefreshNhpProfileFlags();
+    }
+
+    private void RefreshNhpProfileFlags()
+    {
+        for (int i = 0; i < NhpProfiles.Count; i++)
+            NhpProfiles[i].IsLatest = i == NhpProfiles.Count - 1;
+        OnPropertyChanged(nameof(CanDeleteAnyNhpProfile));
+    }
+
+    private void EnsureDefaultNhpProfile()
+    {
+        if (NhpProfiles.Count > 0) return;
+        var profile = NewNhpProfileModel("NHP 1");
+        profile.IsSelected = true;
+        _activeNhpProfile = profile;
+        NhpProfiles.Add(profile);
+        OnPropertyChanged(nameof(ActiveNhpProfileName));
+    }
+
+    private static NhpProfileViewModel NewNhpProfileModel(string name) => new()
+    {
+        Name = name,
+        Lateral = 0,
+        Anteroposterior = 0,
+        Vertical = 0,
+        Roll = 0,
+        Pitch = 0,
+        Yaw = 0
+    };
+
+    private void SaveActiveNhpProfileFromUi()
+    {
+        if (_activeNhpProfile == null) return;
+        _activeNhpProfile.Lateral = NhpLateral;
+        _activeNhpProfile.Anteroposterior = NhpAnteroposterior;
+        _activeNhpProfile.Vertical = NhpVertical;
+        _activeNhpProfile.Roll = NhpRoll;
+        _activeNhpProfile.Pitch = NhpPitch;
+        _activeNhpProfile.Yaw = NhpYaw;
+    }
+
+    private void ApplyNhpProfile(NhpProfileViewModel profile)
+    {
+        NhpLateral = profile.Lateral;
+        NhpAnteroposterior = profile.Anteroposterior;
+        NhpVertical = profile.Vertical;
+        NhpRoll = profile.Roll;
+        NhpPitch = profile.Pitch;
+        NhpYaw = profile.Yaw;
+    }
+
+    private void SetActiveNhpProfile(NhpProfileViewModel profile)
+    {
+        foreach (var p in NhpProfiles) p.IsSelected = false;
+        profile.IsSelected = true;
+        _activeNhpProfile = profile;
+        OnPropertyChanged(nameof(ActiveNhpProfileName));
+    }
+
+    [RelayCommand]
+    private void AddNhpProfile()
+    {
+        SaveActiveNhpProfileFromUi();
+        EnsureDefaultNhpProfile();
+
+        var profile = NewNhpProfileModel($"NHP {NhpProfiles.Count + 1}");
+        NhpProfiles.Add(profile);
+        SetActiveNhpProfile(profile);
+        ApplyNhpProfile(profile);
+        StatusText = $"Working on {profile.Name}. Adjust and press DONE to commit.";
+        RefreshNhpProfileFlags();
+    }
+
+    [RelayCommand]
+    private void DeleteNhpProfile(NhpProfileViewModel? profile)
+    {
+        profile ??= _activeNhpProfile;
+        if (profile == null || NhpProfiles.Count <= 1) return;
+
+        if (MessageBox.Show(
+                $"Delete {profile.Name}? This saved Natural Head Position will be permanently removed.",
+                "Delete NHP",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        SaveActiveNhpProfileFromUi();
+        var removedName = profile.Name;
+        var index = NhpProfiles.IndexOf(profile);
+        var wasActive = profile == _activeNhpProfile;
+        NhpProfiles.Remove(profile);
+
+        if (wasActive)
+        {
+            var next = NhpProfiles[Math.Max(0, Math.Min(index, NhpProfiles.Count - 1))];
+            SetActiveNhpProfile(next);
+            ApplyNhpProfile(next);
+            StatusText = $"Deleted {removedName}. Now editing {next.Name}.";
+        }
+        else
+            StatusText = $"Deleted {removedName}.";
+
+        RefreshNhpProfileFlags();
+    }
+
+    [RelayCommand]
+    private void SelectNhpProfile(NhpProfileViewModel profile)
+    {
+        if (profile == _activeNhpProfile) return;
+        SaveActiveNhpProfileFromUi();
+        SetActiveNhpProfile(profile);
+        ApplyNhpProfile(profile);
+        StatusText = $"Loaded {profile.Name}.";
+    }
+
+    internal void RestoreNhpProfilesFromProject(IEnumerable<NhpProfileViewModel> profiles)
+    {
+        NhpProfiles.Clear();
+        foreach (var p in profiles)
+            NhpProfiles.Add(p);
+
+        if (NhpProfiles.Count == 0)
+        {
+            EnsureDefaultNhpProfile();
+            return;
+        }
+
+        var active = NhpProfiles.FirstOrDefault(p => p.IsSelected) ?? NhpProfiles[0];
+        SetActiveNhpProfile(active);
+        ApplyNhpProfile(active);
+        RefreshNhpProfileFlags();
+    }
+
+    internal void MigrateBaselineToNhpProfileIfNeeded()
+    {
+        if (NhpProfiles.Count > 0) return;
+        var profile = NewNhpProfileModel("NHP 1");
+        profile.Lateral = _cLat;
+        profile.Anteroposterior = _cAnt;
+        profile.Vertical = _cVert;
+        profile.Roll = _cRoll;
+        profile.Pitch = _cPitch;
+        profile.Yaw = _cYaw;
+        profile.IsCommitted = Math.Abs(_cLat) > 0.01 || Math.Abs(_cAnt) > 0.01 || Math.Abs(_cVert) > 0.01
+            || Math.Abs(_cRoll) > 0.01 || Math.Abs(_cPitch) > 0.01 || Math.Abs(_cYaw) > 0.01;
+        profile.IsSelected = true;
+        _activeNhpProfile = profile;
+        NhpProfiles.Add(profile);
+        OnPropertyChanged(nameof(ActiveNhpProfileName));
+        RefreshNhpProfileFlags();
     }
 }

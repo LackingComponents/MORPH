@@ -8,6 +8,7 @@ using System.Windows.Media.Media3D;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using HelixToolkit.Wpf.SharpDX;
+using OrthoPlanner.App.Helpers;
 using OrthoPlanner.App.ViewModels;
 
 namespace OrthoPlanner.App;
@@ -144,6 +145,13 @@ public partial class MainWindow : Window
 
         // ── Headlamp setup: poll on render frame for bullet-proof tracking ──
         System.Windows.Media.CompositionTarget.Rendering += OnHeadlampRendering;
+
+        // ── NHP corner rotation (Yaw / Roll / Pitch drag zones) ──
+        Viewport3D.PreviewMouseLeftButtonDown += Viewport3D_CornerRotation_MouseDown;
+        Viewport3D.PreviewMouseMove           += Viewport3D_CornerRotation_MouseMove;
+        Viewport3D.PreviewMouseLeftButtonUp   += Viewport3D_CornerRotation_MouseUp;
+        Viewport3D.MouseLeave                 += Viewport3D_CornerRotation_MouseLeave;
+        Viewport3D.PreviewMouseLeftButtonUp   += Viewport3D_NhpCameraTrack_MouseUp;
 
         // ── NavCube: wire to the named XAML camera (always current reference) ──
         NavCube.MainCamera = MainCamera;
@@ -970,6 +978,261 @@ public partial class MainWindow : Window
                 }
             }
         }
+    }
+
+    // ═══ Viewport corner rotation (Yaw / Roll / Pitch) ═══
+
+    private enum CornerRotationAxis { None, Yaw, Roll, Pitch }
+
+    private CornerRotationAxis _activeCornerRotation = CornerRotationAxis.None;
+    private Point _cornerRotationStart;
+    private double _cornerRotationStartValue;
+    private bool _savedViewportRotationEnabled = true;
+    private bool _cornerDragTargetsNhp;
+
+    private Point3D _cameraDragStartPosition;
+    private Vector3D _cameraDragStartLook;
+    private Vector3D _cameraDragStartUp;
+
+    private const double CornerRotationSensitivity = 0.2;   // degrees per pixel (yaw / roll)
+    private const double CornerPitchSensitivity = 0.4;    // degrees per pixel (pitch)
+    private const double CornerZoneFraction = 0.54;       // 3× previous 0.18
+    private const double CornerZoneMaxPx = 360;           // 3× previous 120
+
+    private bool IsNhpPanelOpen => NhpToggleButton.IsChecked == true;
+
+    private bool _nhpTrackCameraOnDown;
+    private Vector3D _nhpTrackLookOnDown;
+    private Vector3D _nhpTrackUpOnDown;
+
+    private static double CornerDragSensitivity(CornerRotationAxis axis) =>
+        axis == CornerRotationAxis.Pitch ? CornerPitchSensitivity : CornerRotationSensitivity;
+
+    private void NhpDone_Click(object sender, RoutedEventArgs e)
+    {
+        if (VM == null) return;
+        if (VM.CommitNhpCommand.CanExecute(null))
+            VM.CommitNhpCommand.Execute(null);
+        NhpToggleButton.IsChecked = false;
+    }
+
+    private void SyncCameraToNhpIfNeeded()
+    {
+        if (!IsNhpPanelOpen || VM == null || Viewport3D.Camera == null) return;
+        VM.SetNhpRotationsFromCamera(Viewport3D.Camera.LookDirection, Viewport3D.Camera.UpDirection);
+    }
+
+    private void Viewport3D_NhpCameraTrack_MouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_nhpTrackCameraOnDown || !IsNhpPanelOpen || VM == null || Viewport3D.Camera == null)
+        {
+            _nhpTrackCameraOnDown = false;
+            return;
+        }
+
+        _nhpTrackCameraOnDown = false;
+        if (_activeCornerRotation != CornerRotationAxis.None) return;
+
+        var cam = Viewport3D.Camera;
+        if (NhpCameraAngles.OrientationChanged(_nhpTrackLookOnDown, _nhpTrackUpOnDown,
+                cam.LookDirection, cam.UpDirection))
+            SyncCameraToNhpIfNeeded();
+    }
+
+    private static ViewportRotationKind ToRotationKind(CornerRotationAxis axis) => axis switch
+    {
+        CornerRotationAxis.Yaw   => ViewportRotationKind.Yaw,
+        CornerRotationAxis.Roll  => ViewportRotationKind.Roll,
+        CornerRotationAxis.Pitch => ViewportRotationKind.Pitch,
+        _ => ViewportRotationKind.Yaw
+    };
+
+    private static double GetCornerZoneSize(double width, double height)
+        => Math.Min(CornerZoneMaxPx, Math.Min(width, height) * CornerZoneFraction);
+
+    private CornerRotationAxis HitTestCornerRotationZone(Point pos, double width, double height)
+    {
+        if (width < 20 || height < 20) return CornerRotationAxis.None;
+
+        double sz = GetCornerZoneSize(width, height);
+        double x = pos.X;
+        double y = pos.Y;
+
+        if (x + y <= sz)
+            return CornerRotationAxis.Yaw;
+
+        if ((width - x) + y <= sz)
+            return CornerRotationAxis.Roll;
+
+        if ((width - x) + (height - y) <= sz && !IsPointOverNavCube(pos))
+            return CornerRotationAxis.Pitch;
+
+        return CornerRotationAxis.None;
+    }
+
+    private bool IsPointOverNavCube(Point posInViewport)
+    {
+        if (NavCube.Visibility != Visibility.Visible || NavCube.ActualWidth <= 0) return false;
+        try
+        {
+            var topLeft = NavCube.TransformToVisual(Viewport3D).Transform(new Point(0, 0));
+            var rect = new Rect(topLeft.X, topLeft.Y, NavCube.ActualWidth, NavCube.ActualHeight);
+            return rect.Contains(posInViewport);
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private void Viewport3D_CornerRotation_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.Handled || e.LeftButton != MouseButtonState.Pressed) return;
+        if (_activeMeasurementTool != CustomMeasurementTool.None) return;
+
+        var pos = e.GetPosition(Viewport3D);
+        var axis = HitTestCornerRotationZone(pos, Viewport3D.ActualWidth, Viewport3D.ActualHeight);
+
+        if (axis == CornerRotationAxis.None)
+        {
+            BeginNhpCameraTracking();
+            return;
+        }
+
+        _activeCornerRotation = axis;
+        _cornerRotationStart = pos;
+        _cornerDragTargetsNhp = IsNhpPanelOpen;
+
+        if (_cornerDragTargetsNhp)
+        {
+            if (VM == null) { _activeCornerRotation = CornerRotationAxis.None; return; }
+            _cornerRotationStartValue = axis switch
+            {
+                CornerRotationAxis.Yaw   => VM.NhpYaw,
+                CornerRotationAxis.Roll  => VM.NhpRoll,
+                CornerRotationAxis.Pitch => VM.NhpPitch,
+                _ => 0
+            };
+        }
+        else
+        {
+            var cam = Viewport3D.Camera;
+            if (cam == null) { _activeCornerRotation = CornerRotationAxis.None; return; }
+            _cameraDragStartPosition = cam.Position;
+            _cameraDragStartLook = cam.LookDirection;
+            _cameraDragStartUp = cam.UpDirection;
+        }
+
+        _savedViewportRotationEnabled = Viewport3D.IsRotationEnabled;
+        Viewport3D.IsRotationEnabled = false;
+        Viewport3D.CaptureMouse();
+        Mouse.OverrideCursor = RotationCursors.Get(ToRotationKind(axis));
+        e.Handled = true;
+    }
+
+    private void BeginNhpCameraTracking()
+    {
+        if (!IsNhpPanelOpen || Viewport3D.Camera == null) return;
+        _nhpTrackCameraOnDown = true;
+        _nhpTrackLookOnDown = Viewport3D.Camera.LookDirection;
+        _nhpTrackUpOnDown = Viewport3D.Camera.UpDirection;
+    }
+
+    private void Viewport3D_CornerRotation_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (_activeCornerRotation != CornerRotationAxis.None)
+        {
+            var pos = e.GetPosition(Viewport3D);
+            double delta = pos.X - _cornerRotationStart.X;
+
+            if (_cornerDragTargetsNhp && VM != null)
+            {
+                double sens = CornerDragSensitivity(_activeCornerRotation);
+                double value = _cornerRotationStartValue + delta * sens;
+                switch (_activeCornerRotation)
+                {
+                    case CornerRotationAxis.Yaw:   VM.NhpYaw   = value; break;
+                    case CornerRotationAxis.Roll:  VM.NhpRoll  = value; break;
+                    case CornerRotationAxis.Pitch: VM.NhpPitch = value; break;
+                }
+            }
+            else
+                ApplyCameraCornerRotation(_activeCornerRotation,
+                    delta * CornerDragSensitivity(_activeCornerRotation));
+
+            e.Handled = true;
+            return;
+        }
+
+        if (_activeMeasurementTool != CustomMeasurementTool.None)
+        {
+            Mouse.OverrideCursor = null;
+            return;
+        }
+
+        var hoverPos = e.GetPosition(Viewport3D);
+        var hoverAxis = HitTestCornerRotationZone(hoverPos, Viewport3D.ActualWidth, Viewport3D.ActualHeight);
+        Mouse.OverrideCursor = hoverAxis != CornerRotationAxis.None
+            ? RotationCursors.Get(ToRotationKind(hoverAxis))
+            : null;
+    }
+
+    private static readonly Vector3D WorldYawAxis   = new(0, 0, 1);
+    private static readonly Vector3D WorldRollAxis  = new(0, 1, 0);
+    private static readonly Vector3D WorldPitchAxis = new(1, 0, 0);
+
+    private void ApplyCameraCornerRotation(CornerRotationAxis axis, double degrees)
+    {
+        var cam = Viewport3D.Camera;
+        if (cam == null) return;
+
+        double dist = _cameraDragStartLook.Length;
+        if (dist < 0.001) return;
+
+        var lookDir = _cameraDragStartLook;
+        lookDir.Normalize();
+        var upDir = _cameraDragStartUp;
+        upDir.Normalize();
+
+        // Fixed model/world axes (same as NHP BuildNhpMatrix) so corners stay
+        // pitch=bottom-right (X), roll=top-right (Y), yaw=top-left (Z) in every view.
+        Vector3D rotAxis = axis switch
+        {
+            CornerRotationAxis.Yaw   => WorldYawAxis,
+            CornerRotationAxis.Roll  => WorldRollAxis,
+            CornerRotationAxis.Pitch => WorldPitchAxis,
+            _ => WorldYawAxis
+        };
+
+        var q = new Quaternion(rotAxis, degrees);
+        var mat = new Matrix3D();
+        mat.Rotate(q);
+
+        var newLook = mat.Transform(lookDir) * dist;
+        var newUp = mat.Transform(upDir);
+        var lookAt = _cameraDragStartPosition + _cameraDragStartLook;
+
+        cam.Position = lookAt - newLook;
+        cam.LookDirection = newLook;
+        cam.UpDirection = newUp;
+    }
+
+    private void Viewport3D_CornerRotation_MouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_activeCornerRotation == CornerRotationAxis.None) return;
+
+        _activeCornerRotation = CornerRotationAxis.None;
+        Viewport3D.ReleaseMouseCapture();
+        Viewport3D.IsRotationEnabled = _savedViewportRotationEnabled;
+        Mouse.OverrideCursor = null;
+        _nhpTrackCameraOnDown = false;
+        e.Handled = true;
+    }
+
+    private void Viewport3D_CornerRotation_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (_activeCornerRotation == CornerRotationAxis.None)
+            Mouse.OverrideCursor = null;
     }
 
     // ═══ NavCube: Orbital arrow rotation ═══

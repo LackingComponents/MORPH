@@ -74,6 +74,18 @@ public partial class MainViewModel
                     Pitch = _cPitch,
                     Yaw   = _cYaw
                 },
+                NhpProfiles = NhpProfiles.Select(p => new
+                {
+                    p.Name,
+                    Lat = p.Lateral,
+                    Ant = p.Anteroposterior,
+                    Vert = p.Vertical,
+                    Roll = p.Roll,
+                    Pitch = p.Pitch,
+                    Yaw = p.Yaw,
+                    p.IsCommitted,
+                    p.IsSelected
+                }).ToArray(),
                 // Hybrid NHP: Persist cumulative baked matrix (product of all committed deltas)
                 CumulativeNhpMatrix = MatrixToArray(_cumulativeNhpMatrix),
                 // Phase 1: Persist baked VolumePivot (stable rotation center across reslices)
@@ -341,6 +353,39 @@ public partial class MainViewModel
                         OnPropertyChanged(nameof(NhpPitch));
                         OnPropertyChanged(nameof(NhpYaw));
                         OnPropertyChanged(nameof(IsNhpDirty));
+                    }
+
+                    if (root.TryGetProperty("NhpProfiles", out var nhpProfilesNode)
+                        && nhpProfilesNode.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    {
+                        var restored = new List<NhpProfileViewModel>();
+                        foreach (var el in nhpProfilesNode.EnumerateArray())
+                        {
+                            double ReadProfileDouble(string key)
+                            {
+                                if (!el.TryGetProperty(key, out var prop)) return 0;
+                                double v = prop.GetDouble();
+                                return double.IsNaN(v) || double.IsInfinity(v) ? 0 : v;
+                            }
+                            restored.Add(new NhpProfileViewModel
+                            {
+                                Name = el.TryGetProperty("Name", out var n) ? n.GetString() ?? "NHP" : "NHP",
+                                Lateral = ReadProfileDouble("Lat"),
+                                Anteroposterior = ReadProfileDouble("Ant"),
+                                Vertical = ReadProfileDouble("Vert"),
+                                Roll = ReadProfileDouble("Roll"),
+                                Pitch = ReadProfileDouble("Pitch"),
+                                Yaw = ReadProfileDouble("Yaw"),
+                                IsCommitted = el.TryGetProperty("IsCommitted", out var c) && c.GetBoolean(),
+                                IsSelected = el.TryGetProperty("IsSelected", out var s) && s.GetBoolean()
+                            });
+                        }
+                        if (restored.Count > 0)
+                            RestoreNhpProfilesFromProject(restored);
+                    }
+                    else if (root.TryGetProperty("NhpBaseline", out _))
+                    {
+                        MigrateBaselineToNhpProfileIfNeeded();
                     }
 
                     // Hybrid NHP: Restore cumulative baked matrix
