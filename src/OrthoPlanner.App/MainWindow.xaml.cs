@@ -962,6 +962,23 @@ public partial class MainWindow : Window
         }
     }
 
+    private void NhpProfileName_PreviewMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is TextBox tb)
+        {
+            tb.Focus();
+            tb.SelectAll();
+        }
+    }
+
+    private void NhpProfileName_GotFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox tb || tb.DataContext is not ViewModels.NhpProfileViewModel profile) return;
+        if (DataContext is ViewModels.MainViewModel vm)
+            vm.SelectNhpProfileCommand.Execute(profile);
+    }
+
     private void OptionsTextBox_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (e.Key == System.Windows.Input.Key.Up || e.Key == System.Windows.Input.Key.Down)
@@ -1019,6 +1036,7 @@ public partial class MainWindow : Window
     private void SyncCameraToNhpIfNeeded()
     {
         if (!IsNhpPanelOpen || VM == null || Viewport3D.Camera == null) return;
+        if (VM.SuppressCameraNhpSync) return;
         VM.SetNhpRotationsFromCamera(Viewport3D.Camera.LookDirection, Viewport3D.Camera.UpDirection);
     }
 
@@ -1032,6 +1050,7 @@ public partial class MainWindow : Window
 
         _nhpTrackCameraOnDown = false;
         if (_activeCornerRotation != CornerRotationAxis.None) return;
+        if (VM.SuppressCameraNhpSync) return;
 
         var cam = Viewport3D.Camera;
         if (NhpCameraAngles.OrientationChanged(_nhpTrackLookOnDown, _nhpTrackUpOnDown,

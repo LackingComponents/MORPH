@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.ComponentModel;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Media.Media3D;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -28,6 +30,13 @@ public partial class MainViewModel
     // ━━━ NHP Profiles (NHP 1, NHP 2, …) ━━━
     public ObservableCollection<NhpProfileViewModel> NhpProfiles { get; } = new();
     private NhpProfileViewModel? _activeNhpProfile;
+    private NhpProfileViewModel? _hookedActiveProfile;
+    private bool _isBulkApplyingNhpProfile;
+
+    /// <summary>While true, viewport camera orientation must not overwrite NHP fields (e.g. after adding a profile).</summary>
+    internal bool SuppressCameraNhpSync { get; private set; }
+
+    private static readonly Regex DefaultNhpNameRegex = new(@"^NHP (\d+)$", RegexOptions.Compiled);
 
     public string ActiveNhpProfileName => _activeNhpProfile?.Name ?? "NHP 1";
 
@@ -48,12 +57,20 @@ public partial class MainViewModel
 
     public Rect3D BoneOnlyBounds { get; private set; } = Rect3D.Empty; // Bone segment bounds only
 
-    public bool IsNhpDirty => Math.Abs(NhpLateral - _cLat) > 0.01 ||
-                              Math.Abs(NhpAnteroposterior - _cAnt) > 0.01 ||
-                              Math.Abs(NhpVertical - _cVert) > 0.01 ||
-                              Math.Abs(NhpRoll - _cRoll) > 0.01 ||
-                              Math.Abs(NhpPitch - _cPitch) > 0.01 ||
-                              Math.Abs(NhpYaw - _cYaw) > 0.01;
+    public bool IsNhpDirty =>
+        _activeNhpProfile != null
+            ? Math.Abs(NhpLateral - _activeNhpProfile.Lateral) > 0.01 ||
+              Math.Abs(NhpAnteroposterior - _activeNhpProfile.Anteroposterior) > 0.01 ||
+              Math.Abs(NhpVertical - _activeNhpProfile.Vertical) > 0.01 ||
+              Math.Abs(NhpRoll - _activeNhpProfile.Roll) > 0.01 ||
+              Math.Abs(NhpPitch - _activeNhpProfile.Pitch) > 0.01 ||
+              Math.Abs(NhpYaw - _activeNhpProfile.Yaw) > 0.01
+            : Math.Abs(NhpLateral - _cLat) > 0.01 ||
+              Math.Abs(NhpAnteroposterior - _cAnt) > 0.01 ||
+              Math.Abs(NhpVertical - _cVert) > 0.01 ||
+              Math.Abs(NhpRoll - _cRoll) > 0.01 ||
+              Math.Abs(NhpPitch - _cPitch) > 0.01 ||
+              Math.Abs(NhpYaw - _cYaw) > 0.01;
 
     public bool HasModelLoaded => !BoneOnlyBounds.IsEmpty || Volume != null || Segments.Count > 0;
 
@@ -104,24 +121,31 @@ public partial class MainViewModel
     }
 
     /// <summary>
-    /// Commit NHP: bake the current delta into all mesh vertices and landmarks,
-    /// update the cumulative matrix, and reset the delta to Identity.
-    /// After commit, _nhpTransform = Identity; everything lives in baked NHP space.
+    /// Commit NHP: bake the current absolute target pose into all mesh vertices and landmarks,
+    /// update the cumulative matrix, and reset the preview transform to Identity.
+    /// Slider values are absolute from the original (pre-NHP) volume frame.
     /// </summary>
     [RelayCommand]
     private void CommitNhp()
     {
         if (BoneOnlyBounds.IsEmpty) { StatusText = "⚠ Segment bone first to enable NHP commit"; return; }
 
-        // 1. Build the delta matrix (current slider values - baseline)
-        var deltaMatrix = BuildNhpMatrix(
-            NhpLateral - _cLat, NhpAnteroposterior - _cAnt, NhpVertical - _cVert,
-            NhpRoll - _cRoll, NhpPitch - _cPitch, NhpYaw - _cYaw);
+        var targetMatrix = BuildNhpMatrix(
+            NhpLateral, NhpAnteroposterior, NhpVertical, NhpRoll, NhpPitch, NhpYaw);
+        var deltaMatrix = _cumulativeNhpMatrix.IsIdentity
+            ? targetMatrix
+            : MultiplyMatrices(targetMatrix, InvertMatrix(_cumulativeNhpMatrix));
 
-        // 2. Snapshot for undo BEFORE mutating vertices
+        if (deltaMatrix.IsIdentity &&
+            Math.Abs(NhpLateral) < 0.01 && Math.Abs(NhpAnteroposterior) < 0.01 &&
+            Math.Abs(NhpVertical) < 0.01 && Math.Abs(NhpRoll) < 0.01 &&
+            Math.Abs(NhpPitch) < 0.01 && Math.Abs(NhpYaw) < 0.01)
+        {
+            StatusText = "NHP already at the original volume pose.";
+            return;
+        }
         SaveStateForUndo();
 
-        // 3. Bake delta into all mesh vertices (with dedup for named models)
         var baked = new HashSet<SegmentViewModel>();
         foreach (var seg in Segments)
         {
@@ -166,8 +190,8 @@ public partial class MainViewModel
             SavedCephLandmarks = updatedLandmarks;
         }
 
-        // 7. Update cumulative matrix: CORRECT ORDER — cumulative first, then delta
-        _cumulativeNhpMatrix = _cumulativeNhpMatrix * deltaMatrix;
+        // 7. Cumulative baked pose = absolute target from original volume
+        _cumulativeNhpMatrix = targetMatrix;
 
         // 8. New baseline = current slider values
         _cLat = NhpLateral; _cAnt = NhpAnteroposterior; _cVert = NhpVertical;
@@ -199,6 +223,7 @@ public partial class MainViewModel
     /// <summary>Capture current viewport camera orientation into NHP rotation fields.</summary>
     public void SetNhpRotationsFromCamera(Vector3D lookDir, Vector3D upDir)
     {
+        if (SuppressCameraNhpSync) return;
         var (pitch, roll, yaw) = NhpCameraAngles.FromCamera(lookDir, upDir);
         ApplyCameraAnglesToNhp(pitch, roll, yaw);
         StatusText = "Camera orientation applied to NHP rotations. Press DONE to commit.";
@@ -229,6 +254,13 @@ public partial class MainViewModel
     [RelayCommand]
     private void ResetNhp()
     {
+        if (_activeNhpProfile != null)
+        {
+            ForceSetNhpUi(_activeNhpProfile.Lateral, _activeNhpProfile.Anteroposterior, _activeNhpProfile.Vertical,
+                _activeNhpProfile.Roll, _activeNhpProfile.Pitch, _activeNhpProfile.Yaw);
+            return;
+        }
+
         // Direct field writes to avoid 6× redundant UpdateNhpTransform calls
 #pragma warning disable MVVMTK0034
         _nhpLateral         = _cLat;
@@ -298,6 +330,25 @@ public partial class MainViewModel
         return nhp.Value;
     }
 
+    /// <summary>
+    /// Preview transform on baked vertices: maps current baked pose back toward the absolute
+    /// slider target from the original volume frame (zeros = original un-NHP volume).
+    /// </summary>
+    private Matrix3D BuildAbsoluteNhpPreviewMatrix()
+    {
+        var targetMatrix = BuildNhpMatrix(
+            NhpLateral, NhpAnteroposterior, NhpVertical, NhpRoll, NhpPitch, NhpYaw);
+        if (_cumulativeNhpMatrix.IsIdentity)
+            return targetMatrix;
+        return MultiplyMatrices(targetMatrix, InvertMatrix(_cumulativeNhpMatrix));
+    }
+
+    private static Matrix3D MultiplyMatrices(Matrix3D a, Matrix3D b)
+    {
+        a.Append(b);
+        return a;
+    }
+
     private void UpdateNhpTransform()
     {
         if (BoneOnlyBounds.IsEmpty)
@@ -309,22 +360,21 @@ public partial class MainViewModel
             return;
         }
 
-        // Build the DELTA transform from committed baseline
-        var deltaMatrix = BuildNhpMatrix(
-            NhpLateral - _cLat, NhpAnteroposterior - _cAnt, NhpVertical - _cVert,
-            NhpRoll - _cRoll, NhpPitch - _cPitch, NhpYaw - _cYaw);
+        var targetMatrix = BuildNhpMatrix(
+            NhpLateral, NhpAnteroposterior, NhpVertical, NhpRoll, NhpPitch, NhpYaw);
+        var previewMatrix = BuildAbsoluteNhpPreviewMatrix();
 
-        _nhpTransform = new MatrixTransform3D(deltaMatrix);
+        _nhpTransform = new MatrixTransform3D(previewMatrix);
 
         ApplyNhpToAllTrackedObjects();
 
-        // ModelCenter follows the delta-transformed pivot
         var center = VolumePivot ?? new Point3D(
             BoneOnlyBounds.X + BoneOnlyBounds.SizeX / 2,
             BoneOnlyBounds.Y + BoneOnlyBounds.SizeY / 2,
             BoneOnlyBounds.Z + BoneOnlyBounds.SizeZ / 2);
-        ModelCenter = deltaMatrix.Transform(center);
-        SaveActiveNhpProfileFromUi();
+        ModelCenter = targetMatrix.Transform(center);
+        if (!_isBulkApplyingNhpProfile)
+            SaveActiveNhpProfileFromUi();
     }
 
     /// <summary>
@@ -474,6 +524,42 @@ public partial class MainViewModel
         OnPropertyChanged(nameof(CanDeleteAnyNhpProfile));
     }
 
+    private static int ParseDefaultNhpNumber(string name)
+    {
+        var m = DefaultNhpNameRegex.Match(name);
+        return m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : 0;
+    }
+
+    private int GetNextNhpProfileNumber()
+    {
+        var max = 0;
+        foreach (var p in NhpProfiles)
+            max = Math.Max(max, ParseDefaultNhpNumber(p.Name));
+        return Math.Max(max, NhpProfiles.Count) + 1;
+    }
+
+    private void RenumberAllNhpProfileNames()
+    {
+        for (int i = 0; i < NhpProfiles.Count; i++)
+            NhpProfiles[i].Name = $"NHP {i + 1}";
+        OnPropertyChanged(nameof(ActiveNhpProfileName));
+    }
+
+    private void HookActiveNhpProfile(NhpProfileViewModel? profile)
+    {
+        if (_hookedActiveProfile != null)
+            _hookedActiveProfile.PropertyChanged -= ActiveNhpProfile_PropertyChanged;
+        _hookedActiveProfile = profile;
+        if (profile != null)
+            profile.PropertyChanged += ActiveNhpProfile_PropertyChanged;
+    }
+
+    private void ActiveNhpProfile_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(NhpProfileViewModel.Name))
+            OnPropertyChanged(nameof(ActiveNhpProfileName));
+    }
+
     private void EnsureDefaultNhpProfile()
     {
         if (NhpProfiles.Count > 0) return;
@@ -481,6 +567,7 @@ public partial class MainViewModel
         profile.IsSelected = true;
         _activeNhpProfile = profile;
         NhpProfiles.Add(profile);
+        HookActiveNhpProfile(profile);
         OnPropertyChanged(nameof(ActiveNhpProfileName));
     }
 
@@ -506,14 +593,50 @@ public partial class MainViewModel
         _activeNhpProfile.Yaw = NhpYaw;
     }
 
+    private void SyncEditBaselineFromProfile(NhpProfileViewModel profile)
+    {
+        // Legacy project baseline mirrors the active profile values for save/load compatibility.
+        _cLat = profile.Lateral;
+        _cAnt = profile.Anteroposterior;
+        _cVert = profile.Vertical;
+        _cRoll = profile.Roll;
+        _cPitch = profile.Pitch;
+        _cYaw = profile.Yaw;
+    }
+
+    private void ForceSetNhpUi(double lateral, double anteroposterior, double vertical,
+        double roll, double pitch, double yaw)
+    {
+        _isBulkApplyingNhpProfile = true;
+#pragma warning disable MVVMTK0034
+        _nhpLateral = ClampNhp(lateral, false);
+        _nhpAnteroposterior = ClampNhp(anteroposterior, false);
+        _nhpVertical = ClampNhp(vertical, false);
+        _nhpRoll = ClampNhp(roll, true);
+        _nhpPitch = ClampNhp(pitch, true);
+        _nhpYaw = ClampNhp(yaw, true);
+#pragma warning restore MVVMTK0034
+
+        OnPropertyChanged(nameof(NhpLateral));
+        OnPropertyChanged(nameof(NhpAnteroposterior));
+        OnPropertyChanged(nameof(NhpVertical));
+        OnPropertyChanged(nameof(NhpRoll));
+        OnPropertyChanged(nameof(NhpPitch));
+        OnPropertyChanged(nameof(NhpYaw));
+        OnPropertyChanged(nameof(IsNhpDirty));
+
+        _isBulkApplyingNhpProfile = false;
+        _mprDebounceTimer?.Stop();
+        UpdateNhpTransform();
+        UpdateAllSlices();
+        SaveActiveNhpProfileFromUi();
+    }
+
     private void ApplyNhpProfile(NhpProfileViewModel profile)
     {
-        NhpLateral = profile.Lateral;
-        NhpAnteroposterior = profile.Anteroposterior;
-        NhpVertical = profile.Vertical;
-        NhpRoll = profile.Roll;
-        NhpPitch = profile.Pitch;
-        NhpYaw = profile.Yaw;
+        SyncEditBaselineFromProfile(profile);
+        ForceSetNhpUi(profile.Lateral, profile.Anteroposterior, profile.Vertical,
+            profile.Roll, profile.Pitch, profile.Yaw);
     }
 
     private void SetActiveNhpProfile(NhpProfileViewModel profile)
@@ -521,7 +644,9 @@ public partial class MainViewModel
         foreach (var p in NhpProfiles) p.IsSelected = false;
         profile.IsSelected = true;
         _activeNhpProfile = profile;
+        HookActiveNhpProfile(profile);
         OnPropertyChanged(nameof(ActiveNhpProfileName));
+        OnPropertyChanged(nameof(IsNhpDirty));
     }
 
     [RelayCommand]
@@ -530,10 +655,17 @@ public partial class MainViewModel
         SaveActiveNhpProfileFromUi();
         EnsureDefaultNhpProfile();
 
-        var profile = NewNhpProfileModel($"NHP {NhpProfiles.Count + 1}");
+        var profile = NewNhpProfileModel($"NHP {GetNextNhpProfileNumber()}");
         NhpProfiles.Add(profile);
         SetActiveNhpProfile(profile);
-        ApplyNhpProfile(profile);
+
+        SuppressCameraNhpSync = true;
+        SyncEditBaselineFromProfile(profile);
+        ForceSetNhpUi(0, 0, 0, 0, 0, 0);
+        Application.Current?.Dispatcher.BeginInvoke(
+            () => SuppressCameraNhpSync = false,
+            System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+
         StatusText = $"Working on {profile.Name}. Adjust and press DONE to commit.";
         RefreshNhpProfileFlags();
     }
@@ -556,6 +688,7 @@ public partial class MainViewModel
         var index = NhpProfiles.IndexOf(profile);
         var wasActive = profile == _activeNhpProfile;
         NhpProfiles.Remove(profile);
+        RenumberAllNhpProfileNames();
 
         if (wasActive)
         {
@@ -613,6 +746,7 @@ public partial class MainViewModel
         profile.IsSelected = true;
         _activeNhpProfile = profile;
         NhpProfiles.Add(profile);
+        HookActiveNhpProfile(profile);
         OnPropertyChanged(nameof(ActiveNhpProfileName));
         RefreshNhpProfileFlags();
     }
