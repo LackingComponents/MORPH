@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Collections.ObjectModel;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -319,7 +319,7 @@ public partial class MainViewModel
             .FirstOrDefault();
     }
 
-    private System.Windows.Media.Media3D.Transform3D BuildSurgeryTransform(
+    internal System.Windows.Media.Media3D.Transform3D BuildSurgeryTransform(
         double ant, double lat, double vert,
         double roll, double pitch, double yaw,
         System.Windows.Media.Media3D.Point3D center)

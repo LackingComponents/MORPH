@@ -252,6 +252,33 @@ public partial class SegmentViewModel : ObservableObject
     /// the false "CT bone only" warning.</summary>
     public bool HasMergedDental { get; set; }
 
+    // ── Splint Wizard: snapshot/restore helpers ─────────────────────────────
+    /// <summary>True when <see cref="BaseVerticesBackup"/> holds a pre-transform copy
+    /// of <see cref="Vertices"/> (set by the splint wizard, never by scene code).</summary>
+    public bool SurgicalBaked { get; internal set; }
+
+    /// <summary>A copy of the base (CT-position) vertices before any surgical bake.
+    /// Null unless <see cref="BackupBaseVertices"/> has been called.</summary>
+    public float[]? BaseVerticesBackup { get; private set; }
+
+    /// <summary>Snapshot the current vertices into <see cref="BaseVerticesBackup"/>.
+    /// Call before applying a surgical bake so the scene can be restored later.</summary>
+    public void BackupBaseVertices()
+    {
+        if (Vertices == null) return;
+        BaseVerticesBackup = (float[])Vertices.Clone();
+    }
+
+    /// <summary>Restore <see cref="Vertices"/> from <see cref="BaseVerticesBackup"/>
+    /// and clear the backup. No-op if no backup exists.</summary>
+    public void RestoreBaseVertices()
+    {
+        if (BaseVerticesBackup == null) return;
+        Vertices = BaseVerticesBackup;
+        BaseVerticesBackup = null;
+        SurgicalBaked = false;
+    }
+
     /// <summary>Callback so the parent ViewModel can refresh 3D when visibility toggles.</summary>
     public Action? OnVisibilityChanged { get; set; }
 
