@@ -311,7 +311,10 @@ public partial class SplintSequenceWindow : Window
     private void SequenceRadio_Changed(object sender, RoutedEventArgs e)
     {
         if (!IsLoaded) return;
-        bool nowMaxillaFirst = MaxillaFirstRadio.IsChecked == true;
+        // Use sender identity: WPF fires Checked on the radio that just became checked.
+        // Reading MaxillaFirstRadio.IsChecked here is unreliable because WPF may not yet
+        // have unchecked the sibling when this event fires.
+        bool nowMaxillaFirst = ReferenceEquals(sender, MaxillaFirstRadio);
         if (nowMaxillaFirst == _isMaxillaFirst) return;
         _isMaxillaFirst = nowMaxillaFirst;
 
