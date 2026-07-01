@@ -56,6 +56,9 @@ public partial class SplintPlannerWindow : Window
     // ── Drag state ────────────────────────────────────────────────────────
     private bool _draggingUpper, _draggingLower;
     private int  _dragIdxUpper = -1, _dragIdxLower = -1;
+    // Drag plane for camera-relative movement (BSSO/LeFort pattern)
+    private Point3D  _dragPlanePos;
+    private Vector3D _dragPlaneNormal;
 
     // ── Result ────────────────────────────────────────────────────────────
     public bool   Accepted       { get; private set; }
@@ -256,13 +259,23 @@ public partial class SplintPlannerWindow : Window
         var hits = UpperViewport.FindHits(e.GetPosition(UpperViewport));
         if (hits == null || hits.Count == 0) return;
 
-        // Clicked on an existing marker? → start drag
+        // Clicked on an existing marker? → start drag with camera-plane
         foreach (var hit in hits)
         {
             if (hit.ModelHit is MeshGeometryModel3D marker)
             {
                 int idx = _upperMarkers.IndexOf(marker);
-                if (idx >= 0) { _draggingUpper = true; _dragIdxUpper = idx; e.Handled = true; return; }
+                if (idx >= 0)
+                {
+                    _draggingUpper  = true;
+                    _dragIdxUpper   = idx;
+                    _dragPlanePos    = new Point3D(hit.PointHit.X, hit.PointHit.Y, hit.PointHit.Z);
+                    var ld = UpperCamera.LookDirection;
+                    _dragPlaneNormal = new Vector3D(-ld.X, -ld.Y, -ld.Z);
+                    UpperViewport.CaptureMouse();
+                    e.Handled = true;
+                    return;
+                }
             }
         }
 
@@ -287,13 +300,23 @@ public partial class SplintPlannerWindow : Window
             if (hit.ModelHit is MeshGeometryModel3D marker)
             {
                 int idx = _lowerMarkers.IndexOf(marker);
-                if (idx >= 0) { _draggingLower = true; _dragIdxLower = idx; e.Handled = true; return; }
+                if (idx >= 0)
+                {
+                    _draggingLower  = true;
+                    _dragIdxLower   = idx;
+                    _dragPlanePos    = new Point3D(hit.PointHit.X, hit.PointHit.Y, hit.PointHit.Z);
+                    var ld = LowerCamera.LookDirection;
+                    _dragPlaneNormal = new Vector3D(-ld.X, -ld.Y, -ld.Z);
+                    LowerViewport.CaptureMouse();
+                    e.Handled = true;
+                    return;
+                }
             }
         }
 
-        var pt = hits[0].PointHit;
-        _lowerArch.AddPoint((float)pt.X, (float)pt.Y, (float)pt.Z);
-        AddMarker(LowerGroup, _lowerMarkers, pt, isUpper: false);
+        var pt2 = hits[0].PointHit;
+        _lowerArch.AddPoint((float)pt2.X, (float)pt2.Y, (float)pt2.Z);
+        AddMarker(LowerGroup, _lowerMarkers, pt2, isUpper: false);
         RefreshLowerCurve();
         UpdateUI();
         e.Handled = true;
@@ -301,49 +324,57 @@ public partial class SplintPlannerWindow : Window
 
     // ═══════════════════════════════════════════════════════════
     //  MOUSE — DRAG (move existing point)
+    //  Uses UnProject + ray-plane intersection (same as BSSO/LeFort):
+    //  plane passes through the original hit point and faces the camera.
     // ═══════════════════════════════════════════════════════════
     private void UpperViewport_MouseMove(object sender, MouseEventArgs e)
     {
         if (_isReviewMode) { _draggingUpper = false; _dragIdxUpper = -1; return; }
         if (!_draggingUpper || _dragIdxUpper < 0) return;
-        var hits = UpperViewport.FindHits(e.GetPosition(UpperViewport));
-        if (hits == null) return;
-        // Skip hits on markers
-        foreach (var hit in hits)
-        {
-            if (hit.ModelHit is MeshGeometryModel3D marker && _upperMarkers.Contains(marker)) continue;
-            var pt = hit.PointHit;
-            _upperArch.UpdatePoint(_dragIdxUpper, (float)pt.X, (float)pt.Y, (float)pt.Z);
-            _upperMarkers[_dragIdxUpper].Transform = new TranslateTransform3D(pt.X, pt.Y, pt.Z);
-            RefreshUpperCurve();
-            e.Handled = true;
-            break;
-        }
+        var ray = UpperViewport.UnProject(e.GetPosition(UpperViewport));
+        var pt  = RayPlane(new Point3D(ray.Position.X, ray.Position.Y, ray.Position.Z),
+                           new Vector3D(ray.Direction.X, ray.Direction.Y, ray.Direction.Z),
+                           _dragPlanePos, _dragPlaneNormal);
+        if (!pt.HasValue) return;
+        var np = pt.Value;
+        _dragPlanePos = np;  // advance anchor so the plane follows the point
+        _upperArch.UpdatePoint(_dragIdxUpper, (float)np.X, (float)np.Y, (float)np.Z);
+        _upperMarkers[_dragIdxUpper].Transform = new TranslateTransform3D(np.X, np.Y, np.Z);
+        RefreshUpperCurve();
+        e.Handled = true;
     }
 
     private void LowerViewport_MouseMove(object sender, MouseEventArgs e)
     {
         if (_isReviewMode) { _draggingLower = false; _dragIdxLower = -1; return; }
         if (!_draggingLower || _dragIdxLower < 0) return;
-        var hits = LowerViewport.FindHits(e.GetPosition(LowerViewport));
-        if (hits == null) return;
-        foreach (var hit in hits)
-        {
-            if (hit.ModelHit is MeshGeometryModel3D marker && _lowerMarkers.Contains(marker)) continue;
-            var pt = hit.PointHit;
-            _lowerArch.UpdatePoint(_dragIdxLower, (float)pt.X, (float)pt.Y, (float)pt.Z);
-            _lowerMarkers[_dragIdxLower].Transform = new TranslateTransform3D(pt.X, pt.Y, pt.Z);
-            RefreshLowerCurve();
-            e.Handled = true;
-            break;
-        }
+        var ray = LowerViewport.UnProject(e.GetPosition(LowerViewport));
+        var pt  = RayPlane(new Point3D(ray.Position.X, ray.Position.Y, ray.Position.Z),
+                           new Vector3D(ray.Direction.X, ray.Direction.Y, ray.Direction.Z),
+                           _dragPlanePos, _dragPlaneNormal);
+        if (!pt.HasValue) return;
+        var np = pt.Value;
+        _dragPlanePos = np;
+        _lowerArch.UpdatePoint(_dragIdxLower, (float)np.X, (float)np.Y, (float)np.Z);
+        _lowerMarkers[_dragIdxLower].Transform = new TranslateTransform3D(np.X, np.Y, np.Z);
+        RefreshLowerCurve();
+        e.Handled = true;
     }
 
     private void UpperViewport_MouseLeftUp(object sender, MouseButtonEventArgs e)
-    { _draggingUpper = false; _dragIdxUpper = -1; }
+    { _draggingUpper = false; _dragIdxUpper = -1; UpperViewport.ReleaseMouseCapture(); }
 
     private void LowerViewport_MouseLeftUp(object sender, MouseButtonEventArgs e)
-    { _draggingLower = false; _dragIdxLower = -1; }
+    { _draggingLower = false; _dragIdxLower = -1; LowerViewport.ReleaseMouseCapture(); }
+
+    /// <summary>Ray-plane intersection (BSSO pattern): plane through <paramref name="pp"/> with normal <paramref name="pn"/>.</summary>
+    private static Point3D? RayPlane(Point3D o, Vector3D d, Point3D pp, Vector3D pn)
+    {
+        double nd = Vector3D.DotProduct(d, pn);
+        if (Math.Abs(nd) < 0.0001) return null;
+        double t = Vector3D.DotProduct(pp - o, pn) / nd;
+        return t < 0 ? null : o + d * t;
+    }
 
     // ═══════════════════════════════════════════════════════════
     //  MOUSE — RIGHT CLICK (remove nearest point)
