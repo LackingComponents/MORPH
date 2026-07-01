@@ -192,6 +192,7 @@ public partial class MainViewModel
             };
 
             bool intermediateDone = false;
+            SplintPlannerWindow.ArchSnapshot? interArchSnapshot = null;
             var interWin = new SplintPlannerWindow(interUpper, interLower, this, interConfig);
             interWin.Owner = Application.Current.MainWindow;
             interWin.Closed += (_, _) =>
@@ -200,6 +201,7 @@ public partial class MainViewModel
                 {
                     if (!interWin.Accepted || interWin.SplintVertices == null || interWin.SplintVertices.Length < 9)
                         return;
+                    interArchSnapshot = interWin.GetArchSnapshot();
                     var labelledConfig = interConfig with { FirstOperated = interWin.ChosenFirstOperated };
                     Application.Current.Dispatcher.Invoke(() =>
                     {
@@ -258,7 +260,7 @@ public partial class MainViewModel
                 RightCondyleBox    = rightCondyleBox,
                 EnableAutorotation = false,
             };
-            OpenSplintWindow(finalUpper, finalLower, finalConfig);
+            OpenSplintWindow(finalUpper, finalLower, finalConfig, preloadedArch: interArchSnapshot);
         }
         catch (Exception ex)
         {
@@ -272,9 +274,10 @@ public partial class MainViewModel
     /// <summary>Opens a SplintPlannerWindow and adds the resulting mesh to the scene on accept.</summary>
     private void OpenSplintWindow(
         float[] upper, float[] lower,
-        OrthoPlanner.Core.Geometry.SplintConfig config)
+        OrthoPlanner.Core.Geometry.SplintConfig config,
+        SplintPlannerWindow.ArchSnapshot? preloadedArch = null)
     {
-        var win = new SplintPlannerWindow(upper, lower, this, config);
+        var win = new SplintPlannerWindow(upper, lower, this, config, preloadedArch);
         win.Owner = Application.Current.MainWindow;
         win.Closed += (_, _) =>
         {

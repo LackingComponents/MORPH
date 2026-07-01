@@ -16,6 +16,7 @@ public class ArchCurve
     public void RemoveAt(int i) { if (i >= 0 && i < _ctrl.Count) _ctrl.RemoveAt(i); }
     public void Clear() => _ctrl.Clear();
     public (float x,float y,float z) GetPoint(int i) => _ctrl[i];
+    public List<(float x,float y,float z)> GetPoints() => new(_ctrl);
     public void UpdatePoint(int i, float x, float y, float z)
     {
         if (i >= 0 && i < _ctrl.Count) _ctrl[i] = (x, y, z);

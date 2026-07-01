@@ -51,6 +51,7 @@ public partial class SplintPlannerWindow : Window
     private bool _reviewCastTogglesReady;
     private bool _isReviewMode;
     private bool _pointEditingHandlersAttached = true;
+    private ArchSnapshot? _preloadedArch;
 
     // ── Drag state ────────────────────────────────────────────────────────
     private bool _draggingUpper, _draggingLower;
@@ -59,13 +60,30 @@ public partial class SplintPlannerWindow : Window
     // ── Result ────────────────────────────────────────────────────────────
     public bool   Accepted       { get; private set; }
     public float[]? SplintVertices { get; private set; }
-    /// <summary>The surgical sequence chosen by the radio buttons at generation time
-    /// (maxilla-first vs mandible-first), so the caller can label the produced wafer.</summary>
+    /// <summary>The surgical sequence from the config carried from the wizard.
+    /// Always reflects what was decided in SplintSequenceWindow (Screen 1).</summary>
     public MobileJaw ChosenFirstOperated { get; private set; } = MobileJaw.Maxilla;
+
+    // ── Arch snapshot for inter-window transfer ────────────────────────────
+    public record ArchSnapshot(
+        List<(float x, float y, float z)> UpperPoints,
+        List<(float x, float y, float z)> LowerPoints,
+        double UpperEnvelope, double LowerEnvelope,
+        double LabioLingualWidth, double LingualBuccalBias,
+        double VestibularTrim, bool VestibularOneSided,
+        double BridgeThickness, double CloseErode,
+        double BridgeSdfBase);
+
+    public ArchSnapshot? GetArchSnapshot() =>
+        new(_upperArch.GetPoints(), _lowerArch.GetPoints(),
+            UpperPenetrationSlider.Value, LowerPenetrationSlider.Value,
+            ThicknessSlider.Value, LingualBuccalBiasSlider.Value,
+            VestibularTrimSlider.Value, VestibularOneSidedCheck.IsChecked == true,
+            BridgeThicknessSlider.Value, CloseErodeSlider.Value, BridgeSdfBaseSlider.Value);
 
     // ─────────────────────────────────────────────────────────────────────
     public SplintPlannerWindow(float[] upperMesh, float[] lowerMesh, MainViewModel _,
-        SplintConfig? config = null)
+        SplintConfig? config = null, ArchSnapshot? preloadedArch = null)
     {
         InitializeComponent();
 
@@ -80,11 +98,25 @@ public partial class SplintPlannerWindow : Window
         _upperMesh = upperMesh;
         _lowerMesh = lowerMesh;
         _config    = config ?? new SplintConfig();
-        MaxillaFirstRadio.IsChecked = _config.FirstOperated == MobileJaw.Maxilla;
-        MandibleFirstRadio.IsChecked = _config.FirstOperated == MobileJaw.Mandible;
+        ChosenFirstOperated = _config.FirstOperated;
 
         // Drive the title from the clinical config (no hard-coded "Final Occlusion").
         Title = $"Splint Planner — {_config.DisplayName}";
+
+        // Apply preloaded arch snapshot (slider values + control points)
+        if (preloadedArch != null)
+        {
+            UpperPenetrationSlider.Value  = preloadedArch.UpperEnvelope;
+            LowerPenetrationSlider.Value  = preloadedArch.LowerEnvelope;
+            ThicknessSlider.Value         = preloadedArch.LabioLingualWidth;
+            LingualBuccalBiasSlider.Value = preloadedArch.LingualBuccalBias;
+            VestibularTrimSlider.Value    = preloadedArch.VestibularTrim;
+            VestibularOneSidedCheck.IsChecked = preloadedArch.VestibularOneSided;
+            BridgeThicknessSlider.Value   = preloadedArch.BridgeThickness;
+            CloseErodeSlider.Value        = preloadedArch.CloseErode;
+            BridgeSdfBaseSlider.Value     = preloadedArch.BridgeSdfBase;
+            _preloadedArch = preloadedArch;
+        }
 
         // EffectsManagers — set directly, not via binding
         UpperViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
@@ -142,6 +174,23 @@ public partial class SplintPlannerWindow : Window
         float ls = SplintEngine.WatertightScore(_lowerMesh);
         if (us > 0.02f || ls > 0.02f)
             QualityText.Text = $"⚠ Mesh quality: Upper {us:P0} open | Lower {ls:P0} open — tooth imprint may vary";
+
+        // Pre-load arch points from intermediate window (if provided)
+        if (_preloadedArch != null)
+        {
+            foreach (var (x, y, z) in _preloadedArch.UpperPoints)
+            {
+                _upperArch.AddPoint(x, y, z);
+                AddMarker(UpperGroup, _upperMarkers, new System.Numerics.Vector3(x, y, z), isUpper: true);
+            }
+            foreach (var (x, y, z) in _preloadedArch.LowerPoints)
+            {
+                _lowerArch.AddPoint(x, y, z);
+                AddMarker(LowerGroup, _lowerMarkers, new System.Numerics.Vector3(x, y, z), isUpper: false);
+            }
+            if (_upperArch.ControlPointCount >= 2) RefreshUpperCurve();
+            if (_lowerArch.ControlPointCount >= 2) RefreshLowerCurve();
+        }
 
         UpdateUI();
     }
@@ -543,11 +592,7 @@ public partial class SplintPlannerWindow : Window
             CloseErodeFraction  = (float)CloseErodeSlider.Value / 100f,
             BridgeSdfBaseMm     = (float)BridgeSdfBaseSlider.Value,
             SampleCount         = 160,
-            FirstOperated       = MaxillaFirstRadio.IsChecked == true
-                ? MobileJaw.Maxilla
-                : MobileJaw.Mandible,
-
-            // (sequence is also surfaced to the caller via ChosenFirstOperated)
+            FirstOperated       = _config.FirstOperated, // always from wizard SplintSequenceWindow
 
             // Clinical-fit controls (steps 4–6).
             BlockoutUndercuts   = BlockoutCheck.IsChecked == true,
@@ -558,7 +603,7 @@ public partial class SplintPlannerWindow : Window
             BuccalFlangeDepthMm = (float)FlangeDepthSlider.Value,
             FlangeOnUpper       = FlangeUpperRadio.IsChecked == true,
         };
-        ChosenFirstOperated = genConfig.FirstOperated;
+        // ChosenFirstOperated already set in constructor from _config.FirstOperated
 
         var autorotation = SplintEngine.ApplyMandibularAutorotation(upperSampled, lowerSampled, lMesh, genConfig);
         lowerSampled = autorotation.LowerCurve;
