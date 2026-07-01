@@ -605,7 +605,6 @@ public partial class SplintSequenceWindow : Window
         look.Normalize();
         var pn  = new Vector3D(-look.X, -look.Y, -look.Z);
         var ray = MainViewport.UnProject(screenPos);
-        if (ray.Direction.LengthSquared < 1e-18) return null;  // degenerate unproject
         double nd = pn.X*ray.Direction.X + pn.Y*ray.Direction.Y + pn.Z*ray.Direction.Z;
         if (Math.Abs(nd) < 1e-9) return null;
         double t = (pn.X*(anchor.X-ray.Position.X) +
