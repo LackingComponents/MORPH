@@ -205,9 +205,7 @@ public partial class MainViewModel
                     Label = NextSegmentLabel(),
                     Name = "Cranium (Seed Split)",
                     Vertices = MeshHelper.ToFlatArray(wizard.CraniumResult),
-                    ColorR = 70,
-                    ColorG = 120,
-                    ColorB = 255,
+                    ColorR = 220, ColorG = 200, ColorB = 170,  // warm bone-tone
                     IsVisible = true
                 };
                 craniumVm.OnVisibilityChanged = RefreshCombinedModel;
@@ -222,9 +220,7 @@ public partial class MainViewModel
                     Label = NextSegmentLabel(),
                     Name = "Mandible (Seed Split)",
                     Vertices = MeshHelper.ToFlatArray(wizard.MandibleResult),
-                    ColorR = 255,
-                    ColorG = 150,
-                    ColorB = 0,
+                    ColorR = 220, ColorG = 140, ColorB = 120,  // pinkish
                     IsVisible = true
                 };
                 mandibleVm.OnVisibilityChanged = RefreshCombinedModel;

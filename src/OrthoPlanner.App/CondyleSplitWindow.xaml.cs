@@ -1165,7 +1165,73 @@ public partial class CondyleSplitWindow : Window
         }
     }
 
+    private void SeedSplit_Click(object sender, RoutedEventArgs e)
+    {
+        if (_ctVolume == null || _segVolume == null)
+        {
+            MessageBox.Show(
+                "Seed split requires CT volume and segmentation data.\n" +
+                "Load a DICOM study and compute a bone segmentation first.",
+                "Seed Split", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        // Estimate sensible window/level defaults from boneMinHU
+        double windowCenter = _boneMinHu + 400;
+        double windowWidth  = 2000;
+
+        var wizard = new SeedSplitWindow(
+            _ctVolume,
+            initialCoronalIndex: _ctVolume.Height / 2,
+            windowCenter: windowCenter,
+            windowWidth:  windowWidth,
+            seedTolerance: 200,
+            maskMinHu: _boneMinHu,
+            maskMaxHu: 3071,
+            boneSmoothingAmount: 0.6666667,
+            boneSmoothingPasses: 1,
+            boneKeepAllParts: false,
+            bonePartsKept: 0,
+            enhanceSegmentation: true)
+        {
+            Owner = this
+        };
+
+        if (wizard.ShowDialog() == true && wizard.Accepted)
+        {
+            _craniumVerts = wizard.CraniumResult;
+            _mandibleVerts = wizard.MandibleResult;
+
+            MainGroup.Children.Clear();
+
+            if (_craniumVerts != null && _craniumVerts.Count > 0)
+            {
+                var cranModel = MeshHelper.BuildModel3D(_craniumVerts, 220, 200, 170);
+                if (_nhpDisplayTransform != null) cranModel.Transform = _nhpDisplayTransform;
+                MainGroup.Children.Add(cranModel);
+            }
+            if (_mandibleVerts != null && _mandibleVerts.Count > 0)
+            {
+                var mandModel = MeshHelper.BuildModel3D(_mandibleVerts, 220, 140, 120);
+                if (_nhpDisplayTransform != null) mandModel.Transform = _nhpDisplayTransform;
+                MainGroup.Children.Add(mandModel);
+            }
+
+            CraniumResult  = _craniumVerts;
+            MandibleResult = _mandibleVerts;
+
+            _currentStep = 3;
+            StepTitle.Text = "Step 3: Review & Accept (Seed Split)";
+            StepInstructions.Text = "Warm = Cranium, Cool = Mandible (from seed split). Accept or Cancel.";
+            StatusText.Text = $"Cranium: {(_craniumVerts?.Count ?? 0) / 3} tris | Mandible: {(_mandibleVerts?.Count ?? 0) / 3} tris";
+            SplitBtn.Visibility = Visibility.Collapsed;
+            SeedSplitBtn.Visibility = Visibility.Collapsed;
+            AcceptBtn.Visibility = Visibility.Visible;
+        }
+    }
+
     private void Confirm_Click(object sender, RoutedEventArgs e) { }
+
 
     private void Accept_Click(object sender, RoutedEventArgs e)
     { Accepted = true; DialogResult = true; Close(); }

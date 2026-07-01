@@ -337,7 +337,8 @@ public partial class SplintPlannerWindow : Window
                            _dragPlanePos, _dragPlaneNormal);
         if (!pt.HasValue) return;
         var np = pt.Value;
-        _dragPlanePos = np;  // advance anchor so the plane follows the point
+        // Do NOT advance _dragPlanePos — keep the plane anchored at the initial click
+        // (advancing it causes Z drift when the camera is tilted, matching BSSO behaviour)
         _upperArch.UpdatePoint(_dragIdxUpper, (float)np.X, (float)np.Y, (float)np.Z);
         _upperMarkers[_dragIdxUpper].Transform = new TranslateTransform3D(np.X, np.Y, np.Z);
         RefreshUpperCurve();
@@ -354,7 +355,7 @@ public partial class SplintPlannerWindow : Window
                            _dragPlanePos, _dragPlaneNormal);
         if (!pt.HasValue) return;
         var np = pt.Value;
-        _dragPlanePos = np;
+        // Do NOT advance _dragPlanePos — keep the plane anchored at the initial click
         _lowerArch.UpdatePoint(_dragIdxLower, (float)np.X, (float)np.Y, (float)np.Z);
         _lowerMarkers[_dragIdxLower].Transform = new TranslateTransform3D(np.X, np.Y, np.Z);
         RefreshLowerCurve();
@@ -377,14 +378,24 @@ public partial class SplintPlannerWindow : Window
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  MOUSE — RIGHT CLICK (remove nearest point)
+    //  MOUSE — RIGHT CLICK (remove the last point if clicking its sphere)
+    //  Right click is only recognised when it hits the last-placed marker
+    //  sphere directly. This allows stack-like undo: delete N, then N-1, etc.
     // ═══════════════════════════════════════════════════════════
     private void UpperViewport_MouseRight(object sender, MouseButtonEventArgs e)
     {
         if (_isReviewMode) return;
-        int idx = FindNearestMarker(_upperArch, e.GetPosition(UpperViewport), UpperViewport);
-        if (idx < 0) return;
-        UpperGroup.Children.Remove(_upperMarkers[idx]);
+        if (_upperMarkers.Count == 0) return;
+
+        // Only respond when the click actually hits the last marker
+        var hits = UpperViewport.FindHits(e.GetPosition(UpperViewport));
+        if (hits == null || hits.Count == 0) return;
+        var lastMarker = _upperMarkers[^1];
+        bool hitLast = hits.Any(h => h.ModelHit == lastMarker);
+        if (!hitLast) return;
+
+        int idx = _upperMarkers.Count - 1;
+        UpperGroup.Children.Remove(lastMarker);
         _upperMarkers.RemoveAt(idx);
         _upperArch.RemoveAt(idx);
         RefreshUpperCurve();
@@ -395,9 +406,16 @@ public partial class SplintPlannerWindow : Window
     private void LowerViewport_MouseRight(object sender, MouseButtonEventArgs e)
     {
         if (_isReviewMode) return;
-        int idx = FindNearestMarker(_lowerArch, e.GetPosition(LowerViewport), LowerViewport);
-        if (idx < 0) return;
-        LowerGroup.Children.Remove(_lowerMarkers[idx]);
+        if (_lowerMarkers.Count == 0) return;
+
+        var hits = LowerViewport.FindHits(e.GetPosition(LowerViewport));
+        if (hits == null || hits.Count == 0) return;
+        var lastMarker = _lowerMarkers[^1];
+        bool hitLast = hits.Any(h => h.ModelHit == lastMarker);
+        if (!hitLast) return;
+
+        int idx = _lowerMarkers.Count - 1;
+        LowerGroup.Children.Remove(lastMarker);
         _lowerMarkers.RemoveAt(idx);
         _lowerArch.RemoveAt(idx);
         RefreshLowerCurve();

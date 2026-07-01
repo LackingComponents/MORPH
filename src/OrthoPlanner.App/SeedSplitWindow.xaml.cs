@@ -206,8 +206,9 @@ public partial class SeedSplitWindow : Window, INotifyPropertyChanged
     private static SegmentationVolume CreateSegmentationVolume(VolumeData volume)
     {
         var seg = new SegmentationVolume(volume);
-        seg.AddSegment(new SegmentInfo { Id = MandibleLabel, Name = "Mandible", ColorR = 255, ColorG = 150, ColorB = 0 });
-        seg.AddSegment(new SegmentInfo { Id = CraniumLabel, Name = "Cranium", ColorR = 70, ColorG = 120, ColorB = 255 });
+        // Warm bone-tone for Cranium, pinkish for Mandible (matching CondyleSplitWindow convention)
+        seg.AddSegment(new SegmentInfo { Id = MandibleLabel, Name = "Mandible", ColorR = 220, ColorG = 140, ColorB = 120 });
+        seg.AddSegment(new SegmentInfo { Id = CraniumLabel, Name = "Cranium", ColorR = 220, ColorG = 200, ColorB = 170 });
         seg.AddSegment(new SegmentInfo { Id = ExcludeLabel, Name = "Exclude", ColorR = 255, ColorG = 40, ColorB = 40 });
         return seg;
     }
@@ -549,7 +550,7 @@ public partial class SeedSplitWindow : Window, INotifyPropertyChanged
 
         CoronalImage = BitmapSource.Create(
             _volume.Width, _volume.Depth,
-            96.0 * _volume.Spacing[0], 96.0 * _volume.Spacing[2],
+            96.0, 96.0,  // uniform DPI — let Stretch=Uniform handle the physical aspect from pixel dims
             PixelFormats.Bgra32, null, data, _volume.Width * 4);
 
         RenderSeedMarkers();
@@ -719,9 +720,9 @@ public partial class SeedSplitWindow : Window, INotifyPropertyChanged
 
         public Color DisplayColor => ClassLabel switch
         {
-            MandibleLabel => Color.FromRgb(255, 150, 0),
-            CraniumLabel => Color.FromRgb(70, 120, 255),
-            ExcludeLabel => Color.FromRgb(255, 40, 40),
+            MandibleLabel => Color.FromRgb(220, 140, 120), // warm pinkish — matches mandible mesh colour
+            CraniumLabel  => Color.FromRgb(220, 200, 170), // warm bone-tone — matches cranium mesh colour
+            ExcludeLabel  => Color.FromRgb(255, 40, 40),
             _ => Colors.White
         };
 

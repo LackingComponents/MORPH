@@ -54,7 +54,7 @@ public partial class SplintSequenceWindow : Window
     private enum DragTarget { None, Left, Right }
     private DragTarget _dragging = DragTarget.None;
     private Point3D _dragAnchor;   // world-space anchor for plane intersection
-    private const float SphereRadius = 4f;
+    private const float SphereRadius = 1.5f;
     private const double SphereHitPx = 28.0;  // screen-pixel pick radius
 
     // ── Results ─────────────────────────────────────────────────────────────
@@ -200,8 +200,8 @@ public partial class SplintSequenceWindow : Window
         AddAxisLine();
 
         // Condyle sphere gizmos
-        _leftCondyleSphere  = BuildSphere((float)_leftCondyle.X,  (float)_leftCondyle.Y,  (float)_leftCondyle.Z,  SphereRadius, 220, 160, 80);
-        _rightCondyleSphere = BuildSphere((float)_rightCondyle.X, (float)_rightCondyle.Y, (float)_rightCondyle.Z, SphereRadius, 80, 160, 220);
+        _leftCondyleSphere  = BuildSphere((float)_leftCondyle.X,  (float)_leftCondyle.Y,  (float)_leftCondyle.Z,  SphereRadius, 0, 245, 255);
+        _rightCondyleSphere = BuildSphere((float)_rightCondyle.X, (float)_rightCondyle.Y, (float)_rightCondyle.Z, SphereRadius, 0, 245, 255);
         SceneGroup.Children.Add(_leftCondyleSphere);
         SceneGroup.Children.Add(_rightCondyleSphere);
 
@@ -244,8 +244,8 @@ public partial class SplintSequenceWindow : Window
         _axisLineVisual = new LineGeometryModel3D
         {
             Geometry  = lineBuilder.ToLineGeometry3D(),
-            Color     = System.Windows.Media.Colors.Red,
-            Thickness = 4
+            Color     = System.Windows.Media.Color.FromRgb(0, 245, 255), // neon azure
+            Thickness = 3
         };
         SceneGroup.Children.Add(_axisLineVisual);
     }
@@ -488,8 +488,8 @@ public partial class SplintSequenceWindow : Window
     {
         _adjustAxisMode = true;
         AxisHintLabel.Text = "Drag the orange (L) or blue (R) condyle spheres to reposition the axis.";
-        if (_leftCondyleSphere  != null) _leftCondyleSphere.Material  = MeshHelper.CreatePhongMaterial(255, 180, 40);
-        if (_rightCondyleSphere != null) _rightCondyleSphere.Material = MeshHelper.CreatePhongMaterial(40, 180, 255);
+        if (_leftCondyleSphere  != null) _leftCondyleSphere.Material  = MeshHelper.CreatePhongMaterial(255, 200, 60);  // orange for L adjust
+        if (_rightCondyleSphere != null) _rightCondyleSphere.Material = MeshHelper.CreatePhongMaterial(60, 200, 255);  // blue for R adjust
     }
 
     private void AdjustAxisToggle_Unchecked(object sender, RoutedEventArgs e)
@@ -497,8 +497,8 @@ public partial class SplintSequenceWindow : Window
         _adjustAxisMode = false;
         _dragging = DragTarget.None;
         AxisHintLabel.Text = "";
-        if (_leftCondyleSphere  != null) _leftCondyleSphere.Material  = MeshHelper.CreatePhongMaterial(220, 160, 80);
-        if (_rightCondyleSphere != null) _rightCondyleSphere.Material = MeshHelper.CreatePhongMaterial(80, 160, 220);
+        if (_leftCondyleSphere  != null) _leftCondyleSphere.Material  = MeshHelper.CreatePhongMaterial(0, 245, 255);  // azure
+        if (_rightCondyleSphere != null) _rightCondyleSphere.Material = MeshHelper.CreatePhongMaterial(0, 245, 255);  // azure
     }
 
     private void Viewport_MouseDown(object sender, MouseButtonEventArgs e)
@@ -590,8 +590,8 @@ public partial class SplintSequenceWindow : Window
         if (_leftCondyleSphere != null)  { SceneGroup.Children.Remove(_leftCondyleSphere);  _leftCondyleSphere = null; }
         if (_rightCondyleSphere != null) { SceneGroup.Children.Remove(_rightCondyleSphere); _rightCondyleSphere = null; }
         AddAxisLine();
-        _leftCondyleSphere  = BuildSphere((float)_leftCondyle.X,  (float)_leftCondyle.Y,  (float)_leftCondyle.Z,  SphereRadius, 255, 180, 40);
-        _rightCondyleSphere = BuildSphere((float)_rightCondyle.X, (float)_rightCondyle.Y, (float)_rightCondyle.Z, SphereRadius, 40, 180, 255);
+        _leftCondyleSphere  = BuildSphere((float)_leftCondyle.X,  (float)_leftCondyle.Y,  (float)_leftCondyle.Z,  SphereRadius, 255, 200, 60);
+        _rightCondyleSphere = BuildSphere((float)_rightCondyle.X, (float)_rightCondyle.Y, (float)_rightCondyle.Z, SphereRadius, 60, 200, 255);
         SceneGroup.Children.Add(_leftCondyleSphere);
         SceneGroup.Children.Add(_rightCondyleSphere);
     }
