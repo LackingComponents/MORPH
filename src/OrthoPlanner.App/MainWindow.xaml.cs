@@ -16,11 +16,7 @@ public partial class MainWindow : Window
 {
 
 
-    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
-    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
-
-    private const int DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19;
-    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    // ponytail: DWM dark-mode P/Invoke removed — App.OnWindowLoaded handles all windows globally
 
     public HelixToolkit.Wpf.SharpDX.Viewport3DX MainViewport => Viewport3D;
     public Border SharedViewportHost => ViewportHostBorder;
@@ -35,7 +31,7 @@ public partial class MainWindow : Window
             Viewport3D.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
         }
 
-        SourceInitialized += MainWindow_SourceInitialized;
+    // ponytail: DWM SourceInitialized handler removed — App.OnWindowLoaded handles all windows globally
         Loaded += OnLoaded;
         PreviewKeyDown += MainWindow_PreviewKeyDown;
     }
@@ -50,17 +46,6 @@ public partial class MainWindow : Window
                 e.Handled = true;
             }
         }
-    }
-
-    private void MainWindow_SourceInitialized(object? sender, EventArgs e)
-    {
-        var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
-        int useImmersiveDarkMode = 1;
-        try
-        {
-            DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useImmersiveDarkMode, sizeof(int));
-        }
-        catch { /* Ignore on older OS */ }
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
