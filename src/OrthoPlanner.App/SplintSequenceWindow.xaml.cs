@@ -32,8 +32,10 @@ public partial class SplintSequenceWindow : Window
     private MeshGeometryModel3D? _lowerModel;
     private MeshGeometryModel3D? _leftCondyleSphere;
     private MeshGeometryModel3D? _rightCondyleSphere;
+    private LineGeometryModel3D? _axisLineVisual;
     private RotateTransform3D? _mandibleRotation;
     private EventHandler? _renderingHandler;
+    private readonly float[][]? _ramiMeshes;
 
     // ── Clearance heightfield ────────────────────────────────────────────────
     private float[]? _maxLowZ;
@@ -70,7 +72,8 @@ public partial class SplintSequenceWindow : Window
         (double X, double Y, double Z) leftCondyle,
         (double X, double Y, double Z) rightCondyle,
         bool isFinalOcclusion = false,
-        bool maxillaFirstDefault = true)
+        bool maxillaFirstDefault = true,
+        float[][]? ramiMeshes = null)
     {
         InitializeComponent();
 
@@ -82,6 +85,7 @@ public partial class SplintSequenceWindow : Window
         _rightCondyle = rightCondyle;
         _isFinalOcclusion = isFinalOcclusion;
         _isMaxillaFirst   = maxillaFirstDefault;
+        _ramiMeshes       = ramiMeshes;
 
         if (isFinalOcclusion)
         {
@@ -164,11 +168,25 @@ public partial class SplintSequenceWindow : Window
         SceneGroup.Children.Clear();
         _upperModel = _lowerModel = null;
         _leftCondyleSphere = _rightCondyleSphere = null;
+        _axisLineVisual = null;
         _maxLowZ = null; _maxHas = null;
 
         // Upper arch
         _upperModel = MeshHelper.BuildModel3D(CurrentUpperMesh, 235, 225, 205);
         SceneGroup.Children.Add(_upperModel);
+
+        // Rami in original (CT) position — ghost context meshes
+        if (_ramiMeshes != null)
+        {
+            foreach (var ramus in _ramiMeshes)
+            {
+                if (ramus != null && ramus.Length >= 9)
+                {
+                    var ramusModel = MeshHelper.BuildModel3D(ramus, 200, 190, 175, 100);
+                    SceneGroup.Children.Add(ramusModel);
+                }
+            }
+        }
 
         // Lower arch (subject to autorotation)
         _mandibleRotation = new RotateTransform3D(
@@ -178,7 +196,7 @@ public partial class SplintSequenceWindow : Window
         _lowerModel.Transform = _mandibleRotation;
         SceneGroup.Children.Add(_lowerModel);
 
-        // Axis cylinder
+        // Axis — red line matching CondyleSplitWindow style
         AddAxisLine();
 
         // Condyle sphere gizmos
@@ -209,20 +227,27 @@ public partial class SplintSequenceWindow : Window
     {
         float lx = (float)_leftCondyle.X,  ly = (float)_leftCondyle.Y,  lz = (float)_leftCondyle.Z;
         float rx = (float)_rightCondyle.X, ry = (float)_rightCondyle.Y, rz = (float)_rightCondyle.Z;
-        float len = MathF.Sqrt((lx-rx)*(lx-rx) + (ly-ry)*(ly-ry) + (lz-rz)*(lz-rz));
-        if (len < 1f) return;
 
-        var builder = new HelixToolkit.Geometry.MeshBuilder();
-        builder.AddCylinder(
-            new System.Numerics.Vector3(lx, ly, lz),
-            new System.Numerics.Vector3(rx, ry, rz),
-            1.2f, 8);
-        var lineModel = new MeshGeometryModel3D
+        // Compute unit vector along axis for 15mm extensions past each condyle (matching CondyleSplitWindow)
+        float dx = lx - rx, dy = ly - ry, dz = lz - rz;
+        float len = MathF.Sqrt(dx*dx + dy*dy + dz*dz);
+        if (len < 1f) return;
+        float ux = dx/len, uy = dy/len, uz = dz/len;
+        const float ext = 15f;
+
+        var p1 = new System.Numerics.Vector3(lx + ux*ext, ly + uy*ext, lz + uz*ext);
+        var p2 = new System.Numerics.Vector3(rx - ux*ext, ry - uy*ext, rz - uz*ext);
+
+        var lineBuilder = new HelixToolkit.SharpDX.LineBuilder();
+        lineBuilder.AddLine(p1, p2);
+
+        _axisLineVisual = new LineGeometryModel3D
         {
-            Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(builder.ToMesh()),
-            Material = MeshHelper.CreatePhongMaterial(255, 220, 80, 160)
+            Geometry  = lineBuilder.ToLineGeometry3D(),
+            Color     = System.Windows.Media.Colors.Red,
+            Thickness = 4
         };
-        SceneGroup.Children.Add(lineModel);
+        SceneGroup.Children.Add(_axisLineVisual);
     }
 
     private void CenterLateral()
@@ -509,43 +534,19 @@ public partial class SplintSequenceWindow : Window
         if (_dragging == DragTarget.None || e.LeftButton != MouseButtonState.Pressed) return;
         if (!MainViewport.IsMouseCaptured) return;
 
-        var pos = e.GetPosition(MainViewport);
-        var newPt = CamPlane(pos, _dragAnchor);
+        var pos    = e.GetPosition(MainViewport);
+        var newPt  = CamPlane(pos, _dragAnchor);
         if (!newPt.HasValue) return;
 
         if (_dragging == DragTarget.Left)
         {
             _leftCondyle = (newPt.Value.X, newPt.Value.Y, newPt.Value.Z);
             _dragAnchor  = newPt.Value;
-            if (_leftCondyleSphere != null)
-                _leftCondyleSphere.Transform = new TranslateTransform3D(
-                    newPt.Value.X - (float)_leftCondyle.X + _leftCondyleSphere.Transform.Value.OffsetX,
-                    newPt.Value.Y - (float)_leftCondyle.Y + _leftCondyleSphere.Transform.Value.OffsetY,
-                    newPt.Value.Z - (float)_leftCondyle.Z + _leftCondyleSphere.Transform.Value.OffsetZ);
-
-            // Reposition sphere by rebuilding it in-place
-            int sphereIdx = SceneGroup.Children.IndexOf(_leftCondyleSphere);
-            if (sphereIdx >= 0)
-            {
-                SceneGroup.Children.RemoveAt(sphereIdx);
-                _leftCondyleSphere = BuildSphere((float)_leftCondyle.X, (float)_leftCondyle.Y, (float)_leftCondyle.Z,
-                    SphereRadius, 255, 180, 40);
-                SceneGroup.Children.Insert(sphereIdx, _leftCondyleSphere);
-            }
         }
         else
         {
             _rightCondyle = (newPt.Value.X, newPt.Value.Y, newPt.Value.Z);
             _dragAnchor   = newPt.Value;
-
-            int sphereIdx = SceneGroup.Children.IndexOf(_rightCondyleSphere);
-            if (sphereIdx >= 0)
-            {
-                SceneGroup.Children.RemoveAt(sphereIdx);
-                _rightCondyleSphere = BuildSphere((float)_rightCondyle.X, (float)_rightCondyle.Y, (float)_rightCondyle.Z,
-                    SphereRadius, 40, 180, 255);
-                SceneGroup.Children.Insert(sphereIdx, _rightCondyleSphere);
-            }
         }
 
         RebuildAxis();
@@ -575,17 +576,21 @@ public partial class SplintSequenceWindow : Window
 
     private void RebuildAxisLineInPlace()
     {
-        // Axis line is always the 3rd child (idx 2): upper, lower, axisLine, sphereL, sphereR
-        if (SceneGroup.Children.Count >= 3)
-            SceneGroup.Children.RemoveAt(2);
-        AddAxisLine();
-        // Move it back to position 2 (it was added at end, swap)
-        if (SceneGroup.Children.Count > 3)
+        // Remove the old axis visual and rebuild it.
+        // Scene order: upper, [rami...], lower, axisLine, sphereL, sphereR
+        if (_axisLineVisual != null)
         {
-            var line = SceneGroup.Children[^1];
-            SceneGroup.Children.RemoveAt(SceneGroup.Children.Count - 1);
-            SceneGroup.Children.Insert(2, line);
+            SceneGroup.Children.Remove(_axisLineVisual);
+            _axisLineVisual = null;
         }
+        // Remove old sphere visuals too; AddAxisLine will add new line, then caller re-adds spheres
+        if (_leftCondyleSphere != null)  { SceneGroup.Children.Remove(_leftCondyleSphere);  _leftCondyleSphere = null; }
+        if (_rightCondyleSphere != null) { SceneGroup.Children.Remove(_rightCondyleSphere); _rightCondyleSphere = null; }
+        AddAxisLine();
+        _leftCondyleSphere  = BuildSphere((float)_leftCondyle.X,  (float)_leftCondyle.Y,  (float)_leftCondyle.Z,  SphereRadius, 255, 180, 40);
+        _rightCondyleSphere = BuildSphere((float)_rightCondyle.X, (float)_rightCondyle.Y, (float)_rightCondyle.Z, SphereRadius, 40, 180, 255);
+        SceneGroup.Children.Add(_leftCondyleSphere);
+        SceneGroup.Children.Add(_rightCondyleSphere);
     }
 
     private void UpdateMandibleRotationAxis()

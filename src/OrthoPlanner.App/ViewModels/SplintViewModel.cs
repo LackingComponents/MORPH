@@ -118,6 +118,14 @@ public partial class MainViewModel
                 ? BakeToCopy(mandibleSeg.Vertices, mandibleSeg.SurgicalTransform)
                 : lower;
 
+            // Rami in CT (base) position — used as context ghost meshes in the autorotation window
+            var ramiSegs = Segments
+                .Where(s => s.IsVisible && s.Name?.StartsWith("Ramus") == true && s.Vertices != null)
+                .ToList();
+            float[][]? ramiMeshes = ramiSegs.Count > 0
+                ? ramiSegs.Select(s => s.Vertices!).ToArray()
+                : null;
+
             var lcC = LeftCondyleCenter!.Value;
             var rcC = RightCondyleCenter!.Value;
 
@@ -127,7 +135,8 @@ public partial class MainViewModel
                 upperMoved: upperMoved, lowerMoved: lowerMoved,
                 leftCondyle: lcC, rightCondyle: rcC,
                 isFinalOcclusion: false,
-                maxillaFirstDefault: true)
+                maxillaFirstDefault: true,
+                ramiMeshes: ramiMeshes)
             {
                 Owner = Application.Current.MainWindow
             };
@@ -226,7 +235,8 @@ public partial class MainViewModel
                 upperMoved: upperMoved, lowerMoved: lowerMoved,
                 leftCondyle: lcC, rightCondyle: rcC,
                 isFinalOcclusion: true,
-                maxillaFirstDefault: seq1.IsMaxillaFirst)
+                maxillaFirstDefault: seq1.IsMaxillaFirst,
+                ramiMeshes: ramiMeshes)
             {
                 Owner = Application.Current.MainWindow
             };
