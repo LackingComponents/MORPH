@@ -985,13 +985,9 @@ public static class MeshOps
 
     // -- Cap fill: polyplane surface clipped to bone interior -----------------
 
-    private static readonly string _capLogPath = System.IO.Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "cap_debug.log");
-    private static void CapLog(string msg)
-    {
-        try { System.IO.File.AppendAllText(_capLogPath, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}\n"); }
-        catch { }
-    }
+    // ponytail: CapLog desktop debug-file removed. Use Debug.WriteLine if cap filling needs tracing.
+    [System.Diagnostics.Conditional("DEBUG")]
+    private static void CapLog(string msg) => System.Diagnostics.Debug.WriteLine(msg);
 
     /// <summary>
     /// Caps the open cut boundary by using the cutting polyplane surface itself:

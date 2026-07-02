@@ -93,85 +93,10 @@ public class VolumeData
         ComputeHistogram();
     }
 
-    /// <summary>
-    /// Extract a 2D axial slice at the given Z index.
-    /// Returns pixel data as normalized 0-255 grayscale based on window/level.
-    /// </summary>
-    public byte[] GetAxialSlice(int z, double windowCenter, double windowWidth)
-    {
-        var slice = new byte[Width * Height];
-        double lower = windowCenter - windowWidth / 2.0;
-        double upper = windowCenter + windowWidth / 2.0;
-
-        for (int y = 0; y < Height; y++)
-        for (int x = 0; x < Width; x++)
-        {
-            short hu = GetVoxel(x, y, z);
-            double normalized = Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0);
-            slice[x + y * Width] = (byte)(normalized * 255);
-        }
-        return slice;
-    }
-
-    /// <summary>
-    /// Axial slice as BGRA32 with threshold overlay tint.
-    /// Voxels in [threshMin, threshMax] get a red overlay.
-    /// </summary>
-    public byte[] GetAxialSliceBgra(int z, double windowCenter, double windowWidth,
-        short threshMin, short threshMax)
-    {
-        int pixelCount = Width * Height;
-        var bgra = new byte[pixelCount * 4];
-        double lower = windowCenter - windowWidth / 2.0;
-        double upper = windowCenter + windowWidth / 2.0;
-
-        for (int y = 0; y < Height; y++)
-        for (int x = 0; x < Width; x++)
-        {
-            short hu = GetVoxel(x, y, z);
-            byte gray = (byte)(Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0) * 255);
-            int idx = (x + y * Width) * 4;
-            
-            if (hu >= threshMin && hu <= threshMax)
-            {
-                // Blend: 60% Light Blue (B=255, G=200, R=50)
-                bgra[idx + 0] = (byte)(gray * 0.4 + 255 * 0.6); // B
-                bgra[idx + 1] = (byte)(gray * 0.4 + 200 * 0.6); // G
-                bgra[idx + 2] = (byte)(gray * 0.4 + 50 * 0.6);  // R
-            }
-            else
-            {
-                bgra[idx + 0] = gray; // B
-                bgra[idx + 1] = gray; // G
-                bgra[idx + 2] = gray; // R
-            }
-            bgra[idx + 3] = 255; // A
-        }
-        return bgra;
-    }
-
-    /// <summary>
-    /// Extract a 2D coronal slice at the given Y index.
-    /// Z is reversed so superior (high Z) is at the top of the image.
-    /// </summary>
-    public byte[] GetCoronalSlice(int y, double windowCenter, double windowWidth)
-    {
-        var slice = new byte[Width * Depth];
-        double lower = windowCenter - windowWidth / 2.0;
-        double upper = windowCenter + windowWidth / 2.0;
-
-        for (int z = 0; z < Depth; z++)
-        {
-            int destRow = Depth - 1 - z;
-            for (int x = 0; x < Width; x++)
-            {
-                short hu = GetVoxel(x, y, z);
-                double normalized = Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0);
-                slice[x + destRow * Width] = (byte)(normalized * 255);
-            }
-        }
-        return slice;
-    }
+    // ponytail: GetAxialSlice, GetAxialSliceBgra, GetAxialSliceWithMaskBgra,
+    //           GetSagittalSlice, GetSagittalSliceBgra, GetSagittalSliceWithMaskBgra,
+    //           GetCoronalSlice (grayscale) — all deleted, zero callers.
+    //           DicomViewModel uses oblique slices; SeedSplitWindow uses GetCoronalSliceBgra/WithMaskBgra.
 
     /// <summary>
     /// Coronal slice as BGRA32 with threshold overlay tint.
@@ -194,116 +119,10 @@ public class VolumeData
                 int idx = (x + destRow * Width) * 4;
 
                 if (hu >= threshMin && hu <= threshMax)
-                {
-                    bgra[idx + 0] = (byte)(gray * 0.4 + 255 * 0.6);
-                    bgra[idx + 1] = (byte)(gray * 0.4 + 200 * 0.6);
-                    bgra[idx + 2] = (byte)(gray * 0.4 + 50 * 0.6);
-                }
+                    WriteOverlayBgra(bgra, idx, gray, 255, 200, 50);
                 else
-                {
-                    bgra[idx + 0] = gray;
-                    bgra[idx + 1] = gray;
-                    bgra[idx + 2] = gray;
-                }
-                bgra[idx + 3] = 255;
+                    WriteGrayBgra(bgra, idx, gray);
             }
-        }
-        return bgra;
-    }
-
-    /// <summary>
-    /// Extract a 2D sagittal slice at the given X index.
-    /// Z is reversed so superior (high Z) is at the top of the image.
-    /// </summary>
-    public byte[] GetSagittalSlice(int x, double windowCenter, double windowWidth)
-    {
-        var slice = new byte[Height * Depth];
-        double lower = windowCenter - windowWidth / 2.0;
-        double upper = windowCenter + windowWidth / 2.0;
-
-        for (int z = 0; z < Depth; z++)
-        {
-            int destRow = Depth - 1 - z;
-            for (int y = 0; y < Height; y++)
-            {
-                short hu = GetVoxel(x, y, z);
-                double normalized = Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0);
-                slice[y + destRow * Height] = (byte)(normalized * 255);
-            }
-        }
-        return slice;
-    }
-
-    /// <summary>
-    /// Sagittal slice as BGRA32 with threshold overlay tint.
-    /// </summary>
-    public byte[] GetSagittalSliceBgra(int x, double windowCenter, double windowWidth,
-        short threshMin, short threshMax)
-    {
-        int pixelCount = Height * Depth;
-        var bgra = new byte[pixelCount * 4];
-        double lower = windowCenter - windowWidth / 2.0;
-        double upper = windowCenter + windowWidth / 2.0;
-
-        for (int z = 0; z < Depth; z++)
-        {
-            int destRow = Depth - 1 - z;
-            for (int y = 0; y < Height; y++)
-            {
-                short hu = GetVoxel(x, y, z);
-                byte gray = (byte)(Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0) * 255);
-                int idx = (y + destRow * Height) * 4;
-
-                if (hu >= threshMin && hu <= threshMax)
-                {
-                    bgra[idx + 0] = (byte)(gray * 0.4 + 255 * 0.6);
-                    bgra[idx + 1] = (byte)(gray * 0.4 + 200 * 0.6);
-                    bgra[idx + 2] = (byte)(gray * 0.4 + 50 * 0.6);
-                }
-                else
-                {
-                    bgra[idx + 0] = gray;
-                    bgra[idx + 1] = gray;
-                    bgra[idx + 2] = gray;
-                }
-                bgra[idx + 3] = 255;
-            }
-        }
-        return bgra;
-    }
-
-    /// <summary>
-    /// Axial slice as BGRA32, blending live SegmentationVolume label colors.
-    /// </summary>
-    public byte[] GetAxialSliceWithMaskBgra(int z, double windowCenter, double windowWidth, SegmentationVolume segVol)
-    {
-        int pixelCount = Width * Height;
-        var bgra = new byte[pixelCount * 4];
-        double lower = windowCenter - windowWidth / 2.0;
-        double upper = windowCenter + windowWidth / 2.0;
-
-        for (int y = 0; y < Height; y++)
-        for (int x = 0; x < Width; x++)
-        {
-            int flatIdx = x + y * Width + z * Width * Height;
-            short hu = Voxels[flatIdx];
-            byte gray = (byte)(Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0) * 255);
-            int idx = (x + y * Width) * 4;
-
-            byte label = segVol.Labels[flatIdx];
-            if (label > 0 && segVol.Segments.TryGetValue(label, out var info))
-            {
-                bgra[idx + 0] = (byte)(gray * 0.4 + info.ColorB * 0.6);
-                bgra[idx + 1] = (byte)(gray * 0.4 + info.ColorG * 0.6);
-                bgra[idx + 2] = (byte)(gray * 0.4 + info.ColorR * 0.6);
-            }
-            else
-            {
-                bgra[idx + 0] = gray;
-                bgra[idx + 1] = gray;
-                bgra[idx + 2] = gray;
-            }
-            bgra[idx + 3] = 255;
         }
         return bgra;
     }
@@ -330,60 +149,29 @@ public class VolumeData
 
                 byte label = segVol.Labels[flatIdx];
                 if (label > 0 && segVol.Segments.TryGetValue(label, out var info))
-                {
-                    bgra[idx + 0] = (byte)(gray * 0.4 + info.ColorB * 0.6);
-                    bgra[idx + 1] = (byte)(gray * 0.4 + info.ColorG * 0.6);
-                    bgra[idx + 2] = (byte)(gray * 0.4 + info.ColorR * 0.6);
-                }
+                    WriteOverlayBgra(bgra, idx, gray, info.ColorB, info.ColorG, info.ColorR);
                 else
-                {
-                    bgra[idx + 0] = gray;
-                    bgra[idx + 1] = gray;
-                    bgra[idx + 2] = gray;
-                }
-                bgra[idx + 3] = 255;
+                    WriteGrayBgra(bgra, idx, gray);
             }
         }
         return bgra;
     }
 
-    /// <summary>
-    /// Sagittal slice as BGRA32, blending live SegmentationVolume label colors.
-    /// </summary>
-    public byte[] GetSagittalSliceWithMaskBgra(int x, double windowCenter, double windowWidth, SegmentationVolume segVol)
+    // ── BGRA pixel helpers (ponytail: factored from 9× copy-pasted blocks) ──
+
+    /// <summary>Write a gray BGRA pixel (R=G=B=gray, A=255).</summary>
+    private static void WriteGrayBgra(byte[] bgra, int idx, byte gray)
     {
-        int pixelCount = Height * Depth;
-        var bgra = new byte[pixelCount * 4];
-        double lower = windowCenter - windowWidth / 2.0;
-        double upper = windowCenter + windowWidth / 2.0;
+        bgra[idx] = gray; bgra[idx + 1] = gray; bgra[idx + 2] = gray; bgra[idx + 3] = 255;
+    }
 
-        for (int z = 0; z < Depth; z++)
-        {
-            int destRow = Depth - 1 - z;
-            for (int y = 0; y < Height; y++)
-            {
-                int flatIdx = x + y * Width + z * Width * Height;
-                short hu = Voxels[flatIdx];
-                byte gray = (byte)(Math.Clamp((hu - lower) / (upper - lower), 0.0, 1.0) * 255);
-                int idx = (y + destRow * Height) * 4;
-
-                byte label = segVol.Labels[flatIdx];
-                if (label > 0 && segVol.Segments.TryGetValue(label, out var info))
-                {
-                    bgra[idx + 0] = (byte)(gray * 0.4 + info.ColorB * 0.6);
-                    bgra[idx + 1] = (byte)(gray * 0.4 + info.ColorG * 0.6);
-                    bgra[idx + 2] = (byte)(gray * 0.4 + info.ColorR * 0.6);
-                }
-                else
-                {
-                    bgra[idx + 0] = gray;
-                    bgra[idx + 1] = gray;
-                    bgra[idx + 2] = gray;
-                }
-                bgra[idx + 3] = 255;
-            }
-        }
-        return bgra;
+    /// <summary>Write a 60/40 overlay-tinted BGRA pixel (40% gray + 60% color, A=255).</summary>
+    private static void WriteOverlayBgra(byte[] bgra, int idx, byte gray, byte cb, byte cg, byte cr)
+    {
+        bgra[idx]     = (byte)(gray * 0.4 + cb * 0.6);
+        bgra[idx + 1] = (byte)(gray * 0.4 + cg * 0.6);
+        bgra[idx + 2] = (byte)(gray * 0.4 + cr * 0.6);
+        bgra[idx + 3] = 255;
     }
 
     // ━━━ Oblique Slice Sampling (Visual-Only NHP) ━━━
@@ -456,18 +244,9 @@ public class VolumeData
                 int idx = (col + row * outWidth) * 4;
 
                 if (hu >= threshMin && hu <= threshMax)
-                {
-                    bgra[idx + 0] = (byte)(gray * 0.4 + 255 * 0.6);
-                    bgra[idx + 1] = (byte)(gray * 0.4 + 200 * 0.6);
-                    bgra[idx + 2] = (byte)(gray * 0.4 + 50 * 0.6);
-                }
+                    WriteOverlayBgra(bgra, idx, gray, 255, 200, 50);
                 else
-                {
-                    bgra[idx + 0] = gray;
-                    bgra[idx + 1] = gray;
-                    bgra[idx + 2] = gray;
-                }
-                bgra[idx + 3] = 255;
+                    WriteGrayBgra(bgra, idx, gray);
             }
         });
 
@@ -514,18 +293,9 @@ public class VolumeData
                     label = segVol.Labels[lx + ly * Width + lz * Width * Height];
 
                 if (label > 0 && segVol.Segments.TryGetValue(label, out var info))
-                {
-                    bgra[idx + 0] = (byte)(gray * 0.4 + info.ColorB * 0.6);
-                    bgra[idx + 1] = (byte)(gray * 0.4 + info.ColorG * 0.6);
-                    bgra[idx + 2] = (byte)(gray * 0.4 + info.ColorR * 0.6);
-                }
+                    WriteOverlayBgra(bgra, idx, gray, info.ColorB, info.ColorG, info.ColorR);
                 else
-                {
-                    bgra[idx + 0] = gray;
-                    bgra[idx + 1] = gray;
-                    bgra[idx + 2] = gray;
-                }
-                bgra[idx + 3] = 255;
+                    WriteGrayBgra(bgra, idx, gray);
             }
         });
 
@@ -615,118 +385,5 @@ public class VolumeData
         return (Width * Spacing[0], Height * Spacing[1], Depth * Spacing[2]);
     }
 
-    /// <summary>
-    /// Generates a 2D Curved Panoramic MPR using Maximum Intensity Projection (MIP) along a spline.
-    /// The spline defines the dental arch in the XY plane.
-    /// At each point, we look +/- 10mm perpendicular to the curve and capture the maximum HU.
-    /// We do this for a vertical column (Z) of 50mm centered around zCenterMm.
-    /// If an STL mesh point falls near this exact voxel, we tint the pixel GOLD.
-    /// </summary>
-    public byte[] GetPanoramicMIPBgra(
-        List<(double X, double Y)> archCurveMm,
-        double zCenterMm,
-        double windowCenter, double windowWidth,
-        OrthoPlanner.Core.Geometry.KdTree? alignedStlTree = null)
-    {
-        // Settings 
-        double thicknessMm = 20.0; // 10mm inside, 10mm outside
-        double heightMm = 50.0;    // 25mm up, 25mm down
-        double sampleRateMm = 0.5; // Compute a pixel every 0.5mm
-        double meshThresholdMm = 0.5; // Threshold for highlighting STL mesh
-
-        int imgWidth = (int)(archCurveMm.Count * 0.5); // assuming points are dense
-        int imgHeight = (int)(heightMm / sampleRateMm);
-        var bgra = new byte[imgWidth * imgHeight * 4];
-
-        // Ensure we actually have width to write
-        if (imgWidth == 0 || imgHeight == 0) return bgra;
-
-        double zStartMm = zCenterMm - (heightMm / 2.0);
-
-        double lower = windowCenter - windowWidth / 2.0;
-        double upper = windowCenter + windowWidth / 2.0;
-
-        // Loop horizontally (along the curve)
-        for (int i = 0; i < imgWidth; i++)
-        {
-            // Find our index in the smooth curve
-            int cIdx = (int)(i * (archCurveMm.Count / (double)imgWidth));
-            cIdx = Math.Min(cIdx, archCurveMm.Count - 1);
-            
-            var p = archCurveMm[cIdx];
-
-            // Estimate normal by looking slightly ahead and behind
-            int prevIdx = Math.Max(0, cIdx - 5);
-            int nextIdx = Math.Min(archCurveMm.Count - 1, cIdx + 5);
-            double dx = archCurveMm[nextIdx].X - archCurveMm[prevIdx].X;
-            double dy = archCurveMm[nextIdx].Y - archCurveMm[prevIdx].Y;
-            double len = Math.Sqrt(dx * dx + dy * dy);
-            if (len < 0.001) { dx = 1; dy = 0; len = 1; }
-            
-            // Perpendicular
-            double nx = -dy / len;
-            double ny = dx / len;
-
-            // Loop vertically (Z axis)
-            for (int h = 0; h < imgHeight; h++)
-            {
-                double zMm = zStartMm + (h * sampleRateMm);
-                int zVoxel = (int)(zMm / Spacing[2]);
-                
-                short maxHu = short.MinValue;
-                bool isMeshProfile = false;
-
-                // Loop through the thickness of the slice (MIP Raycast)
-                for (double t = -thicknessMm / 2.0; t <= thicknessMm / 2.0; t += 0.5)
-                {
-                    double xMm = p.X + nx * t;
-                    double yMm = p.Y + ny * t;
-
-                    int xVoxel = (int)(xMm / Spacing[0]);
-                    int yVoxel = (int)(yMm / Spacing[1]);
-
-                    // Get HU
-                    short hu = GetVoxel(xVoxel, yVoxel, zVoxel);
-                    if (hu > maxHu) maxHu = hu;
-
-                    // If STL tree is provided, check if we hit the mesh surface right here!
-                    if (!isMeshProfile && alignedStlTree != null)
-                    {
-                        var (_, distSq) = alignedStlTree.FindNearest((float)xMm, (float)yMm, (float)zMm);
-                        if (distSq < meshThresholdMm * meshThresholdMm)
-                        {
-                            isMeshProfile = true; // BAM! The mesh passes right through this exact MPR slice.
-                        }
-                    }
-                }
-
-                // Map to grayscale based on Window/Level
-                if (maxHu < -1024) maxHu = -1024; // safety cap out of bounds
-                double normalized = Math.Clamp((maxHu - lower) / (upper - lower), 0.0, 1.0);
-                byte gray = (byte)(normalized * 255);
-
-                // Write pixel (Z is reversed so superior is top)
-                int destY = imgHeight - 1 - h;
-                int idx = (i + destY * imgWidth) * 4;
-
-                if (isMeshProfile)
-                {
-                    // Draw gold profile outline for STL mesh
-                    bgra[idx + 0] = 50;  // B
-                    bgra[idx + 1] = 200; // G
-                    bgra[idx + 2] = 255; // R
-                    bgra[idx + 3] = 255; // A
-                }
-                else
-                {
-                    bgra[idx + 0] = gray;
-                    bgra[idx + 1] = gray;
-                    bgra[idx + 2] = gray;
-                    bgra[idx + 3] = 255;
-                }
-            }
-        }
-
-        return bgra;
-    }
+    // ponytail: GetPanoramicMIPBgra — deleted, zero callers
 }
