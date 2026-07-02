@@ -796,17 +796,7 @@
                                     </StackPanel>
                                 </Expander>
 
-                                <!-- 5. SEED SPLIT WIZARD -->
-                                <Expander Header="Seed Split Wizard" IsExpanded="False" Margin="0,2" Expanded="SingleExpanderOnly_Expanded"
-                                          Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold">
-                                    <StackPanel Margin="4,6,4,4">
-                                        <TextBlock Text="Open a dedicated wizard with coronal MPR, Cranium/Mandible/Exclude seed classes, sensitivity, and bone-mask threshold controls."
-                                                   TextWrapping="Wrap" FontSize="10" FontWeight="Normal"
-                                                   Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6" />
-                                        <Button Content="Open Seed Split Wizard" Command="{Binding OpenSeedSplitWizardCommand}"
-                                                IsEnabled="{Binding IsVolumeLoaded}" />
-                                    </StackPanel>
-                                </Expander>
+
 
                                 </StackPanel>
                             </Expander>

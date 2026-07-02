@@ -66,6 +66,9 @@
 
             <StackPanel Grid.Column="2" Orientation="Horizontal">
 
+                <Button x:Name="SeedSplitBtn" Content="Seed Split..." Click="SeedSplit_Click" Width="110" Height="28"
+                        Background="#203050" Foreground="#80CCFF" BorderBrush="#3060A0" Cursor="Hand" Margin="0,0,8,0"
+                        ToolTip="Launch the seed-based split wizard as an alternative to the geometric approach."/>
                 <Button x:Name="SplitBtn" Content="Compute Separation" Click="Split_Click" Width="170" Height="28"
                         Background="#3060A0" Foreground="White" BorderBrush="#4080C0" Cursor="Hand" Margin="0,0,8,0"/>
                 <Button x:Name="ConfirmBtn" Content="Confirm Condyles" Click="Confirm_Click" Width="140" Height="28"
