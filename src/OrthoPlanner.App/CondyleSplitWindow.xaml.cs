@@ -1225,7 +1225,6 @@ public partial class CondyleSplitWindow : Window
             StepInstructions.Text = "Warm = Cranium, Cool = Mandible (from seed split). Accept or Cancel.";
             StatusText.Text = $"Cranium: {(_craniumVerts?.Count ?? 0) / 3} tris | Mandible: {(_mandibleVerts?.Count ?? 0) / 3} tris";
             SplitBtn.Visibility = Visibility.Collapsed;
-            SeedSplitBtn.Visibility = Visibility.Collapsed;
             AcceptBtn.Visibility = Visibility.Visible;
         }
     }
