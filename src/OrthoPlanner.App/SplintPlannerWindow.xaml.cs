@@ -73,7 +73,7 @@ public partial class SplintPlannerWindow : Window
         List<(float x, float y, float z)> LowerPoints,
         double UpperEnvelope, double LowerEnvelope,
         double LabioLingualWidth, double LingualBuccalBias,
-        double VestibularTrim, bool VestibularOneSided,
+        double VestibularTrimBias, bool VestibularOneSided,
         double BridgeThickness, double CloseErode,
         double BridgeSdfBase);
 
@@ -113,7 +113,7 @@ public partial class SplintPlannerWindow : Window
             LowerPenetrationSlider.Value  = preloadedArch.LowerEnvelope;
             ThicknessSlider.Value         = preloadedArch.LabioLingualWidth;
             LingualBuccalBiasSlider.Value = preloadedArch.LingualBuccalBias;
-            VestibularTrimSlider.Value    = preloadedArch.VestibularTrim;
+            VestibularTrimSlider.Value    = preloadedArch.VestibularTrimBias;
             VestibularOneSidedCheck.IsChecked = preloadedArch.VestibularOneSided;
             BridgeThicknessSlider.Value   = preloadedArch.BridgeThickness;
             CloseErodeSlider.Value        = preloadedArch.CloseErode;
@@ -635,7 +635,7 @@ public partial class SplintPlannerWindow : Window
             UpperPenetrationMm  = (float)UpperPenetrationSlider.Value,
             LowerPenetrationMm  = (float)LowerPenetrationSlider.Value,
             LingualBuccalBiasMm = (float)LingualBuccalBiasSlider.Value,
-            VestibularTrimMm    = (float)VestibularTrimSlider.Value,
+            VestibularTrimBiasMm = (float)VestibularTrimSlider.Value,
             VestibularOneSided  = VestibularOneSidedCheck.IsChecked == true,
             BridgeThicknessMm   = (float)BridgeThicknessSlider.Value,
             CloseErodeFraction  = (float)CloseErodeSlider.Value / 100f,

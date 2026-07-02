@@ -166,10 +166,10 @@
                     <TextBlock x:Name="LingualBuccalBiasLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
 
-                <TextBlock Text="Vestibular trim:" FontSize="11" Foreground="#AABBCC" ToolTip="Controls how far the vestibular (buccal) wall extends beyond the arch outline.&#x0a;0 (default): the wall preserves the full natural tooth anatomy including molar walls.&#x0a;−3: trim 3 mm — actively clips bracket wrapping that protrudes beyond the tooth outline.&#x0a;+2: allow 2 mm wider vestibular walls — use for wider buccal flanges or screw fixation."/>
+                <TextBlock Text="Vestibular trim bias:" FontSize="11" Foreground="#AABBCC" ToolTip="Bias relative to the horseshoe outer edge (the blue ribbon in the viewport).&#x0a;0 (default): trim exactly at the ribbon — splint wall matches the horseshoe outline.&#x0a;−2: trim 2 mm inside the ribbon.&#x0a;+3: 3 mm extra vestibular wall beyond the ribbon (for buccal flanges or screw fixation)."/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,4">
-                    <Slider x:Name="VestibularTrimSlider" Minimum="-5" Maximum="10" Value="-3.2" Width="170" SmallChange="0.25" ValueChanged="VestibularTrimSlider_ValueChanged"/>
-                    <TextBlock x:Name="VestibularTrimLabel" Text="-3.2 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                    <Slider x:Name="VestibularTrimSlider" Minimum="-5" Maximum="10" Value="0" Width="170" SmallChange="0.25" ValueChanged="VestibularTrimSlider_ValueChanged"/>
+                    <TextBlock x:Name="VestibularTrimLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
                 <CheckBox x:Name="VestibularOneSidedCheck" Content="One-sided (buccal only)" IsChecked="False"
                           Foreground="#AABBCC" Margin="0,0,0,12"

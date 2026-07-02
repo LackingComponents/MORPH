@@ -368,7 +368,7 @@ public static class SplintEngine
         float lowerPenetrationMm  = config.LowerPenetrationMm;
         float lingualBuccalBiasMm = config.LingualBuccalBiasMm;
         float bridgeThicknessMm   = config.BridgeThicknessMm;
-        float vestibularTrimMm    = config.VestibularTrimMm;
+        float vestibularTrimBiasMm = config.VestibularTrimBiasMm;
         int sampleCount           = Math.Max(2, config.SampleCount);
         var generationWarnings    = new List<string>();
 
@@ -499,7 +499,7 @@ public static class SplintEngine
             float engagementDepthMm = config.EngagementDepthMm;
             bool blockoutUndercuts  = config.BlockoutUndercuts;
 
-            int blurR = 3, blurPasses = 5;  // SDF blank smoothing (pockets carved AFTER blur stay sharp)
+            int blurR = 3, blurPasses = 3;  // SDF blank smoothing (pockets carved AFTER blur stay sharp)
 
             SplintTrace($"carve params: engagement={engagementDepthMm:F2} blockout={blockoutUndercuts}");
             System.Diagnostics.Debug.WriteLine($"[Splint] upperPen={upperPenetrationMm:F1} lowerPen={lowerPenetrationMm:F1} bias={lingualBuccalBiasMm:F1} engagement={engagementDepthMm:F1} blockout={blockoutUndercuts}");
@@ -652,10 +652,11 @@ public static class SplintEngine
                     if (!IsAnteriorToPosteriorLimit(px, py))
                     { bakedGrid[vIdx] = 1.0f; continue; }
 
-                    // Vestibular XY clip — applied per-arch independently so that
-                    // differing arch widths (maxilla wider than mandible) don't cause
-                    // one arch's footprint check to clip the other arch's walls.
-                    float maxVest = half + MathF.Abs(lingualBuccalBiasMm) + (float)Dil1 + VestBaseMargin + vestibularTrimMm;
+                    // Vestibular XY clip — anchored to the horseshoe outer edge.
+                    // maxVest = half + |bias|: at trimBias=0 the clip sits exactly at
+                    // the blue ribbon line. Positive bias allows extra vestibular wall;
+                    // negative trims inward from the ribbon.
+                    float maxVest = half + MathF.Abs(lingualBuccalBiasMm) + vestibularTrimBiasMm;
                     var (uZ2, uax, uay, unx, uny) = NearestUpperInfo(px, py);
                     float uPerpDist = MathF.Abs(((float)px - uax) * unx + ((float)py - uay) * uny);
                     var (lZ2, lax, lay, lnx, lny) = NearestLowerInfo(px, py);
@@ -669,7 +670,27 @@ public static class SplintEngine
                     var pt = new Vector3d(px, py, pz);
                     float upVal1 = uPerpDist <= maxVest ? (float)upImpl1.Value(ref pt) : 1.0f;
                     float loVal1 = lPerpDist <= maxVest ? (float)loImpl1.Value(ref pt) : 1.0f;
-                    bakedGrid[vIdx] = MathF.Min(upVal1, loVal1);
+                    float blankSdf = MathF.Min(upVal1, loVal1);
+
+                    // ── Guided bridge ─────────────────────────────────────────────────
+                    // If this voxel is air but lies within the labio-lingual corridor of
+                    // either arch (the same column the horseshoe body occupies), stamp it
+                    // as solid material. This guarantees Z-connectivity between the upper
+                    // and lower arch halves by construction, so PHASE 2 only needs a tiny
+                    // smoothing radius rather than a large gap-bridging radius.
+                    if (blankSdf > 0f)
+                    {
+                        float bridgeSdfBiasInner = -(config.BridgeSdfBaseMm + bridgeThicknessMm);
+                        // Signed perpendicular distance along each arch's outward normal.
+                        // Corridor check: |signed − lingualBuccalBias| <= half  ↔  inside horseshoe.
+                        float uSigned = ((float)px - uax) * unx + ((float)py - uay) * uny;
+                        float lSigned = ((float)px - lax) * lnx + ((float)py - lay) * lny;
+                        bool inUpperCorridor = MathF.Abs(uSigned - lingualBuccalBiasMm) <= half;
+                        bool inLowerCorridor = MathF.Abs(lSigned - lingualBuccalBiasMm) <= half;
+                        if (inUpperCorridor || inLowerCorridor)
+                            blankSdf = bridgeSdfBiasInner;
+                    }
+                    bakedGrid[vIdx] = blankSdf;
                 }
             });
 
@@ -739,8 +760,10 @@ public static class SplintEngine
                 if (gap > maxGap) maxGap = gap;
             }
             const float coarseVS = 0.5f;
-            int closeR = (int)MathF.Ceiling(maxGap * 0.55f / coarseVS);
-            closeR = Math.Clamp(closeR, 2, 30);
+            // Guided bridge (PHASE 1) guarantees Z-connectivity, so closing only
+            // needs to smooth the junction between tooth-SDF walls and the filled
+            // corridor. A fixed small radius is sufficient.
+            int closeR = 2;
             // Erode less aggressively than dilate: full dilation bridges the gap,
             // but symmetric erosion punches through thin bridge areas. Asymmetric
             // erosion (45% of closeR) preserves bridge connectivity.
@@ -823,7 +846,8 @@ public static class SplintEngine
                 // true = upper is more vestibular
                 bool clipUpper = uOut >= lOut;
 
-                float oneSidedMaxVest = half + MathF.Abs(lingualBuccalBiasMm) + (float)Dil1 + VestBaseMargin + vestibularTrimMm;
+                // Clip anchored to horseshoe outer edge — same formula as PHASE 1.
+                float oneSidedMaxVest = half + MathF.Abs(lingualBuccalBiasMm) + vestibularTrimBiasMm;
                 System.Diagnostics.Debug.WriteLine($"[Splint] PHASE2a one-sided vestibular clip: arch={(clipUpper?"upper":"lower")} maxVest={oneSidedMaxVest:F1}");
                 SplintTrace($"PHASE2a one-sided vestibular clip arch={(clipUpper?"upper":"lower")}");
 
