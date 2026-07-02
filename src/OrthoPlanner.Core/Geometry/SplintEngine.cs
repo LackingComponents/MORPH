@@ -635,17 +635,62 @@ public static class SplintEngine
             var bakedGrid = new float[gnx*gny*gnz];
             SplintTrace($"PHASE1 grid={gnx}x{gny}x{gnz} ({gnx*gny*gnz/1_000_000}M voxels)");
             System.Diagnostics.Debug.WriteLine($"[Splint] PHASE1 Baking blank {gnx}x{gny}x{gnz}={gnx*gny*gnz/1_000_000}M voxels...");
-            System.Threading.Tasks.Parallel.For(0, gnz, iz => {
-                for(int iy=0;iy<gny;iy++) for(int ix=0;ix<gnx;ix++) {
-                    double px = gox+ix*VS_MC, py = goy+iy*VS_MC, pz = goz+iz*VS_MC;
-                    int vIdx = iz*gnx*gny+iy*gnx+ix;
+
+            // ── Pre-compute nearest-arch lookup tables (O(1) per voxel) ──────────────
+            // For every XY grid cell, store the index of the nearest upper / lower
+            // arch sample. The nearest sample only depends on XY (not Z), so it can be
+            // resolved once here and reused across all Z slices in the parallel loop.
+            // Build cost: gnx * gny * n ≈ 1.6 M comparisons (negligible).
+            // Savings:    eliminates 4 × O(n) scans per voxel in PHASE 1 (≈ 640 M → 0).
+            var upperIdxGrid = new int[gnx * gny];
+            var lowerIdxGrid = new int[gnx * gny];
+            System.Threading.Tasks.Parallel.For(0, gny, iy2 =>
+            {
+                for (int ix2 = 0; ix2 < gnx; ix2++)
+                {
+                    float px2 = gox + ix2 * (float)VS_MC;
+                    float py2 = goy + iy2 * (float)VS_MC;
+                    float bestUD = float.MaxValue, bestLD = float.MaxValue;
+                    int   bestU  = 0,              bestL  = 0;
+                    for (int k = 0; k < n; k++)
+                    {
+                        float dux = px2 - upper[k].x, duy = py2 - upper[k].y;
+                        float dlx = px2 - lower[k].x, dly = py2 - lower[k].y;
+                        float du = dux*dux + duy*duy;
+                        float dl = dlx*dlx + dly*dly;
+                        if (du < bestUD) { bestUD = du; bestU = k; }
+                        if (dl < bestLD) { bestLD = dl; bestL = k; }
+                    }
+                    int cell = iy2 * gnx + ix2;
+                    upperIdxGrid[cell] = bestU;
+                    lowerIdxGrid[cell] = bestL;
+                }
+            });
+            SplintTrace($"PHASE1 lookup tables built ({gnx}x{gny} cells, n={n})");
+
+            System.Threading.Tasks.Parallel.For(0, gnz, iz =>
+            {
+                for (int iy=0; iy<gny; iy++) for (int ix=0; ix<gnx; ix++) {
+                    float pz = goz + iz * (float)VS_MC;
+                    int vIdx = iz*gnx*gny + iy*gnx + ix;
+
+                    // O(1) lookup: nearest arch sample for this XY cell
+                    int cell = iy * gnx + ix;
+                    int ui   = upperIdxGrid[cell];
+                    int li   = lowerIdxGrid[cell];
+                    float uax = upper[ui].x, uay = upper[ui].y;
+                    float unx = norU[ui].x,  uny = norU[ui].y;
+                    float lax = lower[li].x, lay = lower[li].y;
+                    float lnx = norL[li].x,  lny = norL[li].y;
+                    float px  = gox + ix * (float)VS_MC;
+                    float py  = goy + iy * (float)VS_MC;
 
                     // Z-clip at the arch surface ± user penetration offset.
                     // +penetration = teeth go deeper into the splint → splint body
                     // extends FURTHER from the gap center (up for upper, down for lower).
-                    float upperCutZ = NearestUpperZ(px, py) + upperPenetrationMm;
-                    float lowerCutZ = NearestLowerZ(px, py) - lowerPenetrationMm;
-                    if ((float)pz > upperCutZ || (float)pz < lowerCutZ)
+                    float upperCutZ = upper[ui].z + upperPenetrationMm;
+                    float lowerCutZ = lower[li].z - lowerPenetrationMm;
+                    if (pz > upperCutZ || pz < lowerCutZ)
                     { bakedGrid[vIdx] = 1.0f; continue; }
 
                     // Posterior limit
@@ -656,11 +701,9 @@ public static class SplintEngine
                     // maxVest = half + |bias|: at trimBias=0 the clip sits exactly at
                     // the blue ribbon line. Positive bias allows extra vestibular wall;
                     // negative trims inward from the ribbon.
-                    float maxVest = half + MathF.Abs(lingualBuccalBiasMm) + vestibularTrimBiasMm;
-                    var (uZ2, uax, uay, unx, uny) = NearestUpperInfo(px, py);
-                    float uPerpDist = MathF.Abs(((float)px - uax) * unx + ((float)py - uay) * uny);
-                    var (lZ2, lax, lay, lnx, lny) = NearestLowerInfo(px, py);
-                    float lPerpDist = MathF.Abs(((float)px - lax) * lnx + ((float)py - lay) * lny);
+                    float maxVest    = half + MathF.Abs(lingualBuccalBiasMm) + vestibularTrimBiasMm;
+                    float uPerpDist  = MathF.Abs((px - uax) * unx + (py - uay) * uny);
+                    float lPerpDist  = MathF.Abs((px - lax) * lnx + (py - lay) * lny);
                     if (uPerpDist > maxVest && lPerpDist > maxVest)
                     { bakedGrid[vIdx] = 1.0f; continue; }
 
@@ -889,15 +932,15 @@ public static class SplintEngine
                         float px = gox + ix * (float)VS_MC;
                         float py = goy + iy * (float)VS_MC;
 
-                        // Signed perpendicular distance to the more-vestibular arch
-                        // positive = buccal/outward, negative = lingual/inward
+                        // O(1) lookup: use pre-computed table from PHASE 1
+                        int cell2 = iy * gnx + ix;
                         float sd;
                         if (clipUpper) {
-                            var (z, ax, ay, nx, ny) = NearestUpperInfo(px, py);
-                            sd = (px - ax) * nx + (py - ay) * ny;
+                            int ui2 = upperIdxGrid[cell2];
+                            sd = (px - upper[ui2].x) * norU[ui2].x + (py - upper[ui2].y) * norU[ui2].y;
                         } else {
-                            var (z, ax, ay, nx, ny) = NearestLowerInfo(px, py);
-                            sd = (px - ax) * nx + (py - ay) * ny;
+                            int li2 = lowerIdxGrid[cell2];
+                            sd = (px - lower[li2].x) * norL[li2].x + (py - lower[li2].y) * norL[li2].y;
                         }
 
                         // Only clip on the buccal side; lingual side is untouched
