@@ -92,8 +92,8 @@ public partial class SplintSequenceWindow : Window
             SequenceSection.Visibility      = Visibility.Collapsed;
             OriginalOcclusionBtn.Visibility = Visibility.Collapsed;
             HeaderTitle.Text    = "Step 3: Final occlusion — autorotation";
-            HeaderSubtitle.Text = "Both jaws at planned surgical position. Set mandibular opening for the final wafer, then click Generate Final Splint.";
-            ContinueBtn.Content = "✔ Generate Final Splint";
+            HeaderSubtitle.Text = "Both jaws at planned surgical position. Set mandibular opening for the final wafer, then click Create Splints.";
+            ContinueBtn.Content = "✔ Create Splints";
         }
         else
         {
@@ -487,9 +487,10 @@ public partial class SplintSequenceWindow : Window
     private void AdjustAxisToggle_Checked(object sender, RoutedEventArgs e)
     {
         _adjustAxisMode = true;
-        AxisHintLabel.Text = "Drag the orange (L) or blue (R) condyle spheres to reposition the axis.";
-        if (_leftCondyleSphere  != null) _leftCondyleSphere.Material  = MeshHelper.CreatePhongMaterial(255, 200, 60);  // orange for L adjust
-        if (_rightCondyleSphere != null) _rightCondyleSphere.Material = MeshHelper.CreatePhongMaterial(60, 200, 255);  // blue for R adjust
+        AxisHintLabel.Text = "Drag a condyle sphere to reposition the rotation axis.";
+        // Condyle spheres stay azure — the axis line turns neon red to signal editing
+        if (_axisLineVisual != null)
+            _axisLineVisual.Color = System.Windows.Media.Color.FromRgb(255, 30, 30); // neon red
     }
 
     private void AdjustAxisToggle_Unchecked(object sender, RoutedEventArgs e)
@@ -497,8 +498,10 @@ public partial class SplintSequenceWindow : Window
         _adjustAxisMode = false;
         _dragging = DragTarget.None;
         AxisHintLabel.Text = "";
-        if (_leftCondyleSphere  != null) _leftCondyleSphere.Material  = MeshHelper.CreatePhongMaterial(0, 245, 255);  // azure
-        if (_rightCondyleSphere != null) _rightCondyleSphere.Material = MeshHelper.CreatePhongMaterial(0, 245, 255);  // azure
+        // Revert axis line to azure
+        if (_axisLineVisual != null)
+            _axisLineVisual.Color = System.Windows.Media.Color.FromRgb(0, 245, 255);
+        // Condyle spheres were never changed — no need to restore
     }
 
     private void Viewport_MouseDown(object sender, MouseButtonEventArgs e)

@@ -548,9 +548,14 @@ public partial class SeedSplitWindow : Window, INotifyPropertyChanged
             ? _volume.GetCoronalSliceWithMaskBgra(CoronalIndex, _windowCenter, _windowWidth, _previewSeg)
             : _volume.GetCoronalSliceBgra(CoronalIndex, _windowCenter, _windowWidth, (short)MaskMinHu, (short)MaskMaxHu);
 
+        // Encode voxel spacing in the DPI so Stretch=Uniform produces a physically correct
+        // aspect ratio. Coronal plane: H=X (Spacing[0]), V=Z (Spacing[2]).
+        double minS   = Math.Min(_volume.Spacing[0], _volume.Spacing[2]);
+        double dpiCol = 96.0 * minS / _volume.Spacing[0];
+        double dpiRow = 96.0 * minS / _volume.Spacing[2];
         CoronalImage = BitmapSource.Create(
             _volume.Width, _volume.Depth,
-            96.0, 96.0,  // uniform DPI — let Stretch=Uniform handle the physical aspect from pixel dims
+            dpiCol, dpiRow,
             PixelFormats.Bgra32, null, data, _volume.Width * 4);
 
         RenderSeedMarkers();
