@@ -896,7 +896,7 @@
                                 <TextBlock Text="Design surgical occlusal splints from arch curves fitted to the dental models."
                                            TextWrapping="Wrap" FontSize="10" FontWeight="Normal"
                                            Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8"/>
-                                <Button Content="⚙  Final Occlusion Splint"
+                                <Button Content="⚙  Create Splints"
                                         Command="{Binding OpenSplintPlannerCommand}"
                                         Margin="0,0,0,4"/>
                             </StackPanel>
