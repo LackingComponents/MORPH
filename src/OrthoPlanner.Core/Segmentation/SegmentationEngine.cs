@@ -847,8 +847,8 @@ public static class SegmentationEngine
         {
             // 1. Convert mask to probability field
             float[] field = new float[w * h * d];
-            for (int i = 0; i < field.Length; i++)
-                field[i] = segVol.Labels[i] == label ? 100f : 0f;
+            System.Threading.Tasks.Parallel.For(0, field.Length, i =>
+                field[i] = segVol.Labels[i] == label ? 100f : 0f);
 
             smooth = new float[w * h * d];
 
@@ -861,22 +861,28 @@ public static class SegmentationEngine
                 for (int pass = 0; pass < smoothingPasses; pass++)
                 {
                     // X-blur
-                    for (int z = 0; z < d; z++)
-                    for (int y = 0; y < h; y++)
-                    for (int x = 1; x < w - 1; x++)
-                        smooth[x+y*w+z*w*h] = field[x+y*w+z*w*h] * wCenter + (field[x-1+y*w+z*w*h] + field[x+1+y*w+z*w*h]) * wNeighbors;
+                    System.Threading.Tasks.Parallel.For(0, d, z =>
+                    {
+                        for (int y = 0; y < h; y++)
+                        for (int x = 1; x < w - 1; x++)
+                            smooth[x+y*w+z*w*h] = field[x+y*w+z*w*h] * wCenter + (field[x-1+y*w+z*w*h] + field[x+1+y*w+z*w*h]) * wNeighbors;
+                    });
 
                     // Y-blur
-                    for (int z = 0; z < d; z++)
-                    for (int y = 1; y < h - 1; y++)
-                    for (int x = 0; x < w; x++)
-                        field[x+y*w+z*w*h] = smooth[x+y*w+z*w*h] * wCenter + (smooth[x+(y-1)*w+z*w*h] + smooth[x+(y+1)*w+z*w*h]) * wNeighbors;
+                    System.Threading.Tasks.Parallel.For(0, d, z =>
+                    {
+                        for (int y = 1; y < h - 1; y++)
+                        for (int x = 0; x < w; x++)
+                            field[x+y*w+z*w*h] = smooth[x+y*w+z*w*h] * wCenter + (smooth[x+(y-1)*w+z*w*h] + smooth[x+(y+1)*w+z*w*h]) * wNeighbors;
+                    });
 
                     // Z-blur
-                    for (int z = 1; z < d - 1; z++)
-                    for (int y = 0; y < h; y++)
-                    for (int x = 0; x < w; x++)
-                        smooth[x+y*w+z*w*h] = field[x+y*w+z*w*h] * wCenter + (field[x+y*w+(z-1)*w*h] + field[x+y*w+(z+1)*w*h]) * wNeighbors;
+                    System.Threading.Tasks.Parallel.For(1, d - 1, z =>
+                    {
+                        for (int y = 0; y < h; y++)
+                        for (int x = 0; x < w; x++)
+                            smooth[x+y*w+z*w*h] = field[x+y*w+z*w*h] * wCenter + (field[x+y*w+(z-1)*w*h] + field[x+y*w+(z+1)*w*h]) * wNeighbors;
+                    });
 
                     // Copy smoothed output back to input for the next iter
                     if (pass < smoothingPasses - 1) Array.Copy(smooth, field, smooth.Length);
