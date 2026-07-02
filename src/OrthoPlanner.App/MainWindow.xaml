@@ -872,20 +872,15 @@
                                 <TextBlock Text="Define cut planes for Le Fort I, BSSO, and genioplasty osteotomies."
                                            TextWrapping="Wrap" FontSize="10" FontWeight="Normal"
                                            Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6" />
-                                <Button Content="Plan Le Fort 1" Command="{Binding PlanLeFort1Command}" Margin="0,0,0,4"
-                                        Background="#FF1B98E0" Foreground="White" FontWeight="Bold" />
+                                <Button Content="Plan Le Fort 1" Command="{Binding PlanLeFort1Command}" Margin="0,0,0,4" />
                                 <Button Content="LeFort 1 — 2-Piece Sagittal" Command="{Binding PlanLeFort1SagittalCutCommand}"
                                         Margin="0,0,0,4" IsEnabled="{Binding HasLeFort1Maxilla}"
-                                        Background="#FF1B6AB0" Foreground="White" FontWeight="Normal"
                                         ToolTip="Splits the separated LeFort 1 maxilla with a sagittal midline cut (requires LeFort 1 to be performed first)"/>
                                 <Button Content="LeFort 1 — 3-Piece Y-Cut" Command="{Binding PlanLeFort1YCutCommand}"
                                         Margin="0,0,0,4" IsEnabled="{Binding HasLeFort1Maxilla}"
-                                        Background="#FF1B6AB0" Foreground="White" FontWeight="Normal"
                                         ToolTip="Splits the separated LeFort 1 maxilla with a Y-shaped cut yielding Left, Right and Central segments (requires LeFort 1 to be performed first)"/>
-                                <Button Content="Plan BSSO" Command="{Binding PlanBssoCommand}" Margin="0,0,0,4"
-                                        Background="#FF1B98E0" Foreground="White" FontWeight="Bold" />
-                                <Button Content="Plan Genioplasty" Command="{Binding PlanGenioplastyCommand}" Margin="0,0,0,4"
-                                        Background="#FF1B98E0" Foreground="White" FontWeight="Bold" />
+                                <Button Content="Plan BSSO" Command="{Binding PlanBssoCommand}" Margin="0,0,0,4" />
+                                <Button Content="Plan Genioplasty" Command="{Binding PlanGenioplastyCommand}" Margin="0,0,0,4" />
                             </StackPanel>
                         </Expander>
 
