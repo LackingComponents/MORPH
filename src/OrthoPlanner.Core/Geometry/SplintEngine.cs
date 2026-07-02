@@ -495,7 +495,8 @@ public static class SplintEngine
             const double CrownMm = 10.0;
             const double Dil1    = 1.0;    // blank dilation: guarantees ≥1mm wall thickness
             const double Dil01   = 0.1;    // pocket dilation: tight 0.1mm clearance for tooth seating
-            const float VestBaseMargin = 3.0f; // teeth (esp. molars) extend ~3mm beyond horseshoe half-width
+            // VestBaseMargin removed — vestibular clip now anchored directly to horseshoe
+            // outer edge (half + |bias| + trimBias). See maxVest in PHASE 1 loop.
             float engagementDepthMm = config.EngagementDepthMm;
             bool blockoutUndercuts  = config.BlockoutUndercuts;
 
@@ -1123,6 +1124,45 @@ public static class SplintEngine
                     System.Diagnostics.Debug.WriteLine($"[Splint] PHASE5b Removed {removedTris} floater triangles ({cc.Count-1} small components), kept {dm.TriangleCount} tris");
                     SplintTrace($"PHASE5b removed {removedTris} tris from {cc.Count-1} small components");
                 }
+            }
+
+            // ── PHASE 5c: Taubin mesh smoothing ────────────────────────────────────
+            // Regularises slivered / degenerate triangles that arise at SDF boundary
+            // junctions (e.g., spine-to-tooth-SDF, vestibular clip edge).
+            // Taubin smoothing (alternating λ / μ passes) does NOT shrink the mesh;
+            // the two opposing passes cancel bulk volume change while redistributing
+            // vertex positions toward a locally equilateral configuration.
+            // Conservative settings: λ=0.1, μ=-0.103, 5 iterations.
+            {
+                const double lambda =  0.10;
+                const double mu     = -0.103;
+                const int    taubinIter = 5;
+
+                for (int tpass = 0; tpass < taubinIter; tpass++)
+                {
+                    // Choose λ for even passes, μ for odd passes
+                    double w = (tpass % 2 == 0) ? lambda : mu;
+
+                    // Snapshot current positions so neighbours see the un-moved frame
+                    var snap = new System.Collections.Generic.Dictionary<int, Vector3d>(dm.VertexCount);
+                    foreach (int vid in dm.VertexIndices())
+                        snap[vid] = dm.GetVertex(vid);
+
+                    foreach (int vid in dm.VertexIndices())
+                    {
+                        if (dm.IsBoundaryVertex(vid)) continue;   // do not move open-boundary vertices
+                        var oneRing = dm.VtxVerticesItr(vid);
+                        var avg = Vector3d.Zero;
+                        int cnt = 0;
+                        foreach (int nb in oneRing) { avg += snap[nb]; cnt++; }
+                        if (cnt == 0) continue;
+                        avg /= cnt;
+                        var cur = snap[vid];
+                        dm.SetVertex(vid, cur + w * (avg - cur));
+                    }
+                }
+                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE5c Taubin smooth {taubinIter} passes done");
+                SplintTrace($"PHASE5c Taubin λ={lambda} μ={mu} iter={taubinIter}");
             }
 
             // ── Flatten to soup ──
