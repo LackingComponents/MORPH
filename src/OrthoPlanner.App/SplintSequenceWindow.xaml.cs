@@ -340,8 +340,6 @@ public partial class SplintSequenceWindow : Window
 
     private void IncFine_Click(object s, RoutedEventArgs e)   => AngleSlider.Value = Clamp(AngleSlider.Value + 0.1);
     private void DecFine_Click(object s, RoutedEventArgs e)   => AngleSlider.Value = Clamp(AngleSlider.Value - 0.1);
-    private void IncCoarse_Click(object s, RoutedEventArgs e) => AngleSlider.Value = Clamp(AngleSlider.Value + 1.0);
-    private void DecCoarse_Click(object s, RoutedEventArgs e) => AngleSlider.Value = Clamp(AngleSlider.Value - 1.0);
     private double Clamp(double v) => Math.Round(Math.Clamp(v, AngleSlider.Minimum, AngleSlider.Maximum), 1);
 
     private void UpdateAngle()

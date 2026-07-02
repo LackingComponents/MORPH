@@ -86,12 +86,16 @@
                     <Slider x:Name="AngleSlider" Minimum="0" Maximum="20" Value="0"
                             SmallChange="0.1" LargeChange="1" TickFrequency="0.1" IsSnapToTickEnabled="True"
                             Margin="0,0,0,8" ValueChanged="AngleSlider_ValueChanged"/>
-                    <UniformGrid Columns="4" Margin="0,0,0,12">
-                        <Button Content="−1°"   Margin="2" Padding="4" Click="DecCoarse_Click"  Background="#30FFFFFF" Foreground="White" BorderThickness="0"/>
-                        <Button Content="−0.1°" Margin="2" Padding="4" Click="DecFine_Click"    Background="#30FFFFFF" Foreground="White" BorderThickness="0"/>
-                        <Button Content="+0.1°" Margin="2" Padding="4" Click="IncFine_Click"    Background="#30FFFFFF" Foreground="White" BorderThickness="0"/>
-                        <Button Content="+1°"   Margin="2" Padding="4" Click="IncCoarse_Click"  Background="#30FFFFFF" Foreground="White" BorderThickness="0"/>
-                    </UniformGrid>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,12">
+                        <Button Content="◄" Click="DecFine_Click"
+                                Width="38" Height="28" FontSize="16" Margin="0,0,6,0"
+                                Background="#20FFFFFF" Foreground="White" BorderBrush="#30FFFFFF"
+                                ToolTip="−0.1°"/>
+                        <Button Content="►" Click="IncFine_Click"
+                                Width="38" Height="28" FontSize="16" Margin="0,0,0,0"
+                                Background="#20FFFFFF" Foreground="White" BorderBrush="#30FFFFFF"
+                                ToolTip="+0.1°"/>
+                    </StackPanel>
 
                     <Separator Background="#30FFFFFF" Margin="0,0,0,12"/>
 
@@ -121,7 +125,6 @@
                     <ToggleButton x:Name="AdjustAxisToggle"
                                   Content="⊕  Adjust Axis"
                                   Padding="8,4" Margin="0,0,0,4"
-                                  Background="#30FFFFFF" Foreground="White" BorderThickness="0"
                                   Checked="AdjustAxisToggle_Checked" Unchecked="AdjustAxisToggle_Unchecked"/>
                     <TextBlock x:Name="AxisHintLabel" Text="" FontSize="10" Foreground="#88FFCC"
                                TextWrapping="Wrap" Margin="0,0,0,0"/>
@@ -140,7 +143,6 @@
             <!-- Original Occlusion test (Screen 1 only) -->
             <Button x:Name="OriginalOcclusionBtn" Grid.Column="0"
                     Content="Original Occlusion (test)" Padding="10,5"
-                    Background="#30FFFFFF" Foreground="#AABBCC" BorderThickness="0"
                     Click="OriginalOcclusion_Click"/>
             <!-- Footer right -->
             <StackPanel Grid.Column="2" Orientation="Horizontal">
@@ -148,7 +150,6 @@
                         Background="#FF2ECC71" Foreground="White" BorderThickness="0" FontWeight="Bold"
                         Click="Continue_Click"/>
                 <Button Content="Cancel" Padding="12,6"
-                        Background="#30FFFFFF" Foreground="White" BorderThickness="0"
                         Click="Cancel_Click"/>
             </StackPanel>
         </Grid>
