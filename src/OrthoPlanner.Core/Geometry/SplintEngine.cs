@@ -670,27 +670,7 @@ public static class SplintEngine
                     var pt = new Vector3d(px, py, pz);
                     float upVal1 = uPerpDist <= maxVest ? (float)upImpl1.Value(ref pt) : 1.0f;
                     float loVal1 = lPerpDist <= maxVest ? (float)loImpl1.Value(ref pt) : 1.0f;
-                    float blankSdf = MathF.Min(upVal1, loVal1);
-
-                    // ── Guided bridge ─────────────────────────────────────────────────
-                    // If this voxel is air but lies within the labio-lingual corridor of
-                    // either arch (the same column the horseshoe body occupies), stamp it
-                    // as solid material. This guarantees Z-connectivity between the upper
-                    // and lower arch halves by construction, so PHASE 2 only needs a tiny
-                    // smoothing radius rather than a large gap-bridging radius.
-                    if (blankSdf > 0f)
-                    {
-                        float bridgeSdfBiasInner = -(config.BridgeSdfBaseMm + bridgeThicknessMm);
-                        // Signed perpendicular distance along each arch's outward normal.
-                        // Corridor check: |signed − lingualBuccalBias| <= half  ↔  inside horseshoe.
-                        float uSigned = ((float)px - uax) * unx + ((float)py - uay) * uny;
-                        float lSigned = ((float)px - lax) * lnx + ((float)py - lay) * lny;
-                        bool inUpperCorridor = MathF.Abs(uSigned - lingualBuccalBiasMm) <= half;
-                        bool inLowerCorridor = MathF.Abs(lSigned - lingualBuccalBiasMm) <= half;
-                        if (inUpperCorridor || inLowerCorridor)
-                            blankSdf = bridgeSdfBiasInner;
-                    }
-                    bakedGrid[vIdx] = blankSdf;
+                    bakedGrid[vIdx] = MathF.Min(upVal1, loVal1);
                 }
             });
 
@@ -747,6 +727,56 @@ public static class SplintEngine
                 SplintTrace($"PHASE1b main={mainSize} removed={removed} floaters");
             }
 
+            // ╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏
+            //  PHASE 1c: Guided bridge — spine rasterization
+            //
+            //  For each pair of corresponding arch sample points (upper[i], lower[i]),
+            //  voxelize the line segment connecting them directly into the fine grid.
+            //  These segments form a thin solid "curtain" that spans the inter-arch gap
+            //  and guarantees Z-connectivity by construction.
+            //
+            //  Key properties:
+            //  • Only air voxels (> 0) are touched — tooth SDF material is preserved.
+            //  • A 3×3 XY neighbourhood is set per step so the coarse grid (0.5mm/voxel)
+            //    reliably samples at least one spine voxel per coarse cell.
+            //  • The subsequent closing only needs to expand the curtain laterally (XY)
+            //    by half the labio-lingual width — NOT by the full gap height.
+            //    closeR = ceil(half / coarseVS) is therefore gap-independent.
+            // ╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏
+            {
+                float bridgeVal = -(config.BridgeSdfBaseMm + bridgeThicknessMm);
+                int spineCount = 0;
+                for (int si = 0; si < n; si++)
+                {
+                    float ux = upper[si].x, uy = upper[si].y, uz = upper[si].z;
+                    float lx = lower[si].x, ly = lower[si].y, lz = lower[si].z;
+                    float segLen = MathF.Sqrt((lx-ux)*(lx-ux) + (ly-uy)*(ly-uy) + (lz-uz)*(lz-uz));
+                    // Step at half a fine-grid voxel to ensure every fine-grid Z level is hit
+                    int steps = Math.Max(1, (int)MathF.Ceiling(segLen / ((float)VS_MC * 0.5f)));
+                    for (int step = 0; step <= steps; step++)
+                    {
+                        float t  = (float)step / steps;
+                        float sx = ux + t * (lx - ux);
+                        float sy = uy + t * (ly - uy);
+                        float sz = uz + t * (lz - uz);
+                        int fx = (int)MathF.Round((sx - gox) / (float)VS_MC);
+                        int fy = (int)MathF.Round((sy - goy) / (float)VS_MC);
+                        int fz = (int)MathF.Round((sz - goz) / (float)VS_MC);
+                        if (fz < 0 || fz >= gnz) continue;
+                        // 3×3 XY footprint so coarse-grid sampling (every 2.5 fine voxels) hits the spine
+                        for (int ddx = -1; ddx <= 1; ddx++) for (int ddy = -1; ddy <= 1; ddy++)
+                        {
+                            int nx2 = fx + ddx, ny2 = fy + ddy;
+                            if (nx2 < 0 || nx2 >= gnx || ny2 < 0 || ny2 >= gny) continue;
+                            int vIdx2 = fz * gnx * gny + ny2 * gnx + nx2;
+                            if (bakedGrid[vIdx2] > 0f) { bakedGrid[vIdx2] = bridgeVal; spineCount++; }
+                        }
+                    }
+                }
+                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE1c spine n={n} voxels={spineCount}");
+                SplintTrace($"PHASE1c spine n={n} voxels={spineCount}");
+            }
+
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             //  PHASE 2: GPU morphological closing on padded coarse grid
             //
@@ -760,10 +790,11 @@ public static class SplintEngine
                 if (gap > maxGap) maxGap = gap;
             }
             const float coarseVS = 0.5f;
-            // Guided bridge (PHASE 1) guarantees Z-connectivity, so closing only
-            // needs to smooth the junction between tooth-SDF walls and the filled
-            // corridor. A fixed small radius is sufficient.
-            int closeR = 2;
+            // Guided bridge spine (PHASE 1c) fills the inter-arch gap along the arch
+            // curve connections, so closing only needs to expand the curtain laterally
+            // (XY) to cover the labio-lingual width. closeR = half / coarseVS.
+            // No need for a large gap-dependent radius.
+            int closeR = Math.Max(2, (int)MathF.Ceiling(half / coarseVS));
             // Erode less aggressively than dilate: full dilation bridges the gap,
             // but symmetric erosion punches through thin bridge areas. Asymmetric
             // erosion (45% of closeR) preserves bridge connectivity.
