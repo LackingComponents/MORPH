@@ -137,10 +137,35 @@ public static class CephAnalysisEngine
 
         // IMPA: mandibular plane (Go→Gn) vs lower incisor axis (L1→L1 Root).
         results.Add(Measure("IMPA", "IMPA", CephUnit.Degrees, 90, 5, lm, q =>
-            CephToolEngine.AngleLines(q.Get("Gonion"), q.Get("Gnathion"),
-                                      q.Get("L1"), q.Get("L1 Root"), sx, sy)));
+            ImpaAngle(q, sx, sy)));
 
         return results;
+    }
+
+    /// <summary>
+    /// IMPA (Incisor Mandibular Plane Angle) between the mandibular plane (Gonion→Gnathion) and
+    /// the lower incisor long axis (L1→L1 Root). Clinically this angle can exceed 90° when the
+    /// lower incisors are proclined, so — like <see cref="InterincisalAngle"/> — it is measured at
+    /// the intersection of the two lines via the directed <see cref="CephToolEngine.Angle3Pts"/>
+    /// (0–180°) rather than <see cref="CephToolEngine.AngleLines"/> (which folds to the acute
+    /// 0–90° range and would mis-report proclined cases as their supplement).
+    /// The arms run toward Gonion (the mandibular plane's posterior end — kept far from the
+    /// intersection so its direction is stable) and toward L1 (the incisor crown), giving 90° for
+    /// an upright incisor, &gt;90° for proclination, and &lt;90° for retroclination.
+    /// If the lines are parallel, falls back to the supplement of the acute line angle.
+    /// </summary>
+    private static double ImpaAngle(LandmarkQuery q, double sx, double sy)
+    {
+        var gonion = q.Get("Gonion");
+        var gnathion = q.Get("Gnathion");
+        var l1 = q.Get("L1");
+        var l1Root = q.Get("L1 Root");
+
+        var intersection = CephToolEngine.LineIntersection(gonion, gnathion, l1, l1Root);
+        if (intersection is { } i)
+            return CephToolEngine.Angle3Pts(gonion, i, l1, sx, sy);
+
+        return 180.0 - CephToolEngine.AngleLines(gonion, gnathion, l1, l1Root, sx, sy);
     }
 
     // ── Ricketts (reduced skeletal subset) ──────────────────────────────────
@@ -152,8 +177,7 @@ public static class CephAnalysisEngine
 
         // Facial Depth: Frankfort horizontal (Po→Or) vs facial plane (N→Pog).
         results.Add(Measure("Facial Depth", "FD", CephUnit.Degrees, 87, 3, lm, q =>
-            CephToolEngine.AngleLines(q.Get("Porion"), q.Get("Orbitale"),
-                                      q.Get("Nasion"), q.Get("Pogonion"), sx, sy)));
+            FacialDepthAngle(q, sx, sy)));
 
         // Mandibular Plane: Frankfort horizontal (Po→Or) vs mandibular plane (Go→Gn).
         results.Add(Measure("Mandibular Plane", "MP", CephUnit.Degrees, 26, 4, lm, q =>
@@ -166,6 +190,33 @@ public static class CephAnalysisEngine
                                                q.Get("Nasion"), q.Get("Pogonion"), sx, sy).DistMm));
 
         return results;
+    }
+
+    /// <summary>
+    /// Facial Depth (Ricketts facial angle) between Frankfort horizontal (Porion→Orbitale) and the
+    /// facial plane (Nasion→Pogonion). A Class III (prognathic) skeletal pattern drives this above
+    /// 90°, so — like <see cref="InterincisalAngle"/> — it is measured at the intersection of the
+    /// two lines via the directed <see cref="CephToolEngine.Angle3Pts"/> (0–180°) rather than
+    /// <see cref="CephToolEngine.AngleLines"/> (which folds to the acute 0–90° range and would
+    /// mis-report prognathic cases as their supplement).
+    /// The arms run toward Porion (Frankfort's posterior end — kept far from the intersection, which
+    /// naturally lands near Orbitale/Nasion, so its direction is stable) and toward Pogonion (the
+    /// facial plane's inferior end), giving the norm ~87° for a balanced face, &gt;90° for
+    /// prognathism, and &lt;87° for retrognathism.
+    /// If the lines are parallel, falls back to the supplement of the acute line angle.
+    /// </summary>
+    private static double FacialDepthAngle(LandmarkQuery q, double sx, double sy)
+    {
+        var porion = q.Get("Porion");
+        var orbitale = q.Get("Orbitale");
+        var nasion = q.Get("Nasion");
+        var pogonion = q.Get("Pogonion");
+
+        var intersection = CephToolEngine.LineIntersection(porion, orbitale, nasion, pogonion);
+        if (intersection is { } i)
+            return CephToolEngine.Angle3Pts(porion, i, pogonion, sx, sy);
+
+        return 180.0 - CephToolEngine.AngleLines(porion, orbitale, nasion, pogonion, sx, sy);
     }
 
     // ── Shared helpers ──────────────────────────────────────────────────────
