@@ -1063,7 +1063,7 @@
 
                         <!-- Direct Volume Rendering proxy for diffuse bone visualization -->
                         <ctrl:VolumeTextureModel3D VolumeNode="{Binding VolumeNode}" 
-                                                   IsRendering="{Binding IsVolumeRenderingEnabled}" />
+                                                   IsRendering="{Binding IsVolumeRenderingEnabled}" Transform="{Binding NhpSharedTransform}" />
 
                         <hx:ItemsModel3D ItemsSource="{Binding Segments}">
                             <hx:ItemsModel3D.ItemTemplate>

@@ -273,13 +273,6 @@ public partial class MainViewModel
 
         RecomputeAllTransforms();
         ScheduleDebouncedSliceUpdate();
-
-        // ModelCenter follows the delta-transformed pivot
-        var center = VolumePivot ?? new Point3D(
-            BoneOnlyBounds.X + BoneOnlyBounds.SizeX / 2,
-            BoneOnlyBounds.Y + BoneOnlyBounds.SizeY / 2,
-            BoneOnlyBounds.Z + BoneOnlyBounds.SizeZ / 2);
-        ModelCenter = deltaMatrix.Transform(center);
     }
 
     /// <summary>The one recompute site (INV1). NhpShared aliases the delta until Task 3.
@@ -302,6 +295,15 @@ public partial class MainViewModel
 #if DEBUG
         AssertFormulaHolds();
 #endif
+
+        // INV7: the camera pivot is decoupled from NHP — feed the CONSTANT source-space VolumePivot,
+        // not NhpShared·VolumePivot. Rotation already worked (a pivot doesn't move under rotation);
+        // translation now shows because the pivot no longer follows (and visually cancels) it.
+        if (VolumePivot.HasValue)
+        {
+            ModelCenter = VolumePivot.Value;
+            OnPropertyChanged(nameof(ModelCenter));
+        }
     }
 
     /// <summary>
