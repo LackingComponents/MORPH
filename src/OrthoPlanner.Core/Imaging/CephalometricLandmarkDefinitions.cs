@@ -1,13 +1,13 @@
 ﻿namespace OrthoPlanner.Core.Imaging;
 
 /// <summary>
-/// Provides the standard set of 42 cephalometric landmarks used in orthognathic surgery planning.
+/// Provides the standard set of 50 cephalometric landmarks used in orthognathic surgery planning.
 /// </summary>
 public static class CephalometricLandmarkDefinitions
 {
     public static List<CephalometricLandmark> GetAll()
     {
-        var landmarks = new List<CephalometricLandmark>(42);
+        var landmarks = new List<CephalometricLandmark>(50);
 
         // ÔöÇÔöÇ Skeletal midline (10) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
@@ -83,15 +83,19 @@ public static class CephalometricLandmarkDefinitions
         AddBilateral(landmarks, "Condylion", "Co", "Most posterior-superior point of condyle", LandmarkCategory.Skeletal);
         AddBilateral(landmarks, "Pterion", "Pt", "Intersection of round foramen and pterygomaxillary fossa", LandmarkCategory.Skeletal);
 
-        // ÔöÇÔöÇ Dental (8 pairs = 16) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+        // ÔöÇÔöÇ Dental (12 pairs = 24) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
         AddBilateral(landmarks, "U1", "U1", "Most occlusal point of upper central incisors", LandmarkCategory.Dental);
         AddBilateral(landmarks, "U1 Root", "U1Ro", "Root apex of upper central incisors", LandmarkCategory.Dental);
         AddBilateral(landmarks, "U3", "U3", "Cusp of upper canines", LandmarkCategory.Dental);
+        AddBilateral(landmarks, "U4", "U4", "Cusp of upper first premolar", LandmarkCategory.Dental);
+        AddBilateral(landmarks, "U5", "U5", "Cusp of upper second premolar", LandmarkCategory.Dental);
         AddBilateral(landmarks, "U6", "U6", "Mesiobuccal cusp of upper first molars", LandmarkCategory.Dental);
         AddBilateral(landmarks, "L1", "L1", "Most occlusal point of lower central incisors", LandmarkCategory.Dental);
         AddBilateral(landmarks, "L1 Root", "L1Ro", "Root apex of lower central incisors", LandmarkCategory.Dental);
         AddBilateral(landmarks, "L3", "L3", "Cusp of lower canines", LandmarkCategory.Dental);
+        AddBilateral(landmarks, "L4", "L4", "Cusp of lower first premolar", LandmarkCategory.Dental);
+        AddBilateral(landmarks, "L5", "L5", "Cusp of lower second premolar", LandmarkCategory.Dental);
         AddBilateral(landmarks, "L6", "L6", "Mesiovestibular cusp of lower first molars", LandmarkCategory.Dental);
 
         return landmarks;
