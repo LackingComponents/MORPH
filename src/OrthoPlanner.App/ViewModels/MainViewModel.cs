@@ -247,6 +247,14 @@ public partial class SegmentViewModel : ObservableObject
     /// <summary>The surgical movement component of this segment's transform (NHP-independent).</summary>
     public System.Windows.Media.Media3D.Transform3D SurgicalTransform { get; set; } = System.Windows.Media.Media3D.Transform3D.Identity;
 
+    /// <summary>Alias of <see cref="SurgicalTransform"/> — the per-piece displacement record used by
+    /// the lazy transform stack. Same value, the formula's name.</summary>
+    public System.Windows.Media.Media3D.Transform3D LocalTransform
+    {
+        get => SurgicalTransform;
+        set => SurgicalTransform = value;
+    }
+
     /// <summary>True when dental scan geometry has been merged into this segment's vertices
     /// (via clean-and-merge or alignment wizard). Used by splint generation to suppress
     /// the false "CT bone only" warning.</summary>
@@ -309,6 +317,11 @@ public partial class MeshViewModel : ObservableObject
     public object? Geometry { get; set; }
     public HelixToolkit.Wpf.SharpDX.Material? Material { get; set; }
     [ObservableProperty] private System.Windows.Media.Media3D.Transform3D _transform = System.Windows.Media.Media3D.Transform3D.Identity;
+
+    /// <summary>The per-piece displacement record (lazy transform stack): surgical movement, cast
+    /// registration (Identity once baked), or — for a splint — the parent jaw's LocalTransform.
+    /// Identity for an unperturbed piece. Never mutated by pose; persists across NHP changes.</summary>
+    public System.Windows.Media.Media3D.Transform3D LocalTransform { get; set; } = System.Windows.Media.Media3D.Transform3D.Identity;
 
     /// <summary>True when vertices already have cumulative NHP baked in (set before
     /// adding to ImportedMeshes to prevent double-baking by the NHP ledger).</summary>

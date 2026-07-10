@@ -35,6 +35,13 @@ public partial class MainViewModel
     // CORRECT multiplication order: _cumulativeNhpMatrix = _cumulativeNhpMatrix * delta
     private Matrix3D _cumulativeNhpMatrix = Matrix3D.Identity;
 
+    // ─── Lazy transform stack: NhpShared is the single shared NHP matrix every piece composes with. ───
+    // Task 1: NhpShared aliases the existing delta (_nhpTransform). Task 3 flips it to MatrixFrom6(absolute six).
+    private System.Windows.Media.Media3D.Matrix3D _nhpShared = System.Windows.Media.Media3D.Matrix3D.Identity;
+
+    /// <summary>The shared NHP transform (Matrix3D), bound to the CT volume render (Task 2).</summary>
+    public System.Windows.Media.Media3D.Transform3D NhpSharedTransform { get; private set; } = System.Windows.Media.Media3D.Transform3D.Identity;
+
     public Rect3D BoneOnlyBounds { get; private set; } = Rect3D.Empty; // Bone segment bounds only
 
     public bool IsNhpDirty => Math.Abs(NhpLateral - _cLat) > 0.01 ||
@@ -167,7 +174,7 @@ public partial class MainViewModel
 
         // 10. Re-apply transforms and refresh
         OnPropertyChanged(nameof(IsNhpDirty));
-        ApplyNhpToAllTrackedObjects();
+        RecomputeAllTransforms();
         RefreshCombinedModel();
         UpdateAllSlices();
         StatusText = "NHP committed and baked into geometry.";
@@ -264,7 +271,8 @@ public partial class MainViewModel
 
         _nhpTransform = new MatrixTransform3D(deltaMatrix);
 
-        ApplyNhpToAllTrackedObjects();
+        RecomputeAllTransforms();
+        ScheduleDebouncedSliceUpdate();
 
         // ModelCenter follows the delta-transformed pivot
         var center = VolumePivot ?? new Point3D(
@@ -274,19 +282,26 @@ public partial class MainViewModel
         ModelCenter = deltaMatrix.Transform(center);
     }
 
-    /// <summary>
-    /// Applies the current NHP delta transform to ALL tracked objects.
-    /// Called when sliders change (preview mode) or after commit (Identity = no-op).
-    /// </summary>
-    private void ApplyNhpToAllTrackedObjects()
+    /// <summary>The one recompute site (INV1). NhpShared aliases the delta until Task 3.
+    /// INV1: every piece.Transform == Compose(NhpShared, piece.LocalTransform).</summary>
+    private void RecomputeAllTransforms()
     {
-        if (HardTissueModel != null) HardTissueModel.Transform = _nhpTransform;
-        if (SoftTissueModel != null) SoftTissueModel.Transform = _nhpTransform;
-        if (DentalModel     != null) DentalModel.Transform     = _nhpTransform;
+        // Task 1: NhpShared = the live delta. Task 3 replaces with MatrixFrom6(absolute six).
+        _nhpShared = _nhpTransform.Value;
+        NhpSharedTransform = _nhpTransform;
+        OnPropertyChanged(nameof(NhpSharedTransform));
 
-        foreach (var seg  in Segments)       seg.Transform  = ComposeTransforms(_nhpTransform, seg.SurgicalTransform);
-        foreach (var mesh in ImportedMeshes) mesh.Transform = _nhpTransform;
-        foreach (var occ  in LoadedOcclusions) occ.Transform = _nhpTransform;
+        if (HardTissueModel != null) HardTissueModel.Transform = ComposeTransforms(NhpSharedTransform, HardTissueModel.LocalTransform);
+        if (SoftTissueModel != null) SoftTissueModel.Transform = ComposeTransforms(NhpSharedTransform, SoftTissueModel.LocalTransform);
+        if (DentalModel     != null) DentalModel.Transform     = ComposeTransforms(NhpSharedTransform, DentalModel.LocalTransform);
+
+        foreach (var seg  in Segments)        seg.Transform  = ComposeTransforms(NhpSharedTransform, seg.LocalTransform);
+        foreach (var mesh in ImportedMeshes) mesh.Transform = ComposeTransforms(NhpSharedTransform, mesh.LocalTransform);
+        foreach (var occ  in LoadedOcclusions) occ.Transform = ComposeTransforms(NhpSharedTransform, occ.LocalTransform);
+
+#if DEBUG
+        AssertFormulaHolds();
+#endif
     }
 
     /// <summary>
@@ -320,7 +335,7 @@ public partial class MainViewModel
                     seg.BuildModel();
                 }
                 seg.NhpBaked = true;
-                seg.Transform = ComposeTransforms(_nhpTransform, seg.SurgicalTransform);
+                seg.Transform = ComposeTransforms(NhpSharedTransform, seg.LocalTransform);
             }
         }
     }
@@ -337,7 +352,7 @@ public partial class MainViewModel
                     mesh.BuildModel();
                     mesh.NhpBaked = true;
                 }
-                mesh.Transform = _nhpTransform;
+                mesh.Transform = ComposeTransforms(NhpSharedTransform, mesh.LocalTransform);
             }
         }
     }
@@ -354,7 +369,7 @@ public partial class MainViewModel
                     occ.BuildModel();
                     occ.NhpBaked = true;
                 }
-                occ.Transform = _nhpTransform;
+                occ.Transform = ComposeTransforms(NhpSharedTransform, occ.LocalTransform);
             }
         }
     }
@@ -401,5 +416,19 @@ public partial class MainViewModel
         g.Children.Add(first);
         g.Children.Add(second);
         return g;
+    }
+
+    [System.Diagnostics.Conditional("DEBUG")]
+    private void AssertFormulaHolds()
+    {
+        // INV1 — every piece carries the formula. RecomputeAllTransforms just wrote each, so verify each.
+        bool Eq(System.Windows.Media.Media3D.Matrix3D a, System.Windows.Media.Media3D.Matrix3D b)
+            => Math.Abs(a.M11-b.M11)<1e-9 && Math.Abs(a.OffsetX-b.OffsetX)<1e-9
+            && Math.Abs(a.M22-b.M22)<1e-9 && Math.Abs(a.OffsetY-b.OffsetY)<1e-9
+            && Math.Abs(a.M33-b.M33)<1e-9 && Math.Abs(a.OffsetZ-b.OffsetZ)<1e-9;
+        System.Windows.Media.Media3D.Matrix3D Expected(System.Windows.Media.Media3D.Transform3D local)
+        { var g = new System.Windows.Media.Media3D.MatrixTransform3D(_nhpShared); var c = ComposeTransforms(g, local); return c.Value; }
+        foreach (var seg in Segments)
+            System.Diagnostics.Debug.Assert(Eq(seg.Transform.Value, Expected(seg.LocalTransform)), "INV1 segment");
     }
 }
