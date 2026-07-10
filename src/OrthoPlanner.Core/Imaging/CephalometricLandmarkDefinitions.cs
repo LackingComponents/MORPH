@@ -104,13 +104,13 @@ public static class CephalometricLandmarkDefinitions
     {
         list.Add(new CephalometricLandmark
         {
-            Name = $"{name} (L)", Abbreviation = $"{abbreviation}-L",
+            Name = $"{name} (R)", Abbreviation = $"{abbreviation}-R",
             Description = description,
             Category = category, IsBilateral = true
         });
         list.Add(new CephalometricLandmark
         {
-            Name = $"{name} (R)", Abbreviation = $"{abbreviation}-R",
+            Name = $"{name} (L)", Abbreviation = $"{abbreviation}-L",
             Description = description,
             Category = category, IsBilateral = true
         });
