@@ -1,4 +1,5 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
+using OrthoPlanner.Core.Imaging;
 
 namespace OrthoPlanner.App.ViewModels;
 
@@ -10,15 +11,44 @@ public partial class MainViewModel
 
     partial void OnIsVolumeRenderingEnabledChanged(bool value)
     {
-        if (value && VolumeNode == null && Volume != null)
+        if (value && Volume != null)
         {
+            // Always rebuild fresh — the previously built node may reference the
+            // stale scan if the user toggled off then on without loading a new scan.
             SetupVolumeMaterial();
         }
+    }
+
+    // Volume replaced (new DICOM load / project open): drop the ~800 MB texture
+    // node so it isn't retained alongside the new scan, and rebuild immediately
+    // if the diffused view is currently enabled.
+    partial void OnVolumeChanged(VolumeData? value)
+    {
+        DetachAndDisposeVolumeNode();
+        if (value != null && IsVolumeRenderingEnabled)
+            SetupVolumeMaterial();
+    }
+
+    /// <summary>
+    /// Detach the volume node from the viewport (set null so the XAML binding
+    /// releases it) then dispose its GPU/system resources.
+    /// </summary>
+    private void DetachAndDisposeVolumeNode()
+    {
+        if (VolumeNode == null) return;
+        var old = VolumeNode;
+        VolumeNode = null;
+        (old as System.IDisposable)?.Dispose();
     }
 
     private void SetupVolumeMaterial()
     {
         if (Volume == null) return;
+
+        // Dispose any node left over from a prior build so GPU texture memory
+        // is reclaimed before we allocate the next one.
+        DetachAndDisposeVolumeNode();
+
 
         int w = Volume.Width;
         int h = Volume.Height;

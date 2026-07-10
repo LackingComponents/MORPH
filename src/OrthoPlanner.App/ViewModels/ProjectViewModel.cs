@@ -178,6 +178,8 @@ public partial class MainViewModel
 
         try
         {
+            // Open is committed — tell the view to drop session-bound visuals (measurements).
+            ProjectReset?.Invoke();
             IsLoading = true;
             StatusText = "Loading project...";
 
@@ -250,7 +252,6 @@ public partial class MainViewModel
                     vol.ComputeMinMax();
 
                     Volume = vol;
-                    OriginalVolume = null; // Reset starting position for new project
                     IsVolumeLoaded = true;
                     IsoMin = Math.Max(-1000, (double)vol.MinValue);
                     IsoMax = vol.MaxValue;

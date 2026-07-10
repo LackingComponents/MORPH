@@ -608,7 +608,8 @@ public partial class CondyleSplitWindow : Window
             int idx = x + y * w + z * w * h;
             if (inputSegVol.Labels[idx] != boneLabel) continue;
             
-            // Drop software-bridged soft tissue voxels that fall below the physical bone HU threshold
+
+            // Drop morphological-closing bridged voxels that are definitively NOT bone
             if (ctVol.Voxels[idx] < rawThreshold)
             {
                 segVol.Labels[idx] = 0;
@@ -637,6 +638,7 @@ public partial class CondyleSplitWindow : Window
             int cy = Math.Clamp((int)Math.Round(anchor[1] / sy), 0, h - 1);
             int cz = Math.Clamp((int)Math.Round(anchor[2] / sz), 0, d - 1);
             int idx = cx + cy * w + cz * w * h;
+
 
             if (segVol.Labels[idx] != unassignedAboveLabel && segVol.Labels[idx] != mandBodyLabel)
             {
@@ -732,6 +734,7 @@ public partial class CondyleSplitWindow : Window
                 }
             }
         }
+
 
         Dispatcher.Invoke(() => StatusText.Text = "Finalizing Components...");
 

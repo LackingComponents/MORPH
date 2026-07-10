@@ -17,8 +17,11 @@ public partial class MainViewModel
     // ÔöÇÔöÇÔöÇ Volume State ÔöÇÔöÇÔöÇ
     [ObservableProperty] private VolumeData? _volume;
     [ObservableProperty] private bool _isVolumeLoaded;
-    [ObservableProperty] private VolumeData? _originalVolume;
     private string? _lastDicomPath;
+
+    // Raised when a new DICOM load or project open resets the session — lets the view
+    // drop viewport-bound visuals (custom measurements) that the VM doesn't own.
+    public event Action? ProjectReset;
 
     // ÔöÇÔöÇÔöÇ Patient Info ÔöÇÔöÇÔöÇ
     [ObservableProperty] private string _patientName = "";
@@ -163,6 +166,8 @@ public partial class MainViewModel
             Segments.Clear();
             ImportedMeshes.Clear();
             _segVolume = null;
+            LoadedOcclusions.Clear();
+            OcclusionNodes.Clear();
 
             var seriesList = await Task.Run(() =>
                 DicomLoader.ScanFolderAsync(folderPath, p =>
@@ -191,13 +196,14 @@ public partial class MainViewModel
                 return;
             }
 
+            // Load is committed — tell the view to drop session-bound visuals (measurements).
+            ProjectReset?.Invoke();
+
             StatusText = $"Loading series ({selectorVm.SelectedSeries.Info.ImageCount} slices)...";
 
             Volume = await Task.Run(() =>
                 DicomLoader.LoadSeriesAsync(selectorVm.SelectedSeries.Info.FilePaths, p =>
                     Application.Current.Dispatcher.Invoke(() => LoadProgress = 40 + p * 60)));
-
-            OriginalVolume = null; // Reset starting position for new DICOM
 
             // Phase 0: Bake the volume pivot from the original DICOM dimensions.
             // This is the permanent rotation pivot; it never drifts across reslices.

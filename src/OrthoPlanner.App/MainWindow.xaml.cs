@@ -53,6 +53,9 @@ public partial class MainWindow : Window
         // ── Center camera on model when bone bounds change ──
         if (VM != null)
         {
+            // ponytail: MainWindow lives for the app lifetime, so no unsubscribe needed.
+            VM.ProjectReset += ClearMeasurements;
+
             VM.PropertyChanged += (s, args) =>
             {
                 switch (args.PropertyName)
@@ -1334,6 +1337,21 @@ public partial class MainWindow : Window
         foreach (var s in _pendingMeasVisuals) Viewport3D.Items.Remove(s);
         _pendingMeasVisuals.Clear();
         _pendingMeasPts.Clear();
+    }
+
+    /// <summary>
+    /// Drop every committed distance/angle measurement from the viewport + measurements
+    /// tree. Invoked via <see cref="ViewModels.MainViewModel.ProjectReset"/> when a new
+    /// DICOM load or project open resets the session, so session-bound visuals don't carry
+    /// across patients/projects.
+    /// </summary>
+    public void ClearMeasurements()
+    {
+        foreach (var m in _customMeasurements)
+            foreach (var v in m.Visuals) Viewport3D.Items.Remove(v);
+        ClearPendingMeasurements();
+        _customMeasurements.Clear();
+        RebuildCxMeasurementTree();
     }
 
     private HelixToolkit.Wpf.SharpDX.MeshGeometryModel3D Make3DSphere(System.Numerics.Vector3 center, float radius, System.Windows.Media.Color col)

@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using g3;
@@ -734,7 +735,7 @@ public static class SplintEngine
                     return Result(horseshoeFlat, "Blank SDF had no interior volume; emitted the flat horseshoe blank.");
                 }
 
-                var visited = new bool[totalVox];
+                var visited = new BitArray(totalVox);
                 var queue = new Queue<int>();
                 float seedX = archMidX, seedY = archMidY, seedZ = (upperZ + lowerZ) * 0.5f;
                 int bestSeed = -1; float bestSeedD = float.MaxValue;

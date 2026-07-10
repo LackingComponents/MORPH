@@ -340,26 +340,6 @@ public partial class MainViewModel
 
             SaveStateForUndo();
 
-            // Store a copy of originals in a hidden mesh (name-prefixed) if not already backed up
-            string backupName = $"[Original] {editedName}";
-            if (!ImportedMeshes.Any(m => m.Name == backupName))
-            {
-                // Keep original as invisible backup
-                var backup = new MeshViewModel
-                {
-                    Name      = backupName,
-                    Vertices  = (float[])target.Vertices!.Clone(),
-                    ColorR    = target.ColorR,
-                    ColorG    = target.ColorG,
-                    ColorB    = target.ColorB,
-                    ScanType  = target.ScanType,
-                    IsVisible = false
-                };
-                backup.OnVisibilityChanged = RefreshCombinedModel;
-                backup.BuildModel();
-                ImportedMeshes.Add(backup);
-            }
-
             // Apply edited verts
             target.Vertices = MeshHelper.ToFlatArray(editedVerts);
             target.BuildModel();

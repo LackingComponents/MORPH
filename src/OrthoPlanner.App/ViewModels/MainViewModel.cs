@@ -50,7 +50,7 @@ public partial class MainViewModel : ObservableObject
 
 
     // ÔöÇÔöÇÔöÇ Volume State (see DicomViewModel.cs) ÔöÇÔöÇÔöÇ
-    // _volume, _isVolumeLoaded, _originalVolume, _lastDicomPath ÔåÆ DicomViewModel.cs
+    // _volume, _isVolumeLoaded, _lastDicomPath ÔåÆ DicomViewModel.cs
     // PatientName, StudyDate, SeriesDescription, VolumeDimensions ÔåÆ DicomViewModel.cs
     // TotalSlices, CurrentSlice, AxialIndex, CoronalIndex, SagittalIndex ÔåÆ DicomViewModel.cs
     // AxialMax, CoronalMax, SagittalMax, *DisplayHeight ÔåÆ DicomViewModel.cs

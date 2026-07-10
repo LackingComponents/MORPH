@@ -16,26 +16,31 @@ Primary developer: a surgeon (non-programmer) — every AI response must be expl
 **Solution file:** `OrthoPlanner.sln`  
 **Local path (Mirko's machine):** `C:\Users\Mirko\Documents\Orthoplanner`
 
+> **Before any refactor or edit to a shared contract, read §22 (Whole-Project Architecture & Cascade Risk).** It maps the god-objects and the cross-cutting conventions where a single change ripples to many call sites — the reason "it got bigger and bigger, and now one change risks cascading breaks."
+
 ---
 
 ## 2. Solution Layout
 
 ```
 OrthoPlanner.sln
-├── src/OrthoPlanner.App         → WPF UI layer (Views, ViewModels, Windows)
-├── src/OrthoPlanner.Core        → Business logic (engines, loaders, data models)
-└── src/OrthoPlanner.Infrastructure → DICOM / DRR generation
+├── src/OrthoPlanner.App    → WPF UI layer (Views, ViewModels, Windows, code-behind)
+└── src/OrthoPlanner.Core   → Business logic (engines, loaders, data models, DRR)
+
+> `OrthoPlanner.Infrastructure` no longer exists — it was folded into `OrthoPlanner.Core` (commit `c107f93`). `DrrGenerator` now lives in `src/OrthoPlanner.Core/Imaging/`. There are exactly **two** projects today.
 ```
 
 ### Key NuGet packages
 
-| Package | Purpose |
-|---|---|
-| `HelixToolkit.Wpf.SharpDX` 3.1.2 | 3D rendering (DirectX-backed via SharpDX) |
-| `fo-dicom` (FellowOakDicom) | DICOM loading and codec transcoding |
-| `CommunityToolkit.Mvvm` 8.4.0 | MVVM: `ObservableObject`, `[ObservableProperty]`, `[RelayCommand]` |
-| `ManifoldNET` 1.0.7-alpha | Boolean mesh operations (requires `manifoldc.dll` + `tbb12.dll` native DLLs in output) |
-| ILGPU | GPU acceleration (files from collaborator fork) |
+| Package | Project | Purpose |
+|---|---|---|
+| `HelixToolkit.Wpf.SharpDX` 3.1.2 | App | 3D rendering (DirectX-backed via SharpDX) |
+| `CommunityToolkit.Mvvm` 8.4.0 | App | MVVM: `ObservableObject`, `[ObservableProperty]`, `[RelayCommand]` |
+| `ManifoldNET` 1.0.7-alpha | App + Core | Boolean mesh operations (requires `manifoldc.dll` + `tbb12.dll` native DLLs in output) |
+| `fo-dicom` 5.2.5 | Core | DICOM loading |
+| `fo-dicom.Codecs` 5.16.5.1 | Core | DICOM codec transcoding |
+| `geometry3Sharp` 1.0.324 | Core | `DMesh3` indexed mesh + SDF types (`BoundedImplicitFunction3d`, `AxisAlignedBox3d`); used by `MeshOps`, `IcpAligner`, `SplintEngine` |
+| `ILGPU` 1.5.1 | Core | GPU acceleration — CUDA (NVIDIA) → OpenCL (AMD/Intel) → CPU fallback; powers `GpuMorphology3D`. (`ILGPU.Algorithms` was removed.) |
 
 > ⚠️ ManifoldNET requires `Prefer32Bit=false` in the csproj and the two native DLLs must be copied to the build output. This is already configured.
 
@@ -65,20 +70,26 @@ There is only one `MainViewModel` instance, created by `MainWindow` (set as `Dat
 
 | File | Responsibility |
 |---|---|
-| `ViewModels/MainViewModel.cs` | Class declaration, shared helpers (`RefreshCombinedModel`, `MeshHelper`, `SegmentViewModel`, `MeshViewModel`) |
+| `ViewModels/MainViewModel.cs` | **Class declaration + base** (`public partial class MainViewModel : ObservableObject`), shared helpers (`RefreshCombinedModel`, `MeshHelper`), and the helper VMs `SegmentViewModel` (L174) + `MeshViewModel` (L300) |
 | `ViewModels/DicomViewModel.cs` | DICOM loading, MPR slice rendering, window/level, histograms, NHP physical reslice |
-| `ViewModels/SegmentationViewModel.cs` | Segmentation pipeline, region growing, mesh generation |
+| `ViewModels/SegmentationViewModel.cs` | Segmentation pipeline, region growing, mesh generation, live bone preview |
 | `ViewModels/OsteotomyViewModel.cs` | Osteotomy wizard launchers (LeFort 1, BSSO, Genioplasty, Condyle Split) |
-| `ViewModels/SurgeryViewModel.cs` | Per-segment 6-DOF surgical movements, occlusion STL management, plan tree |
-| `ViewModels/StlViewModel.cs` | STL import, dental alignment, merge, export |
-| `ViewModels/ProjectViewModel.cs` | Save/Load `.orthoplan` ZIP archives |
-| `ViewModels/NhpViewModel.cs` | Natural Head Position alignment (visual preview + commit/reslice) |
-| `ViewModels/UndoRedoViewModel.cs` | 5-level undo stack (segment/mesh snapshots only) |
-| `ViewModels/ViewportViewModel.cs` | Camera anchors, lighting, MPR toggles, orthographic mode |
-| `ViewModels/VolumeRenderingViewModel.cs` | Volume rendering toggle |
-| `ViewModels/NhpViewModel.cs` | NHP delta transform logic |
-| `ViewModels/SplintViewModel.cs` | Splint planner state |
-| `ViewModels/OcclusionPlanViewModel.cs` | Per-occlusion surgical plan snapshots |
+| `ViewModels/SurgeryViewModel.cs` | Per-segment 6-DOF surgical movements, occlusion STL alignment / ICP orchestration, per-occlusion plan tree |
+| `ViewModels/StlViewModel.cs` | STL import + classify, dental cast alignment (ICP), clean-merge, export |
+| `ViewModels/ProjectViewModel.cs` | Save/Load `.orthoplan` ZIP archives (incl. occlusion vertices/transforms + ceph landmarks) |
+| `ViewModels/NhpViewModel.cs` | Natural Head Position — visual preview (sliders → `_nhpTransform`) + commit/reslice, bakes landmarks through the delta |
+| `ViewModels/UndoRedoViewModel.cs` | 5-level undo stack (segment/mesh snapshots + condyle landmark backup) |
+| `ViewModels/ViewportViewModel.cs` | Camera anchors, clipping, MPR toggles, orthographic mode |
+| `ViewModels/VolumeRenderingViewModel.cs` | Volume rendering toggle (uses `AllowUnsafeBlocks` for half-float write) |
+| `ViewModels/SplintViewModel.cs` | Splint planner state, `CondyleBox`, mandibular autorotation params |
+| `ViewModels/ThreeDModelPanelViewModel.cs` | 3D-model panel controls |
+
+> **Crucial:** all 13 files above are `partial class MainViewModel` — they add to a *single* object, the app's one `DataContext` created by `MainWindow`. There is no encapsulation between them: every partial sees every field/property the others declare. This is the project's central **god-object** (see §22). `OcclusionPlanViewModel` and `OcclusionNodeViewModel` are *not* part of it — they are independent `ObservableObject` subclasses owned by the surgery VM.
+
+**Independent VM classes** (their own `ObservableObject`, *not* `MainViewModel` partials):
+- `DicomSelectorViewModel` + `SeriesItemViewModel` — series picker dialog.
+- `OcclusionNodeViewModel`, `OcclusionPlanViewModel` — the plan-tree nodes/plans owned by `SurgeryViewModel`.
+- `PhotogrammetryViewModel`, `PhotoViewModel`, `MeasurementViewModel`, `LineAnnotationViewModel`, `AngleAnnotationViewModel` (under `ViewModels/Photogrammetry/`) — the 2D-photo measurement subsystem (see §21).
 
 ### 4.2 Key Collections on MainViewModel
 
@@ -269,7 +280,7 @@ This is purely a visual transform — the underlying `Voxels` and `Vertices` dat
 **Mode B — Commit (`CommitNhpAsync`):**  
 1. Captures the delta between current UI values and last committed baseline.
 2. Calls `PerformPhysicalResliceAsync(delta...)` which:
-   - Reslices `OriginalVolume` (the first CT loaded) through `SegmentationEngine.ResliceVolume()`, producing a new `VolumeData` physically in the NHP orientation.
+   - Reslices `Volume` (the committed CT) through `SegmentationEngine.ResliceVolume()`, producing a new `VolumeData` physically in the NHP orientation.
    - Mutates all segment and mesh `Vertices` in-place by the delta matrix.
    - Rebuilds all 3D models.
    - Resets all Transform3D to Identity (vertices are now physically at the correct position).
@@ -290,7 +301,11 @@ Each osteotomy is handled by a dedicated `Window` class that receives input mesh
 | `PlanLeFort1YCut` | `LeFort1YCutWindow` | LeFort 1 Separated maxilla | `LeftResult`, `RightResult`, `CentralResult` |
 | `PlanBsso` | `BssoOsteotomyWindow` | Mandible vertices | `ProximalResult` (Ramus), `DistalResult` (Mandible) |
 | `PlanGenioplasty` | `GenioplastyOsteotomyWindow` | Mandible vertices | `UpperMandibleResult`, `ChinSegmentResult` |
-| `SplitCraniumMandibleAsync` | `CondyleSplitWindow` | Full bone mesh + segvol | `CraniumResult`, `MandibleResult`, `LeftCondyleCenter`, `RightCondyleCenter`, `DentalMidlinePoint` |
+| `SplitCraniumMandibleAsync` | `CondyleSplitWindow` | Full bone mesh + segvol | `CraniumResult`, `MandibleResult`, `LeftCondyleCenter`, `RightCondyleCenter`, `DentalMidlinePoint`, `Left/RightCondyleHalfExtents`. Two entry modes via a `landmarkOnlyMode` flag (`false` = full split from `OsteotomyViewModel`; `true` = landmarks-only from `SurgeryViewModel.EnsureCondyleFulcrum`). |
+| (seed split fallback) | `SeedSplitWindow` | Full bone mesh + segvol | `CraniumResult`, `MandibleResult` — but **no landmarks** (a contract gap: cases routed through the seed path silently lose the Ramus fulcrum + splint box; see [cranium-mandible-split-redesign.md](cranium-mandible-split-redesign.md) §2). |
+| (cast / dental align) | `DentalAlignmentWindow` / `DentalCastEditorWindow` | CT bone + cast meshes | `FinalTransform` (`double[,]`) + merged cast mesh; the algorithm-only path reuses `IcpAligner`. |
+
+> The **splint** wizards (`SplintPlannerWindow`, `SplintSequenceWindow`) and the **occlusion-alignment** windows (`OcclusionAlignmentWindow`, `ManualOcclusionAlignmentWindow`, `OcclusionCheckerWindow`) follow the same show-dialog → read-public-properties pattern but emit splint meshes or `Matrix3D`/`double[,]` transforms rather than osteotomy result meshes.
 
 Pattern for calling a wizard:
 ```csharp
@@ -467,7 +482,7 @@ Named XAML elements in `MainWindow.xaml`:
 - `meshes/N_Name.bin` — imported mesh vertex data (same format)
 - `occlusions/N_Name.bin` — occlusion STL vertex data (same format as meshes)
 
-Current version field in JSON: **`"Version": "2.1"`**.
+Current version field in JSON: **`"Version": "2.2"`** (bumped from "2.1"; the 2.1 occlusion/ceph-landmark additions and the 2.0 / pre-2.0 fallbacks below still apply).
 
 Backwards compatibility:
 - `"2.0"` files: loaded normally; occlusion and ceph data simply absent (treated as empty).
@@ -529,6 +544,8 @@ In `OpenProjectAsync()`:
 
 > **Note:** `MainWindow.xaml` and `MainWindow.xaml.cs` were previously on this list but have since required multiple additions (Measurements tab tree, crosshair wiring). They may be edited with explicit instruction but require a build check after every change.
 
+> **Refactor carve-out:** the "All files in `OrthoPlanner.Core`" line is **suspended for the app-wide decomposition refactor** (in flight) — the Core engines (`SplintEngine`, `MeshOps`, `SegmentationEngine`) are in scope to be split by responsibility with their public API kept stable. The usual protect rule reapplies once that refactor lands.
+
 ---
 
 ## 17. Build Command
@@ -544,10 +561,11 @@ dotnet build OrthoPlanner.sln --configuration Debug --no-incremental
 
 ## 18. Pending Refactoring Work
 
-1. `CephalometryOverlay.xaml.cs` (~2100 lines) has no dedicated ViewModel. A public API exists (`GetMeasurements`, `SetMeasurementVisible`, `MeasurementsChanged`) to allow the Measurements tab to interact with it without a ViewModel, but a proper `CephalometryViewModel` would clean this up substantially.
+0. **App-wide decomposition (in flight):** pulling pure logic out of the god-objects into plain Core helpers + a missing `CephalometryViewModel`, behavior-preserving with a characterization ("golden-master") harness, ordered least-risk first. §22 maps the god-objects and the cascade contracts this refactor is meant to shrink.
+1. `CephalometryOverlay.xaml.cs` (~2027 lines) has no dedicated ViewModel. A public API exists (`GetMeasurements`, `SetMeasurementVisible`, `MeasurementsChanged`) to allow the Measurements tab to interact with it without a ViewModel, but a proper `CephalometryViewModel` would clean this up substantially. **Also:** `Make3DSphere`/`Make3DLine` are duplicated identically in `MainWindow.xaml.cs` (dedup target).
 2. Cephalometric **measurements** (drawn lines, angles, distances) are not saved to the project file — only landmarks are. Add measurement serialization to `ProjectViewModel.SaveProject` / `OpenProjectAsync`.
-3. Surgical planning windows (`BssoOsteotomyWindow`, `LeFortOsteotomyWindow`, `CondyleSplitWindow`) contain 600–900 lines each with business logic mixed into the code-behind. Refactor into Core services.
-4. Clean up spurious root-level files: `extract.cs`, `ViewCube.cs`, `ViewCubeVisual3D.cs`, `RefactorUI/`, `RestoreUI/`, `probe*.cs`, `patch.cs`, etc.
+3. Surgical planning windows mix business logic into the code-behind: `CondyleSplitWindow` (~1251), `SplintPlannerWindow` (~894), `SplintSequenceWindow` (~695), `BssoOsteotomyWindow` (~696), `LeFortOsteotomyWindow` (~657), etc. The **Cranium/Mandible split** is already redesigned as Architecture C (Core solvers behind `ICraniumMandibleSolver`) — see [cranium-mandible-split-redesign.md](cranium-mandible-split-redesign.md). Model the other wizards on the same "pure Core solver + thin window" boundary.
+4. ~~Clean up spurious root-level files~~ — **DONE** (`extract.cs`, `ViewCube.cs`, `RefactorUI/`, `RestoreUI/`, `probe*.cs`, `patch.cs` are gone; `MarchingCubesTables` folded into `Core.Imaging.MarchingCubes`; the `OrthoPlanner.Infrastructure` project removed; `ILGPU.Algorithms` removed).
 
 ---
 
@@ -658,3 +676,94 @@ When creating UI elements in C# (e.g. measurements tree lists), adhere to these 
   3. TextBlock (Label + value, FontSize `10`, Foreground `#D0D8E0`, `TextTrimming=CharacterEllipsis`, `MaxWidth=140`).
   4. Delete Button (✕ text, FontSize `8`, Padding `2,0`, transparent background, Foreground `#888888`, Cursor `Hand`, ToolTip `Delete measurement`).
 * **Empty States**: Show italicized placeholder TextBlocks in `#6E7F90`.
+
+---
+
+## 21. Photogrammetry (2D Photo Measurement)
+
+A measurement feature **separate** from the 3D cephalometry module (§13): photogrammetry works on ordinary 2D clinical photos (profile / frontal / smiling), not CT or DRR.
+
+Entry: `Views/PhotogrammetryView.xaml.cs` (canvas + mouse) bound to `PhotogrammetryViewModel` under `ViewModels/Photogrammetry/`, which owns an `ObservableCollection<PhotoViewModel>`. It is **not** part of the `MainViewModel` god-object — its own independent `ObservableObject` (see §4.1).
+
+Tool modes (`PhotogrammetryToolMode`):
+
+| Mode | Action |
+|---|---|
+| `Pan` | default: left-drag pan, scroll zoom |
+| `Normalize` | draw a line, enter its real mm length → sets `PixelsPerMm` (the calibration that makes every other mode quantitative) |
+| `Horizon` | draw a line between two points → rotate the image so that line is horizontal |
+| `Measure` | draw a line → read distance in mm (uses `PixelsPerMm`) |
+| `DrawLine` | permanent annotation line |
+| `Angle` | draw a line → read its angle from horizontal |
+
+Annotations persist (in-memory only) as `MeasurementViewModel` / `LineAnnotationViewModel` / `AngleAnnotationViewModel` on each `PhotoViewModel`. **No project-file persistence yet** — the same gap as ceph-measurements (§18-2).
+
+---
+
+## 22. Whole-Project Architecture & Cascade Risk
+
+> Read this before planning any refactor or touching a shared contract. It names the **god-objects** and, more importantly, the cross-cutting conventions where a single change ripples across many call sites — the "it got bigger and bigger, now one change risks cascading breaks" problem.
+
+### 22.1 How the app grew
+
+MORPH began small: one `MainWindow`, one `MainViewModel`, a few Core engines. The partial-class MVVM pattern (required by CommunityToolkit.Mvvm source generators) let features scale by adding `partial class MainViewModel` files — which silently turned **one class into a thirteen-headed god-object** (§22.2). In parallel, each new osteotomy / splint wizard grew its own `Window` code-behind that accumulated rendering + mouse + algorithm together, and the Core engines grew to 1400–1500 lines. The result today: no tests, heavy shared mutable state, and **string-based contracts** (§22.3) that mean every edit risks an invisible cascade.
+
+### 22.2 The god-objects (the targets of the refactor)
+
+| God-object | Lines | Why it is a god-object |
+|---|---|---|
+| `MainViewModel` (13 partials) | ~5,700 | One object, one `DataContext`; all 13 files share all private state. DICOM, segmentation, surgery, NHP, splint, undo, viewport, volume, 3D-panel, project all on one class. Editing a field is visible to every other partial — zero encapsulation. |
+| `CephalometryOverlay.xaml.cs` | 2027 | 2D landmark sidebar + DRR gen/render + canvas mouse + 2D↔3D projection math + 3D landmarks/measurements + tool-by-tool handlers + measurement drawing + public API + persistence. No ViewModel. |
+| `MainWindow.xaml.cs` | 1494 | Camera/orbit + grid overlay + MPR slice interaction + crosshairs + numeric-textbox helpers + the entire ceph measurement-tree + its own custom 3D-measurement subsystem (duplicates CephalometryOverlay's `Make3DSphere`/`Make3DLine`). |
+| `CondyleSplitWindow.xaml.cs` | 1251 | DX rendering + mouse hit-testing + plane math + voxel flood-fill + marching-cubes orchestration, all in one code-behind. (Redesign in flight — see [cranium-mandible-split-redesign.md](cranium-mandible-split-redesign.md).) |
+| `SplintPlannerWindow.xaml.cs` | 894 | Same wizard-mixing pattern (arch point drag, autorotation, snapping, rendering). |
+| `SurgeryViewModel.cs` (partial of the god) | 996 | Surgical-transform math + occlusion ICP orchestration + plan tree all on the shared object (mixed with the matrix-convention converters). |
+| `SplintEngine.cs` (Core) | 1515 | Arch sampling + the `GenerateSplint` pipeline + autorotation + rotation utils + ribbon/line-strip + tooth-pocket + `OffsetImpl` SDF. A pipeline, but with several separable sub-algorithms. |
+| `MeshOps.cs` (Core) | 1469 | Slicing + dental-cast ops + topology/components + `DMesh3` interop + bbox clip — a grab-bag. |
+| `SegmentationEngine.cs` (Core) | 1384 | Threshold/clean/morphology + region-grow variants + mesh extraction + `ResliceVolume` (an imaging op misplaced in Segmentation). |
+
+> Big-but-coherent files deliberately left alone by the refactor: `IcpAligner.cs` (691 — one concern, ICP+SVD), `DicomViewModel.cs` (780 — "the DICOM/MPR viewport VM"), `VolumeData.cs` / `MarchingCubes.cs` / `SdfEngine.cs` (each one cohesive algorithm). The decomposition is by **cohesion**, not line-count.
+
+### 22.3 The cross-cutting contracts — where one change cascades
+
+These are the load-bearing conventions; touch one and a fan-out breaks.
+
+**a. Segment-name strings (§8) — the biggest epicenter.** Surgery transforms, occlusion, NHP bake, the splint engine, undo, and persistence all locate segments by `Segments.LastOrDefault(s => s.Name.Contains("Maxilla") ...)` etc. Renaming a segment — or adding one whose name substring-matches an existing role — breaks **surgery transforms**, **occlusion alignment**, **NHP baking**, **undo**, and **save/load** simultaneously, with **no compiler error**, only a wrong surgical result downstream. Hardening path: an explicit role tag/enum on `SegmentViewModel` instead of substring matching (keep names identical during the refactor; the tag can be a follow-up).
+
+**b. The `MainViewModel` god-object itself.** Because every feature is a partial of one class, *any* new state becomes a field all 13 files can see → no boundary to reason about → "easy" additions that braid unrelated features together. Even unrelated features read each other's fields (e.g. splint-wizard state read by surgery-transform code). The unit of change is effectively the whole class.
+
+**c. Wizard output contracts.** Each wizard exposes specific `*Result`/`*Center` properties, and `OsteotomyViewModel` hardcodes those names ([OsteotomyViewModel.cs:328](../src/OrthoPlanner.App/ViewModels/OsteotomyViewModel.cs#L328)). Adding or renaming a result breaks the caller silently. The seed-split path already violates this contract (emits meshes but no landmarks — see [cranium-mandible-split-redesign.md](cranium-mandible-split-redesign.md) §2). The split redesign centralizes `SplitRequest`/`SplitResult` records one place; the other wizards should follow.
+
+**d. Matrix / vector-convention split.** Three conventions coexist with no single conversion boundary: WPF `Matrix3D`/`Vector3D` (row-vector), `IcpAligner` `double[4,4]` (column-vector), and `System.Numerics.Vector3`. The converters (`ToDoubleMatrix` / `ConvertToMatrix3D`) live in `SurgeryViewModel`. Getting the convention wrong = a silently-transposed transform. The split redesign does the conversion once at the wizard boundary — the pattern to copy.
+
+**e. Coordinate spaces.** Three spaces interleave per feature: raw **DICOM** (`x*spacing`), **baked/NHP** (post-commit), and **display** (view-only `Transform`). Each feature handles them by hand; the missing bake on returned split meshes (split P1) is a known silent-wrong-result trap. Convention to enforce: the wizard that owns the forward transform bakes it *before* exposing results; consumers must not re-bake.
+
+**f. NHP-commit fan-out.** `CommitNhp` rewrites `Volume`, mutates every segment/mesh `Vertices` in place, resets transforms, and bakes `Left/RightCondyleCenter` + `DentalMidlinePoint` — but **not** `CondyleHalfExtents` (split P4). A commit touches ~6 subsystems; forgetting one field is an invisible splint-geometry error. Mitigation: make "what NHP bakes" an explicit, enumerable list.
+
+**g. Shared mutable mask state.** `_segVolume` (and the recently-removed `_boneOnlySegVolume`) is mutated by live-preview / seed-split paths; the cranium split had to drop a fast path because a prior seed-split-preview could clobber the mask. Shared mutables that previews write to are a standing footgun.
+
+### 22.4 Why it has become "impossible to maintain"
+
+- **Locating a change** requires reading across multiple partials / windows — no single file shows a feature end-to-end.
+- **No compiler guard** on the contract layers: a renamed segment, field, or result property builds clean and ships wrong.
+- **No tests** mean behavior regressions surface only when a surgeon clicks the exact flow — sometimes clinics later.
+- **Heavy shared mutable state** (god-object fields + the segment volume) means refactors can change timing/data a unit test would have caught.
+
+### 22.5 What the refactor buys, and how it is ordered
+
+The decomposition (approach B) shrinks each cascade to a contract boundary:
+- Pull **pure math** out of code-behind / the god-object into Core helpers, backed by a **characterization harness** (golden-master fingerprints on a saved `.orthoplan` — vertex counts + bounding box + sampled-vertex hash) so algorithmic regressions the string/god-object contracts currently hide become *visible automatically*, not just when a surgeon clicks.
+- Keep **public API + segment names + wizard result properties + matrix conventions identical** so the cascade contracts above do not fire.
+- The split redesign (Architecture C) is the exemplar for one subsystem; model the rest on its "pure Core solver + thin window + record contracts" boundary. Interfaces appear **only** where there is genuinely >1 implementation (e.g. `ICraniumMandibleSolver`); no interface-with-one-impl, no DI, no factory unless there's a real second caller — per the project's lazy-code rule.
+- **Order = risk-ascending (cohesion verdict drives it):** bank the safe wins first (dedup `Make3DSphere`/`Make3DLine`; lift `ResliceVolume` from Segmentation into `Imaging`), then the wizard math, hardest-coupled (`CondyleSplit`, `SplintPlanner`) last. Each step ends with a clean build + a golden-master re-diff.
+
+---
+
+## 23. Recent Changes (late June – July 2026)
+
+- **Project structure:** `OrthoPlanner.Infrastructure` folded into `OrthoPlanner.Core`; `DrrGenerator` now in `Core/Imaging`. `MarchingCubesTables` folded into `Core.Imaging.MarchingCubes`. `ILGPU.Algorithms` removed (raw `ILGPU` 1.5.1 kept). Root junk files cleaned up (§18-4 done).
+- **Splint wizard:** multi-step `SplintSequenceWindow` + intermediate/final wafer orchestration added; `SplintEngine` gained O(1) arch-lookup tables, Taubin smoothing, spine rasterization, guided bridge.
+- **Cranium/Mandible split:** function report [cranium-mandible-split.md](cranium-mandible-split.md) (problems P1–P7) and redesign [cranium-mandible-split-redesign.md](cranium-mandible-split-redesign.md) (Architecture C) written; redesign not yet implemented.
+- **Dead-code audits:** trimmed unused `SplineHelper`/`StlIO` lines, deduped converters + DWM P-Invoke.
+- **Photogrammetry:** new 2D-photo measurement subsystem (documented in §21).
+- **Project version:** `"2.1"` → `"2.2"`.

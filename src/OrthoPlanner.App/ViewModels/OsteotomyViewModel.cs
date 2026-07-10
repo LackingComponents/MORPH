@@ -353,25 +353,26 @@ public partial class MainViewModel
 
             // ponytail: build bone-only mask on-demand from _segVolume instead of
             // keeping a 100 MB copy around forever. Released after the dialog closes.
+            //
+            // IMPORTANT: never pass _segVolume directly (fast-path removed in fix for d64d2b3
+            // regression). _segVolume may have bone-label voxels overwritten to 0 or to
+            // seed-split preview labels (1/2/3) if the user opened the seed-split preview
+            // earlier in the same session. Always rebuild a pristine bone-only copy with a
+            // single linear pass (~50 ms on 512³). This restores the invariant that the old
+            // _boneOnlySegVolume eager-copy provided.
             OrthoPlanner.Core.Segmentation.SegmentationVolume? boneOnlyMask = null;
             OrthoPlanner.Core.Segmentation.SegmentationVolume? GetValidSplitTargetVolume(byte boneLabel)
             {
-                // First: try the live seg volume (fast path, no allocation)
-                if (HasUsableBoneMask(_segVolume, boneLabel))
-                    return _segVolume;
-                // Second: build a bone-only mask from _segVolume on-demand
-                if (_segVolume != null && Volume != null && _boneLabel.HasValue)
-                {
-                    boneOnlyMask = new OrthoPlanner.Core.Segmentation.SegmentationVolume(Volume);
-                    byte target = _boneLabel.Value;
-                    int n = _segVolume.Labels.Length;
-                    for (int i = 0; i < n; i++)
-                        if (_segVolume.Labels[i] == target)
-                            boneOnlyMask.Labels[i] = target;
-                    if (HasUsableBoneMask(boneOnlyMask, boneLabel))
-                        return boneOnlyMask;
-                }
-                return null;
+                if (_segVolume == null || Volume == null) return null;
+                // Prefer the label recorded at bone-segmentation time; fall back to the
+                // segment's current label in case _boneLabel was never set.
+                byte target = _boneLabel ?? boneLabel;
+                boneOnlyMask = new OrthoPlanner.Core.Segmentation.SegmentationVolume(Volume);
+                int n = _segVolume.Labels.Length;
+                for (int i = 0; i < n; i++)
+                    if (_segVolume.Labels[i] == target)
+                        boneOnlyMask.Labels[i] = target;
+                return HasUsableBoneMask(boneOnlyMask, target) ? boneOnlyMask : null;
             }
 
             var splitTargetVolume = GetValidSplitTargetVolume(boneSegment.Label);
