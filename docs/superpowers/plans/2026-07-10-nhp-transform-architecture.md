@@ -376,7 +376,7 @@ Replace the entire `CommitNhp` body (`:101-172`): no vertex bake, no landmark ba
     }
 ```
 
-Delete the now-orphaned `BakeTransformIntoVertices` **call sites** in `CommitNhp` and the ledger (`OnSegmentsChangedForNhp:317-323`, `OnMeshesChangedForNhp:334-340`, `OnOcclusionsChangedForNhp:351-357` — the `if (!SuppressLedgerBake && !... && !_cumulativeNhpMatrix.IsIdentity) BakeTransformIntoVertices(...)` branches). Keep `BakeTransformIntoVertices` itself (B2 in Task 7 uses it). The ledger's `OnXChanged` bodies shrink to just `x.Transform = ComposeTransforms(NhpSharedTransform, x.LocalTransform)` (already done by `RecomputeAllTransforms`, so the bodies become empty of bake — they can stay as the CollectionChanged hook that calls `RecomputeAllTransforms` once, or be removed entirely since `RecomputeAllTransforms` iterates all collections anyway).
+Delete the now-orphaned `BakeTransformIntoVertices` **call sites** in `CommitNhp` and the ledger (`OnSegmentsChangedForNhp:317-323`, `OnMeshesChangedForNhp:334-340`, `OnOcclusionsChangedForNhp:351-357` — the `if (!SuppressLedgerBake && !... && !_cumulativeNhpMatrix.IsIdentity) BakeTransformIntoVertices(...)` branches). Also delete the **ceph-bake** block (`CommitNhp:141-156`, the `SavedCephLandmarks` re-transform by `deltaMatrix`) — under the lazy model ceph points live in source space and render posed (Task 5 wires the overlay), so commit must not re-bake them. Keep `BakeTransformIntoVertices` itself (B2 in Task 7 uses it). The ledger's `OnXChanged` bodies shrink to just `x.Transform = ComposeTransforms(NhpSharedTransform, x.LocalTransform)` (already done by `RecomputeAllTransforms`, so the bodies become empty of bake — they can stay as the CollectionChanged hook that calls `RecomputeAllTransforms` once, or be removed entirely since `RecomputeAllTransforms` iterates all collections anyway).
 
 - [ ] **Step 7: Port the profile XAML block.**
 
@@ -529,19 +529,20 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 ---
 
-### Task 5: Bake points — B1 (split source return) + B3 (splint inherits jaw `LocalTransform`); delete `NhpBaked`
+### Task 5: Bake points — B1 (split source return) + B3 (splint inherits jaw `LocalTransform`); cephalometry picks-in-NHP/saved-in-source; delete `NhpBaked`
 
-**Goal:** Make the two no-bake points literal. The split already returns DICOM/source vertices — just stop any forward-bake intent and set `LocalTransform = Identity`. The splint stops baking `BakeToCopy(seg.Vertices, SurgicalTransform)` into its own vertices; instead it generates from source-space jaw teeth and sets `splint.LocalTransform = jaw.LocalTransform`. Delete `NhpBaked` everywhere (no longer needed — nothing bakes cumulatively). Verify INV9; close P1 + the splint-order audit (MED-HIGH) and (with Task 4) the occlusion double-bake (HIGH).
+**Goal:** Make the two no-bake points literal. The split already returns DICOM/source vertices — just stop any forward-bake intent and set `LocalTransform = Identity`. The splint stops baking `BakeToCopy(seg.Vertices, SurgicalTransform)` into its own vertices; instead it generates from source-space jaw teeth and sets `splint.LocalTransform = jaw.LocalTransform`. **Cephalometry follows the same rule as every persistent anatomical point (condylar axis, interincisal midline): picked in the NHP view, saved as the un-posed source coordinate, rendered posed so it follows anatomy under any NHP** — implement the pick-un-pose + render-pose + re-invoke-on-change in `CephalometryOverlay`. Delete `NhpBaked` everywhere (no longer needed — nothing bakes cumulatively). Verify INV4 + INV9; close P1 + the splint-order audit (MED-HIGH) and (with Task 4) the occlusion double-bake (HIGH).
 
 **Files:**
 - Modify: `src/OrthoPlanner.App/ViewModels/OsteotomyViewModel.cs` (split return assignment, `:422-449`)
 - Modify: `src/OrthoPlanner.App/ViewModels/SplintViewModel.cs` (`BakeToCopy` call, `:115-118`; `NhpBaked = true`, `:318`; `AddSplintMeshToScene`, `:217/300`)
+- Modify: `src/OrthoPlanner.App/Views/CephalometryOverlay.xaml.cs` (3D-hit pick un-pose `:809`; 3D render pose `:914-952`; re-invoke on NHP change)
 - Modify: `src/OrthoPlanner.App/ViewModels/MainViewModel.cs` (delete `NhpBaked` on SegmentViewModel `:237` and MeshViewModel `:315`)
 - Modify: `src/OrthoPlanner.App/ViewModels/NhpViewModel.cs` (delete `NhpBaked` reads in the ledger `On*Changed` bodies)
 
 **Interfaces:**
-- Consumes: `LocalTransform` (Tasks 1,3), source-space `seg.Vertices`.
-- Produces: INV9 (splint seats under any NHP). P1 closed (no DICOM-vs-NHP mismatch — split returns source, `LocalTransform=Identity`, `NhpShared` composes once).
+- Consumes: `LocalTransform` (Tasks 1,3), source-space `seg.Vertices`, `NhpSharedTransform` (Task 1) + its inverse for pick un-pose.
+- Produces: INV4 (ceph points source-space, render posed — follows anatomy) + INV9 (splint seats under any NHP). P1 closed (no DICOM-vs-NHP mismatch — split returns source, `LocalTransform=Identity`, `NhpShared` composes once).
 
 - [ ] **Step 1: Delete `NhpBaked` declarations.**
 
@@ -570,25 +571,65 @@ In `SplintViewModel.OpenSplintPlanner` (`:115-118` region): today it builds `Spl
 
 Remove the `NhpBaked = true` line (`:318`). If `SplintEngine` internally needs the jaw's posed teeth to compute offsets, compute offsets in source space against source teeth normals (the splint's outward normal then rotates with the jaw via `LocalTransform`) — do not pre-pose. If `SplintEngine` reads `CondyleBox`, it already gets source-space center + half-extents and `NhpShared` poses it (Spec §4). Audit the `BakeToCopy` call and the splint-geometry generation: the only legitimate bake (B2) is in `StlViewModel`, not here — `BakeToCopy` here is the bug, remove it.
 
-- [ ] **Step 4: Build clean.**
+- [ ] **Step 4: Cephalometry — pick in NHP, persist in source, render posed (INV4).**
+
+The 2D-DRR-driven path is already source (`Project2DTo3D:872` projects a DRR pixel to a source coordinate — the DRR is generated from the raw volume with no NHP, `DrrGenerator.GenerateLateral/GeneratePA`). Close the 3D path with three edits in `src/OrthoPlanner.App/Views/CephalometryOverlay.xaml.cs`. `NhpSharedTransform` (Task 1) is the public accessor the overlay reads off the VM.
+
+(a) **Pick un-pose** — `:809` stores a posed world hit as `Position3D`. Store its **source** coordinate instead:
+
+```csharp
+        // INV4: picked in the NHP view, stored as the SOURCE coordinate (world hit × NhpShared⁻¹).
+        // ponytail: ceph landmarks sit on un-operated skull (LocalTransform=Identity), so inverse(NhpShared)
+        //           recovers the source point; it then follows anatomy under any NHP/profile switch.
+        var nhpT = (Application.Current.MainWindow as MainWindow)?.DataContext is ViewModels.MainViewModel vm2
+            ? vm2.NhpSharedTransform as System.Windows.Media.Media3D.MatrixTransform3D
+            : null;
+        if (nhpT != null) {
+            var invNhp = nhpT.Value; invNhp.Invert();
+            var src = invNhp.Transform(new System.Windows.Media.Media3D.Point3D(hit.X, hit.Y, hit.Z));
+            _activeLandmark.Position3D = (src.X, src.Y, src.Z);
+        } else {
+            _activeLandmark.Position3D = (hit.X, hit.Y, hit.Z);
+        }
+```
+
+(b) **Render posed** — `Refresh3DLandmarks:914-952` builds each marker sphere at the source `Position3D` with **no `Transform`** (`:937-947`). Add the NHP transform so the sphere renders in the posed scene:
+
+```csharp
+            var nhpM = (Application.Current.MainWindow as MainWindow)?.DataContext is ViewModels.MainViewModel vm3
+                ? (vm3.NhpSharedTransform as System.Windows.Media.Media3D.MatrixTransform3D)?.Value
+                  ?? System.Windows.Media.Media3D.Matrix3D.Identity
+                : System.Windows.Media.Media3D.Matrix3D.Identity;
+            // ...inside the existing sphere construction:
+                Transform = new System.Windows.Media.Media3D.MatrixTransform3D(nhpM),   // render the source point posed
+```
+
+(c) **Re-invoke on NHP change.** In the overlay's attach/init, subscribe to the VM's `PropertyChanged` for `nameof(NhpSharedTransform)` → `Refresh3DLandmarks()` (it clears and rebuilds the spheres with the fresh transform — `:917-919`). Unsubscribe on detach. (If the overlay already listens to VM events elsewhere, add the branch there.)
+
+After these, the `CommitNhp` ceph bake removed in Task 3 Step 6 leaves ceph points source-space + posed-rendered — placed in the NHP view, followed through any NHP change/commit/profile switch. The 2D path keeps working (already source); its markers render posed via (b).
+
+- [ ] **Step 5: Build clean.**
 
 Run: `dotnet build src/OrthoPlanner.App/OrthoPlanner.App.csproj`
 Expected: `Build succeeded.` Grep `NhpBaked` → zero.
 
-- [ ] **Step 5: Manual INV9 check.**
+- [ ] **Step 6: Manual INV4 + INV9 checks.**
 
-Launch, load DICOM, set NHP Yaw 15° (+ dirty, uncommitted), run a split, then open the Splint Planner and generate a splint. Confirm the splint seats exactly on the maxillary teeth under the uncommitted NHP. Commit NHP (Task 3 flag-flip) — the splint stays seated. Change the jaw's surgical slide (LeFort) — the splint moves rigidly with the jaw (shares `LocalTransform`). Switch NHP profiles — splint + jaw reorient together.
+Launch, load DICOM, set NHP Yaw 15° (dirty, uncommitted).
+**INV9 (splint):** run a split, open the Splint Planner, generate a splint — confirm it seats exactly on the maxillary teeth under the uncommitted NHP. Commit NHP (flag-flip) — splint stays seated. Move the jaw's surgical slide (LeFort) — splint moves rigidly with the jaw (shares `LocalTransform`). Switch NHP profiles — splint + jaw reorient together.
+**INV4 (ceph):** open Cephalometry, place a landmark on the 3D skull surface (NHP-posed). Note its `Position3D` (the stored source coordinate). Change NHP Yaw to −10° — confirm the marker **follows the anatomy** (stays glued to the skull point in the reoriented scene) while `Position3D` is **byte-identical** (source space). Place another via the 2D/DRR view — same behaviour. Save → reopen — markers land on the same anatomy under the restored NHP.
 
-- [ ] **Step 6: Commit.**
+- [ ] **Step 7: Commit.**
 
 ```bash
-git add src/OrthoPlanner.App/ViewModels/OsteotomyViewModel.cs src/OrthoPlanner.App/ViewModels/SplintViewModel.cs src/OrthoPlanner.App/ViewModels/MainViewModel.cs src/OrthoPlanner.App/ViewModels/NhpViewModel.cs
-git commit -m "fix(transforms): B1/B3 no-bake — split returns source, splint inherits jaw LocalTransform (Task 5)
+git add src/OrthoPlanner.App/ViewModels/OsteotomyViewModel.cs src/OrthoPlanner.App/ViewModels/SplintViewModel.cs src/OrthoPlanner.App/Views/CephalometryOverlay.xaml.cs src/OrthoPlanner.App/ViewModels/MainViewModel.cs src/OrthoPlanner.App/ViewModels/NhpViewModel.cs
+git commit -m "fix(transforms): B1/B3 no-bake + cephalometry pick-in-NHP/saved-in-source (Task 5)
 
-Split returns source-space vertices with LocalTransform=Identity (P1 closed — no DICOM-vs-NHP mismatch).
-Splint generated from source jaw teeth and gets splint.LocalTransform = jaw.LocalTransform (INV9 — seats under
-any NHP, any committed/dirty state, any profile). BakeToCopy removed from the splint path. NhpBaked deleted
-everywhere; nothing bakes cumulatively, so the occlusion-double-bake-on-reopen (audit HIGH) is also closed.
+Split returns source-space vertices with LocalTransform=Identity (P1 closed). Splint generated from source jaw
+teeth, splint.LocalTransform = jaw.LocalTransform (INV9 — seats under any NHP/profile). Cephalometry 3D pick
+un-posed to source (×NhpShared⁻¹); markers render posed and re-invoke on NHP change (INV4 — follows anatomy).
+BakeToCopy + CommitNhp ceph bake removed; NhpBaked deleted everywhere. Occlusion-double-bake-on-reopen (audit HIGH)
+and splint-order mismatch (MED-HIGH) closed — nothing bakes cumulatively.
 
 Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
@@ -786,6 +827,6 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 ## Self-Review (run after writing, before offering execution)
 
-- **Spec coverage:** Spec §0-§11 → Task map: §1-3 formula/recompute → Task 1+3; §4 bake points → Task 5(B1/B3)+7(B2/B4); §5 commit/save/multi-NHP → Task 3+4; §6 shim → Task 6; §7 INV1-9 → Tasks 1,2,3,4,5,6,7 each verify its invs; §8 display子系统 + translation fix + centering → Task 2; §9 build order → Tasks 1-7 in order; §10 Lore prior-art → Task 3 Step 1-4 + Task 4 Step 3 (verbatim port); §11 deliverables → Task 7 Step 7-8. No spec section untasked.
+- **Spec coverage:** Spec §0-§11 → Task map: §1-3 formula/recompute + §3.2 pick-in-NHP/persist-in-source landmark rule → Task 1+3 (+ Task 5 ceph overlay); §4 bake points (B1 incl. all landmark/ceph picks) → Task 5(B1/B3/ceph)+7(B2/B4); §5 commit/save/multi-NHP → Task 3+4; §6 shim → Task 6; §7 INV1-9 (INV4 broadened to the full cephalometric set) → Tasks 1,2,3,4,5,6,7 each verify its invs; §8 display + translation fix + centering → Task 2; §9 build order → Tasks 1-7 in order; §10 Lore prior-art → Task 3 Step 1-4 + Task 4 Step 3 (verbatim port); §11 deliverables → Task 7 Step 7-8. No spec section untasked.
 - **Placeholder scan:** No "TBD"/"TODO"/"fill in". Lore ports cite exact `git show` line ranges any implementer can replay. Large Lore blocks (Task 3 Step 4) are "copy line-for-line from named method + named Lore line range" — explicit, not paraphrased.
 - **Type consistency:** `LocalTransform` (Transform3D) used consistently; `NhpShared`/`NhpSharedTransform` produced Task 1, consumed Tasks 2/3; `NhpProfiles`/`NhpProfileViewModel` declared Task 3 Step 1, consumed Task 4; `RestoreNhpProfilesFromProject`/`MigrateBaselineToNhpProfileIfNeeded` produced Task 4 Step 3, used Task 6; `LegacyUnbakeMatrix` produced+consumed Task 6 Step 1 only; `BuildNhpMatrixForCheck`/`NhpMathSelfCheck.Run()` Task 7. Names match across tasks.
