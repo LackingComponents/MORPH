@@ -942,6 +942,31 @@ public partial class MainWindow : Window
         }
     }
 
+    private void NhpProfileName_PreviewMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is TextBox tb)
+        {
+            tb.Focus();
+            tb.SelectAll();
+        }
+    }
+
+    private void NhpProfileName_GotFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox tb || tb.DataContext is not ViewModels.NhpProfileViewModel profile) return;
+        if (DataContext is ViewModels.MainViewModel vm)
+            vm.SelectNhpProfileCommand.Execute(profile);
+    }
+
+    private void NhpDone_Click(object sender, RoutedEventArgs e)
+    {
+        if (VM == null) return;
+        if (VM.CommitNhpCommand.CanExecute(null))
+            VM.CommitNhpCommand.Execute(null);
+        NhpToggleButton.IsChecked = false;
+    }
+
     private void OptionsTextBox_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (e.Key == System.Windows.Input.Key.Up || e.Key == System.Windows.Input.Key.Down)
