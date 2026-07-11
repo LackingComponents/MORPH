@@ -312,7 +312,7 @@ public partial class MainViewModel
 
         // Compute NHP total bounds once (cumulative × delta), share across slice methods
         GetInverseNhpTransform(out var invNhp);
-        bool isNhpEffectivelyIdentity = _cumulativeNhpMatrix.IsIdentity && _nhpTransform.Value.IsIdentity;
+        bool isNhpEffectivelyIdentity = _nhpShared.IsIdentity;
         if (isNhpEffectivelyIdentity)
         {
             _nhpBoundsMinX = _nhpBoundsMaxX = _nhpBoundsMinY = _nhpBoundsMaxY = _nhpBoundsMinZ = _nhpBoundsMaxZ = null;
@@ -575,27 +575,15 @@ public partial class MainViewModel
     private const int MaxMprExpansion = 4;
 
     /// <summary>
-    /// Inverts the TOTAL NHP transform (cumulative committed × current delta) so we can
-    /// map NHP-space slice geometry back into DICOM space for oblique sampling.
-    /// - Cumulative: baked history of all past commits (DICOM → baked space)
-    /// - Delta: current uncommitted preview (baked space → preview space)
-    /// - Total = cumulative × delta (CORRECT order for row-vector convention)
+    /// Inverts the NhpShared transform so slice geometry in NHP-posed space can be mapped back
+    /// into DICOM (source) space for oblique sampling. MPR samples source space (req f), so it
+    /// un-poses by NhpShared⁻¹. Lazy model (Task 3): NhpShared is the single absolute-from-source
+    /// NHP matrix (zeros = original volume); there is no cumulative/delta split.
     /// </summary>
     private void GetInverseNhpTransform(out Matrix3D matrix)
     {
-        // Total transform = cumulative baked history × current uncommitted delta
-        var deltaMatrix = _nhpTransform.Value;
-        bool isTotalIdentity = _cumulativeNhpMatrix.IsIdentity && deltaMatrix.IsIdentity;
-
-        if (isTotalIdentity)
-        {
-            matrix = Matrix3D.Identity;
-            return;
-        }
-
-        // Compose: cumulative first, then delta (row-vector convention: cumulative × delta)
-        matrix = _cumulativeNhpMatrix;
-        matrix.Append(deltaMatrix);
+        matrix = _nhpShared;
+        if (matrix.IsIdentity) return;
 
         if (matrix.HasInverse) matrix.Invert();
         else { matrix = Matrix3D.Identity; return; }
@@ -625,9 +613,8 @@ public partial class MainViewModel
         double h = Volume.Height * Volume.Spacing[1];
         double d = Volume.Depth  * Volume.Spacing[2];
 
-        // Total transform = cumulative × delta (row-vector convention)
-        var totalMatrix = _cumulativeNhpMatrix;
-        totalMatrix.Append(_nhpTransform.Value);
+        // NhpShared is the total NHP transform (absolute from source)
+        var totalMatrix = _nhpShared;
 
         if (totalMatrix.IsIdentity)
         {

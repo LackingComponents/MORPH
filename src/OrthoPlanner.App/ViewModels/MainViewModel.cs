@@ -23,8 +23,9 @@ public partial class MainViewModel : ObservableObject
         // (covers project load, undo/redo, and segment deletion).
         Segments.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasLeFort1Maxilla));
 
-        // NHP Ledger: auto-apply NHP transform to any object entering the viewport collections
+        // NHP Ledger: auto-compose NhpShared onto any object entering the viewport collections
         InitNhpLedger();
+        InitNhpProfiles();
         InitializeThreeDModelsPanel();
     }
 

@@ -400,9 +400,9 @@ public partial class MainViewModel
             var wizard = new CondyleSplitWindow(
                 MeshHelper.ToVertexList(boneSegment.Vertices),
                 Volume, splitTargetVolume, boneSegment.Label, BoneMinHU,
-                inverseNhpMatrix: _cumulativeNhpMatrix.IsIdentity
+                inverseNhpMatrix: _nhpShared.IsIdentity
                     ? (System.Windows.Media.Media3D.Matrix3D?)null
-                    : InvertMatrix(_cumulativeNhpMatrix));
+                    : InvertMatrix(_nhpShared));
             wizard.Owner = System.Windows.Application.Current.MainWindow;
 
             if (wizard.ShowDialog() == true && wizard.Accepted)

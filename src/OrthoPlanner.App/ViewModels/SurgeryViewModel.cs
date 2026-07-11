@@ -346,8 +346,8 @@ public partial class MainViewModel
         void ApplySurgical(SegmentViewModel? seg, System.Windows.Media.Media3D.Transform3D surgTx)
         {
             if (seg == null) return;
-            seg.SurgicalTransform = surgTx;
-            seg.Transform = ComposeTransforms(_nhpTransform, surgTx);
+            seg.SurgicalTransform = surgTx;   // = seg.LocalTransform (alias) — persisted per-piece
+            seg.Transform = ComposeTransforms(NhpSharedTransform, surgTx);  // Compose(NhpShared, LocalTransform)
         }
 
         var center = ModelCenter;
