@@ -1,8 +1,10 @@
+using System.ComponentModel;
 using System.Numerics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Media3D;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using OrthoPlanner.Core.Imaging;
@@ -804,10 +806,15 @@ public partial class CephalometryOverlay : UserControl
             return;
         }
 
-        // Landmark placement (Select mode)
+        // Landmark placement (Select mode). INV4: the 3D viewport renders NhpShared·source, so the hit
+        // comes back in posed/NHP space. Store the SOURCE point (world×NhpShared⁻¹) so the landmark sticks
+        // to anatomy through later NHP/commit rounds; the DRR projection below is source-space too (the
+        // volume/DRR are never re-posed), so un-posing fixes both the 3D store and the 2D dot. At NHP=source
+        // (Identity) ToSourceSpace is a no-op, so the common no-NHP workflow is unchanged.
         if (_activeLandmark == null) return;
-        _activeLandmark.Position3D = (hit.X, hit.Y, hit.Z);
-        var pos2D = Project3DTo2D(hit.X, hit.Y, hit.Z);
+        var src = ToSourceSpace(hit.X, hit.Y, hit.Z);
+        _activeLandmark.Position3D = (src.X, src.Y, src.Z);
+        var pos2D = Project3DTo2D(src.X, src.Y, src.Z);
         if (pos2D.HasValue) _activeLandmark.Position = pos2D.Value;
         Refresh3DLandmarks();
         RefreshLandmarkOverlay();
@@ -913,6 +920,7 @@ public partial class CephalometryOverlay : UserControl
 
     private void Refresh3DLandmarks()
     {
+        EnsureNhpReposeListener();   // arm once: later NHP changes re-pose existing spheres (INV4 re-invoke)
         // Remove old spheres
         foreach (var sphere in _landmarkSpheres3D)
             SharedViewport3D?.Items.Remove(sphere);
@@ -944,11 +952,67 @@ public partial class CephalometryOverlay : UserControl
                     SpecularShininess = 10f,
                 },
                 IsHitTestVisible = false,
+                // INV4 render-pose: sphere is built at the source center; pose it into the NHP world.
+                // NhpShared is rotation+translation only (no scale), so the 1.5mm radius is preserved.
+                Transform = CurrentNhpSharedTransform(),
             };
 
             _landmarkSpheres3D.Add(sphere);
             SharedViewport3D?.Items.Add(sphere);
         }
+    }
+
+    /// <summary>Re-poses existing landmark spheres when NHP changes — a Transform-only update,
+    /// no rebuild, so each sphere keeps its current IsRendering/toggle state (INV4 re-invoke).</summary>
+    private void Repose3DLandmarks()
+    {
+        if (_landmarkSpheres3D.Count == 0) return;
+        var t = CurrentNhpSharedTransform();
+        foreach (var sphere in _landmarkSpheres3D) sphere.Transform = t;
+    }
+
+    // ── NHP transform access (INV4 pick-in-NHP / persist-in-source / render-posed) ─────────────
+    private bool _nhpReposeListenerAttached;
+
+    /// <summary>One-shot: subscribe to the VM's NhpSharedTransform change so landmark spheres
+    /// re-pose whenever NHP/commit changes the shared matrix. Set when the VM is first available;
+    /// never cleared (overlay lives for the app lifetime). PropertyChanged fires on the UI thread.</summary>
+    private void EnsureNhpReposeListener()
+    {
+        if (_nhpReposeListenerAttached) return;
+        var vm = NhpVm;
+        if (vm == null) return;
+        _nhpReposeListenerAttached = true;
+        ((INotifyPropertyChanged)vm).PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MainViewModel.NhpSharedTransform))
+                Repose3DLandmarks();
+        };
+    }
+
+    private MainViewModel? NhpVm =>
+        (Application.Current.MainWindow as MainWindow)?.DataContext as MainViewModel;
+
+    /// <summary>The shared NHP transform from the live sliders, or Identity before the VM exists.</summary>
+    private Transform3D CurrentNhpSharedTransform()
+    {
+        var vm = NhpVm;
+        return vm?.NhpSharedTransform ?? Transform3D.Identity;
+    }
+
+    /// <summary>Maps a world/posed point back to source space (world × NhpShared⁻¹).
+    /// At NHP=source the matrix is Identity, so this is a no-op for the common no-NHP workflow.</summary>
+    private (double X, double Y, double Z) ToSourceSpace(double x, double y, double z)
+    {
+        var vm = NhpVm;
+        if (vm == null) return (x, y, z);
+        var m = vm.NhpSharedTransform;
+        if (m == Transform3D.Identity) return (x, y, z);
+        var inv = m.Value;            // Matrix3D copy
+        if (!inv.HasInverse) return (x, y, z);
+        inv.Invert();
+        var p = inv.Transform(new Point3D(x, y, z));
+        return (p.X, p.Y, p.Z);
     }
 
     // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ

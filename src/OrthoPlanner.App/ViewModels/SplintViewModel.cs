@@ -315,7 +315,11 @@ public partial class MainViewModel
         {
             Name              = config.DisplayName,
             Vertices          = verts,
-            NhpBaked          = true,  // vertices already in NHP space
+            // B3 (INV9): splint verts are surgical-frame-baked (BakeToCopy at 115/118; interUpper/interLower
+            // at 188/189 bridge a moved jaw's surgical frame vs an unmoved jaw's source frame). LocalTransform
+            // therefore stays default Identity, and RecomputeAllTransforms composes NhpShared on top uniformly —
+            // so the wafer tracks BOTH arches under any NHP, for final/intermediate/bimaxillary/single-jaw alike.
+            // (Plan's `LocalTransform = jaw.LocalTransform` would double-apply surgical onto already-baked verts.)
             ColorR            = 200,
             ColorG            = 230,
             ColorB            = 255,

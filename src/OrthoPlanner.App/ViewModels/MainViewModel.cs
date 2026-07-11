@@ -231,17 +231,10 @@ public partial class SegmentViewModel : ObservableObject
     [ObservableProperty] private System.Windows.Media.Media3D.Transform3D _transform = System.Windows.Media.Media3D.Transform3D.Identity;
 
     /// <summary>
-    /// When true, the segment's vertices already have the cumulative NHP transform baked in.
-    /// Managed by the NHP ledger — do NOT set manually. Use <see cref="DerivedFrom"/> instead
-    /// to declare parent-child lineage; the ledger infers bake state from the parent.
-    /// </summary>
-    public bool NhpBaked { get; internal set; }
-
-    /// <summary>
     /// The parent segment this was derived from (e.g., Bone → Cranium/Mandible, Mandible → Ramus).
-    /// The NHP ledger checks this: if the parent is already NHP-baked, the child inherits that
-    /// state automatically and the ledger skips re-baking. Set this when creating a segment
-    /// whose vertices come from an already-existing segment's vertex data.
+    /// Lineage record only — set when creating a segment whose vertices came from another
+    /// segment's vertex data. (Under the lazy model no vertices are baked, so this carries no
+    /// pose meaning; the segment poses itself via its own LocalTransform in the shared stack.)
     /// </summary>
     public SegmentViewModel? DerivedFrom { get; set; }
 
@@ -319,14 +312,11 @@ public partial class MeshViewModel : ObservableObject
     public HelixToolkit.Wpf.SharpDX.Material? Material { get; set; }
     [ObservableProperty] private System.Windows.Media.Media3D.Transform3D _transform = System.Windows.Media.Media3D.Transform3D.Identity;
 
-    /// <summary>The per-piece displacement record (lazy transform stack): surgical movement, cast
-    /// registration (Identity once baked), or — for a splint — the parent jaw's LocalTransform.
-    /// Identity for an unperturbed piece. Never mutated by pose; persists across NHP changes.</summary>
+    /// <summary>The per-piece displacement record (lazy transform stack): surgical movement for an
+    /// operated segment; Identity for an imported mesh / registered cast; Identity for a splint
+    /// (its verts are surgical-frame-baked by BakeToCopy, so NhpShared composed on top seats it with
+    /// the teeth under any NHP — INV9). Never mutated by pose; persists across NHP changes.</summary>
     public System.Windows.Media.Media3D.Transform3D LocalTransform { get; set; } = System.Windows.Media.Media3D.Transform3D.Identity;
-
-    /// <summary>True when vertices already have cumulative NHP baked in (set before
-    /// adding to ImportedMeshes to prevent double-baking by the NHP ledger).</summary>
-    public bool NhpBaked { get; set; }
 
     // Relative transforms based on occlusion
     [ObservableProperty] private System.Windows.Media.Media3D.Matrix3D _maxillaOcclusionTransform = System.Windows.Media.Media3D.Matrix3D.Identity;
