@@ -26,17 +26,12 @@ public partial class MainViewModel
         public SegmentViewModel? SoftTissueModel { get; init; }
         public SegmentViewModel? DentalModel { get; init; }
 
-        // NHP transform state (needed so undo after commit reverses correctly)
-        public Matrix3D CumulativeNhpMatrix { get; init; }
+        // NHP pivot (needed so restored pieces re-pose under the same rotation center).
+        // The lazy model keeps the live six sliders uncaptured here: SaveStateForUndo is only called
+        // before surgical ops, never before an NHP commit (commit is a flag flip, no vertex bake), so the
+        // NHP pose is identical across an undo boundary — and reverting it on undo-of-surgery would
+        // "lose NHP along the way" (req c). Restore re-poses via RecomputeAllTransforms instead.
         public Point3D? VolumePivot { get; init; }
-
-        // NHP committed baseline values
-        public double CBaseLat { get; init; }
-        public double CBaseAnt { get; init; }
-        public double CBaseVert { get; init; }
-        public double CBaseRoll { get; init; }
-        public double CBasePitch { get; init; }
-        public double CBaseYaw { get; init; }
 
         // Anatomical landmarks (DICOM or NHP space depending on commit state)
         public (double X, double Y, double Z)? LeftCondyleCenter { get; init; }
@@ -81,6 +76,7 @@ public partial class MainViewModel
             ColorR   = m.ColorR, ColorG = m.ColorG, ColorB = m.ColorB,
             ScanType = m.ScanType,
             IsVisible = m.IsVisible,
+            LocalTransform = m.LocalTransform,
             MaxillaOcclusionTransform  = m.MaxillaOcclusionTransform,
             MandibleOcclusionTransform = m.MandibleOcclusionTransform,
             OnVisibilityChanged = RefreshCombinedModel
@@ -153,11 +149,8 @@ public partial class MainViewModel
             SoftTissueModel = softClone,
             DentalModel     = dentClone,
 
-            // NHP state
-            CumulativeNhpMatrix = _cumulativeNhpMatrix,
+            // NHP pivot (lazy model: live sliders are uncaptured — see StateSnapshot).
             VolumePivot = VolumePivot,
-            CBaseLat    = _cLat,  CBaseAnt  = _cAnt,  CBaseVert = _cVert,
-            CBaseRoll   = _cRoll, CBasePitch = _cPitch, CBaseYaw = _cYaw,
 
             // Landmarks
             LeftCondyleCenter  = LeftCondyleCenter,
@@ -190,13 +183,10 @@ public partial class MainViewModel
             SoftTissueModel = snapshot.SoftTissueModel; SoftTissueModel?.BuildModel();
             DentalModel     = snapshot.DentalModel;     DentalModel?.BuildModel();
 
-            // Restore NHP transform state
-            _cumulativeNhpMatrix = snapshot.CumulativeNhpMatrix;
-            VolumePivot  = snapshot.VolumePivot;
-            _cLat   = snapshot.CBaseLat;   _cAnt   = snapshot.CBaseAnt;
-            _cVert  = snapshot.CBaseVert;  _cRoll  = snapshot.CBaseRoll;
-            _cPitch = snapshot.CBasePitch; _cYaw   = snapshot.CBaseYaw;
-            OnPropertyChanged(nameof(IsNhpDirty));
+            // Restore NHP pivot (lazy model: live sliders uncaptured — see StateSnapshot).
+            // The restored pieces re-pose via UpdateNhpTransform + RefreshCombinedModel below,
+            // each composing NhpShared with the restored per-piece LocalTransform.
+            VolumePivot = snapshot.VolumePivot;
 
             // Restore landmarks
             LeftCondyleCenter  = snapshot.LeftCondyleCenter;

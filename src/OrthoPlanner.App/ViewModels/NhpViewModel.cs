@@ -41,11 +41,6 @@ public partial class MainViewModel
 
     public bool CanDeleteAnyNhpProfile => NhpProfiles.Count > 1;
 
-    // ponytail: dead under the lazy model — removed in Task 4 (save/load rewrite). Commit no longer
-    // touches these; vertices are never baked. Kept declared only so ProjectViewModel save/load compiles.
-    private double _cLat, _cAnt, _cVert, _cRoll, _cPitch, _cYaw;
-    private Matrix3D _cumulativeNhpMatrix = Matrix3D.Identity;
-
     // ─── Lazy transform stack: NhpShared is the single shared NHP matrix every piece composes with. ───
     // Absolute-from-source: zeros = the original un-NHP volume frame. Built from the live six.
     private Matrix3D _nhpShared = Matrix3D.Identity;
@@ -55,21 +50,16 @@ public partial class MainViewModel
 
     public Rect3D BoneOnlyBounds { get; private set; } = Rect3D.Empty; // Bone segment bounds only
 
-    // Dirty = live sliders differ from the active (committed) profile — i.e. an uncommitted preview exists.
+    // Dirty = live sliders differ from the active (committed) profile (an uncommitted preview exists).
+    // Active profile is guaranteed non-null (InitNhpProfiles/EnsureDefaultNhpProfile run in the ctor).
     public bool IsNhpDirty =>
-        _activeNhpProfile != null
-            ? Math.Abs(NhpLateral - _activeNhpProfile.Lateral) > 0.01 ||
-              Math.Abs(NhpAnteroposterior - _activeNhpProfile.Anteroposterior) > 0.01 ||
-              Math.Abs(NhpVertical - _activeNhpProfile.Vertical) > 0.01 ||
-              Math.Abs(NhpRoll - _activeNhpProfile.Roll) > 0.01 ||
-              Math.Abs(NhpPitch - _activeNhpProfile.Pitch) > 0.01 ||
-              Math.Abs(NhpYaw - _activeNhpProfile.Yaw) > 0.01
-            : Math.Abs(NhpLateral - _cLat) > 0.01 ||
-              Math.Abs(NhpAnteroposterior - _cAnt) > 0.01 ||
-              Math.Abs(NhpVertical - _cVert) > 0.01 ||
-              Math.Abs(NhpRoll - _cRoll) > 0.01 ||
-              Math.Abs(NhpPitch - _cPitch) > 0.01 ||
-              Math.Abs(NhpYaw - _cYaw) > 0.01;
+        _activeNhpProfile != null &&
+        (Math.Abs(NhpLateral - _activeNhpProfile.Lateral) > 0.01 ||
+         Math.Abs(NhpAnteroposterior - _activeNhpProfile.Anteroposterior) > 0.01 ||
+         Math.Abs(NhpVertical - _activeNhpProfile.Vertical) > 0.01 ||
+         Math.Abs(NhpRoll - _activeNhpProfile.Roll) > 0.01 ||
+         Math.Abs(NhpPitch - _activeNhpProfile.Pitch) > 0.01 ||
+         Math.Abs(NhpYaw - _activeNhpProfile.Yaw) > 0.01);
 
     public bool HasModelLoaded => !BoneOnlyBounds.IsEmpty || Volume != null || Segments.Count > 0;
 
@@ -177,38 +167,15 @@ public partial class MainViewModel
         StatusText = "NHP parameters reset to zero.";
     }
 
-    /// <summary>Reset all NHP parameters to the committed (active profile) pose.</summary>
+    /// <summary>Reset all NHP parameters to the committed (active profile) pose.
+    /// _activeNhpProfile is guaranteed non-null (InitNhpProfiles/EnsureDefaultNhpProfile run in the ctor),
+    /// so the old _cLat fallback is dead and removed with the bake-model fields (Task 4).</summary>
     [RelayCommand]
     private void ResetNhp()
     {
-        if (_activeNhpProfile != null)
-        {
-            ForceSetNhpUi(_activeNhpProfile.Lateral, _activeNhpProfile.Anteroposterior, _activeNhpProfile.Vertical,
-                _activeNhpProfile.Roll, _activeNhpProfile.Pitch, _activeNhpProfile.Yaw);
-            return;
-        }
-
-        // Direct field writes to avoid 6× redundant UpdateNhpTransform calls
-#pragma warning disable MVVMTK0034
-        _nhpLateral         = _cLat;
-        _nhpAnteroposterior = _cAnt;
-        _nhpVertical        = _cVert;
-        _nhpRoll            = _cRoll;
-        _nhpPitch           = _cPitch;
-        _nhpYaw             = _cYaw;
-#pragma warning restore MVVMTK0034
-
-        OnPropertyChanged(nameof(NhpLateral));
-        OnPropertyChanged(nameof(NhpAnteroposterior));
-        OnPropertyChanged(nameof(NhpVertical));
-        OnPropertyChanged(nameof(NhpRoll));
-        OnPropertyChanged(nameof(NhpPitch));
-        OnPropertyChanged(nameof(NhpYaw));
-        OnPropertyChanged(nameof(IsNhpDirty));
-
-        _mprDebounceTimer?.Stop();
-        UpdateNhpTransform();
-        UpdateAllSlices();
+        if (_activeNhpProfile == null) return;
+        ForceSetNhpUi(_activeNhpProfile.Lateral, _activeNhpProfile.Anteroposterior, _activeNhpProfile.Vertical,
+            _activeNhpProfile.Roll, _activeNhpProfile.Pitch, _activeNhpProfile.Yaw);
     }
 
     /// <summary>Zero a single NHP parameter by name (e.g. "Lat", "Pitch").</summary>
@@ -557,5 +524,87 @@ public partial class MainViewModel
         SetActiveNhpProfile(profile);
         ApplyNhpProfile(profile);
         StatusText = $"Loaded {profile.Name}.";
+    }
+
+    /// <summary>
+    /// Restore the NHP profile set from a saved new-format project, then seed the live sliders from the
+    /// active (IsSelected, else first) profile WITHOUT recomputing. The load path calls
+    /// RecomputeAllTransforms later (via RefreshCombinedModel once BoneOnlyBounds is restored), which
+    /// rebuilds _nhpShared from these seeded sliders. Recomputing here would hit the empty-bounds guard
+    /// mid-load and toast a misleading "segment bone first" warning. IsLatest is recomputed by
+    /// RefreshNhpProfileFlags (it is derived from position), so it is not restored from JSON.
+    /// </summary>
+    internal void RestoreNhpProfilesFromProject(IEnumerable<NhpProfileViewModel> profiles)
+    {
+        NhpProfiles.Clear();
+        foreach (var p in profiles)
+            NhpProfiles.Add(p);
+
+        if (NhpProfiles.Count == 0)
+        {
+            EnsureDefaultNhpProfile();
+            return;
+        }
+
+        var active = NhpProfiles.FirstOrDefault(p => p.IsSelected) ?? NhpProfiles[0];
+        SetActiveNhpProfile(active);
+
+#pragma warning disable MVVMTK0034 // direct field set during bulk restore — recompute is deferred to the load tail
+        _nhpLateral         = ClampNhp(active.Lateral, false);
+        _nhpAnteroposterior = ClampNhp(active.Anteroposterior, false);
+        _nhpVertical        = ClampNhp(active.Vertical, false);
+        _nhpRoll            = ClampNhp(active.Roll, true);
+        _nhpPitch           = ClampNhp(active.Pitch, true);
+        _nhpYaw             = ClampNhp(active.Yaw, true);
+#pragma warning restore MVVMTK0034
+
+        OnPropertyChanged(nameof(NhpLateral));
+        OnPropertyChanged(nameof(NhpAnteroposterior));
+        OnPropertyChanged(nameof(NhpVertical));
+        OnPropertyChanged(nameof(NhpRoll));
+        OnPropertyChanged(nameof(NhpPitch));
+        OnPropertyChanged(nameof(NhpYaw));
+        OnPropertyChanged(nameof(IsNhpDirty));
+
+        RefreshNhpProfileFlags();
+    }
+
+    /// <summary>
+    /// Legacy bake-model file: no NhpProfiles, just a NhpBaseline six. Build a single "NHP 1" profile
+    /// from them and seed the sliders. The vertex/landmark un-bake that makes legacy files render
+    /// correctly under the lazy model is Task 6 (spec §6); until then legacy files double-pose (known
+    /// transient, ponytail). Signature takes the six from the load path, not the deleted fields.
+    /// </summary>
+    internal void MigrateBaselineToNhpProfileIfNeeded(double lat, double ant, double vert, double roll, double pitch, double yaw)
+    {
+        if (NhpProfiles.Count > 0) return;
+
+        var profile = NewNhpProfileModel("NHP 1");
+        profile.Lateral = lat; profile.Anteroposterior = ant; profile.Vertical = vert;
+        profile.Roll = roll; profile.Pitch = pitch; profile.Yaw = yaw;
+        profile.IsCommitted = Math.Abs(lat) > 0.01 || Math.Abs(ant) > 0.01 || Math.Abs(vert) > 0.01
+            || Math.Abs(roll) > 0.01 || Math.Abs(pitch) > 0.01 || Math.Abs(yaw) > 0.01;
+
+        NhpProfiles.Add(profile);
+        SetActiveNhpProfile(profile);
+
+#pragma warning disable MVVMTK0034
+        _nhpLateral         = ClampNhp(lat, false);
+        _nhpAnteroposterior = ClampNhp(ant, false);
+        _nhpVertical        = ClampNhp(vert, false);
+        _nhpRoll            = ClampNhp(roll, true);
+        _nhpPitch           = ClampNhp(pitch, true);
+        _nhpYaw             = ClampNhp(yaw, true);
+#pragma warning restore MVVMTK0034
+
+        OnPropertyChanged(nameof(NhpLateral));
+        OnPropertyChanged(nameof(NhpAnteroposterior));
+        OnPropertyChanged(nameof(NhpVertical));
+        OnPropertyChanged(nameof(NhpRoll));
+        OnPropertyChanged(nameof(NhpPitch));
+        OnPropertyChanged(nameof(NhpYaw));
+        OnPropertyChanged(nameof(IsNhpDirty));
+
+        RefreshNhpProfileFlags();
     }
 }
