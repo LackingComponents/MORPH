@@ -333,8 +333,9 @@ public partial class MainViewModel
                         MigrateBaselineToNhpProfileIfNeeded(
                             bl("Lat", false), bl("Ant", false), bl("Vert", false),
                             bl("Roll", true), bl("Pitch", true), bl("Yaw", true));
-                        // Task 6 adds the vertex/landmark un-bake here (legacy vertices/landmarks were
-                        // saved already-baked; the lazy model double-poses until the shim un-bakes them).
+                        // Vertex/landmark un-bake (inv CumulativeNhpMatrix) is applied at the load tail
+                        // below — search "Task 6 legacy shim" — AFTER verts/landmarks are in, so it covers
+                        // every piece incl. the named models condensed into Segments.
                     }
 
                     // Hybrid NHP: Restore anatomical landmarks (in baked NHP space)
@@ -523,6 +524,79 @@ public partial class MainViewModel
                         SavedCephLandmarks.Add(new CephLandmarkSave(cName, x2d, y2d, x3d, y3d, z3d));
                 }
             }
+
+            // ── Task 6: legacy bake-model → lazy-model migration shim (removal-pending, spec §6) ─────
+            // Legacy files baked CumulativeNhpMatrix into the stored vertices + DentalMidlinePoint +
+            // condyle CENTERS + ceph X3D/Y3D/Z3D at every commit. Under the lazy model NhpShared — rebuilt from
+            // the six the baseline was migrated into (above) — would compose ON TOP of those already-baked
+            // verts → double pose. Un-bake by inv(stored CumulativeNhpMatrix) to recover exact source
+            // verts/landmarks; the tail RefreshCombinedModel (next) re-applies a single NhpShared pose (the same
+            // single reconstruction the old load did, now via the lazy stack). Inv6 = renders identical to the
+            // original: displayed verts = NhpShared_load·source = (CumulativeNhpMatrix)·source = the legacy
+            // baked verts (NhpShared_load is rebuilt from the migrated six ≈ CumulativeNhpMatrix).
+            // Condyle HALF-EXTENTS were never baked (commits baked centers only) → left in source space,
+            // consistent with the migrated centers. VolumePivot → ModelCenter (the camera/orbit anchor, NOT
+            // NHP-tracked geometry) is deliberately LEFT in its saved/posed space: that poses it at the legacy
+            // volume's baked center = NhpShared_load·source_center = the displayed center, so the migrated view
+            // stays centered on the same on-screen point the legacy user saw (Inv6). Un-baking it would re-anchor
+            // the camera on source and make the once-centered legacy volume drift — a gratuitous view jump, not a
+            // fix; the volume RENDER still follows NhpSharedTransform (Task 2) so translation stays visible.
+            // Named models condense into Segments (refs), so the Segments loop covers them. New-format files
+            // carry no CumulativeNhpMatrix → the gate skips them. ponytail: removable once legacy bake-model
+            // .orthoplan files are out of the wild — delete this block; the NhpBaseline read above + the Migrate
+            // call become dead with it.
+            if (root.TryGetProperty("CumulativeNhpMatrix", out var cumNode)
+                && cumNode.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                var cum = ArrayToMatrix(cumNode);
+                if (!cum.IsIdentity && cum.HasInverse)
+                {
+                    cum.Invert();
+
+                    // 1. Un-bake vertices of every piece (float[] flat, stride 3). Mutate in place, then
+                    //    rebuild geometry so the next RefreshCombinedModel renders from source.
+                    static void UnbakeVerts(float[]? v, System.Windows.Media.Media3D.Matrix3D m)
+                    {
+                        if (v == null) return;
+                        for (int i = 0; i + 2 < v.Length; i += 3)
+                        {
+                            var p = m.Transform(new System.Windows.Media.Media3D.Point3D(v[i], v[i + 1], v[i + 2]));
+                            v[i] = (float)p.X; v[i + 1] = (float)p.Y; v[i + 2] = (float)p.Z;
+                        }
+                    }
+                    foreach (var s in Segments)          { UnbakeVerts(s.Vertices, cum); s.BuildModel(); }
+                    foreach (var m in ImportedMeshes)    { UnbakeVerts(m.Vertices, cum); m.BuildModel(); }
+                    foreach (var o in LoadedOcclusions) { UnbakeVerts(o.Vertices, cum); o.BuildModel(); }
+
+                    // 2. Un-bake tracked points (midline + condyle centers). Half-extents stay untouched.
+                    static (double X, double Y, double Z)? InvPt((double X, double Y, double Z)? p, System.Windows.Media.Media3D.Matrix3D m)
+                    {
+                        if (!p.HasValue) return null;
+                        var t = m.Transform(new System.Windows.Media.Media3D.Point3D(p.Value.X, p.Value.Y, p.Value.Z));
+                        return (t.X, t.Y, t.Z);
+                    }
+                    DentalMidlinePoint = InvPt(DentalMidlinePoint, cum);
+                    LeftCondyleCenter  = InvPt(LeftCondyleCenter,  cum);
+                    RightCondyleCenter = InvPt(RightCondyleCenter, cum);
+
+                    // 3. Un-bake ceph 3D coords; 2D (X2D/Y2D) are source-space DRR projections → untouched.
+                    if (SavedCephLandmarks.Count > 0)
+                    {
+                        var unbaked = new List<CephLandmarkSave>(SavedCephLandmarks.Count);
+                        foreach (var lm in SavedCephLandmarks)
+                        {
+                            if (lm.X3D is double x && lm.Y3D is double y && lm.Z3D is double z)
+                            {
+                                var t = cum.Transform(new System.Windows.Media.Media3D.Point3D(x, y, z));
+                                unbaked.Add(new CephLandmarkSave(lm.Name, lm.X2D, lm.Y2D, t.X, t.Y, t.Z));
+                            }
+                            else unbaked.Add(lm); // no 3D point on this landmark → pass through.
+                        }
+                        SavedCephLandmarks = unbaked;
+                    }
+                }
+            }
+            // ── end Task 6 legacy shim ─────────────────────────────────────────────────────────
 
             RefreshCombinedModel();
 
