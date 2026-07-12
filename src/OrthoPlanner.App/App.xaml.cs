@@ -22,6 +22,12 @@ public partial class App : Application
         var splash = new SplashWindow();
         splash.Show();
 
+#if DEBUG
+        // NHP math self-check (spec §7): pure-geometry primitives verified once at startup — identity-at-zero,
+        // invertible round-trip, rigidity. A failure pops the Debug.Assert dialog before the heavy init runs.
+        System.Threading.Tasks.Task.Run(() => OrthoPlanner.App.NhpMathSelfCheck.Run()).Wait();
+#endif
+
         // 2. Initialize background services asynchronously
         splash.Status = "Registering DICOM codecs...";
         await System.Threading.Tasks.Task.Run(() => {

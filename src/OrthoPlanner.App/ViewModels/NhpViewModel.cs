@@ -203,17 +203,15 @@ public partial class MainViewModel
     }
 
     /// <summary>
-    /// Builds the NHP transform matrix from the given six, centered on VolumePivot (or bone bounds).
-    /// Zeros = the original un-NHP source frame. Used both for the absolute NhpShared and (Task 4) save.
+    /// Builds the NHP transform matrix from the given six, centered at <paramref name="center"/>.
+    /// Zeros = the original un-NHP source frame. Pure geometry — center passed in, no instance state.
+    /// The instance overload below sources <paramref name="center"/> from <see cref="VolumePivot"/>/bone
+    /// bounds; this static form is what the DEBUG <see cref="NhpMathSelfCheck"/> verifies.
     /// </summary>
-    private Matrix3D BuildNhpMatrix(double dLat, double dAnt, double dVert,
+    // ponytail: internal for the DEBUG NhpMathSelfCheck only — pure function of center + six.
+    internal static Matrix3D BuildNhpMatrix(Point3D center, double dLat, double dAnt, double dVert,
         double dRoll, double dPitch, double dYaw)
     {
-        var center = VolumePivot ?? new Point3D(
-            BoneOnlyBounds.X + BoneOnlyBounds.SizeX / 2,
-            BoneOnlyBounds.Y + BoneOnlyBounds.SizeY / 2,
-            BoneOnlyBounds.Z + BoneOnlyBounds.SizeZ / 2);
-
         var nhp = new Transform3DGroup();
         nhp.Children.Add(new TranslateTransform3D(-center.X, -center.Y, -center.Z));
         nhp.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), dPitch)));
@@ -221,6 +219,17 @@ public partial class MainViewModel
         nhp.Children.Add(new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 0, 1), dYaw)));
         nhp.Children.Add(new TranslateTransform3D(center.X + dLat, center.Y + dAnt, center.Z + dVert));
         return nhp.Value;
+    }
+
+    /// <summary>Instance path: center from <see cref="VolumePivot"/> (or bone bounds) → the pure static builder.</summary>
+    private Matrix3D BuildNhpMatrix(double dLat, double dAnt, double dVert,
+        double dRoll, double dPitch, double dYaw)
+    {
+        var center = VolumePivot ?? new Point3D(
+            BoneOnlyBounds.X + BoneOnlyBounds.SizeX / 2,
+            BoneOnlyBounds.Y + BoneOnlyBounds.SizeY / 2,
+            BoneOnlyBounds.Z + BoneOnlyBounds.SizeZ / 2);
+        return BuildNhpMatrix(center, dLat, dAnt, dVert, dRoll, dPitch, dYaw);
     }
 
     /// <summary>NhpShared = the absolute NHP matrix from the live six (zeros = source frame). No cumulative/delta split under the lazy model.</summary>

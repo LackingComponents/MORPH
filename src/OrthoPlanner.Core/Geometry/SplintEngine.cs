@@ -340,6 +340,10 @@ public static class SplintEngine
         }
 
         float signedAngle = sign * angle;
+        // ponytail: B4 — autorotation scratch (spec §4). rotatedLowerCurve/Mesh are RETURNED COPIES consumed
+        // by the App layer as transient wafer-generation input; never assigned to a persisted piece.Transform nor
+        // written to stored Vertices. The clearance probe below is likewise a pure-function local. (The old
+        // BakeTransformIntoVertices helper was deleted in Task 3 — no scratch→stored sites remain.)
         var rotatedLowerCurve = RotateCurve(lowerCurve, axisA, (ax, ay, az), signedAngle);
         var rotatedLowerMesh = lowerMesh == null || lowerMesh.Length < 3
             ? lowerMesh
