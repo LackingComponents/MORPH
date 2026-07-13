@@ -284,10 +284,14 @@ public partial class MainViewModel
     private void AssertFormulaHolds()
     {
         // INV1 — every piece carries the formula. RecomputeAllTransforms just wrote each, so verify each.
+        // Full upper-left 3×3 + offsets: a wrong compose order or a dropped LocalTransform corrupts the
+        // off-diagonal rotation entries (M12/M13/M21/M23/M31/M32), so comparing those too — not just the
+        // diagonal + offsets — makes the assert actually catch a formula regression, not just a translation one.
         bool Eq(Matrix3D a, Matrix3D b)
-            => Math.Abs(a.M11-b.M11)<1e-9 && Math.Abs(a.OffsetX-b.OffsetX)<1e-9
-            && Math.Abs(a.M22-b.M22)<1e-9 && Math.Abs(a.OffsetY-b.OffsetY)<1e-9
-            && Math.Abs(a.M33-b.M33)<1e-9 && Math.Abs(a.OffsetZ-b.OffsetZ)<1e-9;
+            => Math.Abs(a.M11-b.M11)<1e-9 && Math.Abs(a.M12-b.M12)<1e-9 && Math.Abs(a.M13-b.M13)<1e-9
+            && Math.Abs(a.M21-b.M21)<1e-9 && Math.Abs(a.M22-b.M22)<1e-9 && Math.Abs(a.M23-b.M23)<1e-9
+            && Math.Abs(a.M31-b.M31)<1e-9 && Math.Abs(a.M32-b.M32)<1e-9 && Math.Abs(a.M33-b.M33)<1e-9
+            && Math.Abs(a.OffsetX-b.OffsetX)<1e-9 && Math.Abs(a.OffsetY-b.OffsetY)<1e-9 && Math.Abs(a.OffsetZ-b.OffsetZ)<1e-9;
         Matrix3D Expected(Transform3D local)
         { var g = new MatrixTransform3D(_nhpShared); var c = ComposeTransforms(g, local); return c.Value; }
         void Expect(Transform3D? t, Transform3D? local, string what)
