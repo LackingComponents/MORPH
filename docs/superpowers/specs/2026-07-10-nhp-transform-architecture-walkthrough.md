@@ -16,7 +16,7 @@ piece.Transform = Compose(NhpShared, piece.LocalTransform)
 
 - **`NhpShared`** — one shared `Matrix3D`, built once from the six **absolute** NHP sliders of the active profile. Absolute-from-source: zeros = the original un-NHP volume. Rigid (rotation + translation, no scale). Held in `_nhpShared` ([NhpViewModel.cs:46]) and exposed as `NhpSharedTransform` (a `MatrixTransform3D`, [:49]).
 - **`piece.LocalTransform`** — the per-piece, **persisted** displacement record. `Identity` for an unperturbed piece/imported cast/splint; a surgical movement for an operated segment. For `SegmentViewModel` it is an alias of the existing `SurgicalTransform` ([MainViewModel.cs:246-250]); for `MeshViewModel` it is a plain `Transform3D` property ([MainViewModel.cs:319], `Identity` default).
-- **`Compose(A, B)`** = `Transform3DGroup{A, B}` = "apply A then B" (WPF row-vector convention). `ComposeTransforms` fast-paths to `first` when `second` is Identity ([NhpViewModel.cs:309]).
+- **`Compose(A, B)`** = `Transform3DGroup{A, B}` = "apply A then B" (WPF row-vector convention). `ComposeTransforms` fast-paths to `first` when `second` is Identity ([NhpViewModel.cs:319]).
 
 **Layer diagram:**
 
@@ -200,7 +200,7 @@ The manual end-to-end GUI confirms (INV2/4/7/8/9, the B2/B3/B4 paths, the legacy
 | Where do vertices live? | Source DICOM frame, forever. |
 | What gets stored? | `NhpProfiles` (six each) + per-piece `LocalTransform`; vertices & landmarks in source space. |
 | What's derived? | `NhpShared` (from the active profile's six) and every `piece.Transform`. |
-| Where's the one recompute? | `RecomputeAllTransforms` (NhpViewModel.cs:246). |
+| Where's the one recompute? | `RecomputeAllTransforms` (NhpViewModel.cs:255). |
 | What does commit do? | Flips profile flags. Moves nothing. |
 | Where is geometry allowed to bake? | B2 only — cast/occlusion registration onto CT source. |
 | How do picks survive NHP change? | Stored as `world × NhpShared⁻¹`; rendered posed. |
