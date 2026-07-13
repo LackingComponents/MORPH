@@ -290,8 +290,16 @@ public partial class MainViewModel
             && Math.Abs(a.M33-b.M33)<1e-9 && Math.Abs(a.OffsetZ-b.OffsetZ)<1e-9;
         Matrix3D Expected(Transform3D local)
         { var g = new MatrixTransform3D(_nhpShared); var c = ComposeTransforms(g, local); return c.Value; }
-        foreach (var seg in Segments)
-            System.Diagnostics.Debug.Assert(Eq(seg.Transform.Value, Expected(seg.LocalTransform)), "INV1 segment");
+        void Expect(Transform3D? t, Transform3D? local, string what)
+        { if (t == null || local == null) return; System.Diagnostics.Debug.Assert(Eq(t.Value, Expected(local)), "INV1 " + what); }
+        // INV1 — assert the formula on every piece RecomputeAllTransforms wrote (named models are also
+        // Segments refs but asserted explicitly so a future non-Segments named model is still caught).
+        foreach (var seg in Segments)           Expect(seg.Transform,            seg.LocalTransform,           "segment");
+        Expect(HardTissueModel?.Transform,      HardTissueModel?.LocalTransform, "hard-tissue");
+        Expect(SoftTissueModel?.Transform,      SoftTissueModel?.LocalTransform, "soft-tissue");
+        Expect(DentalModel?.Transform,          DentalModel?.LocalTransform,     "dental");
+        foreach (var mesh in ImportedMeshes)    Expect(mesh.Transform,           mesh.LocalTransform,          "mesh");
+        foreach (var occ in LoadedOcclusions)   Expect(occ.Transform,            occ.LocalTransform,            "occlusion");
     }
 
     /// <summary>Returns the inverse of a Matrix3D, or Identity if not invertible.</summary>
