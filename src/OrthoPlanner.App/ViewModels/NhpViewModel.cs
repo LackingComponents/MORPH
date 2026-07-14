@@ -50,6 +50,19 @@ public partial class MainViewModel
     // When committed, this is Identity. Applied on top of already-baked vertices.
     private Transform3D _nhpTransform = Transform3D.Identity;
 
+    /// <summary>
+    /// Visual-only NHP delta during preview. Cephalometry landmark spheres apply this
+    /// transform so they stay aligned with mesh segments before commit.
+    /// </summary>
+    public Transform3D NhpPreviewTransform => _nhpTransform;
+
+    /// <summary>
+    /// Raised after an NHP delta has been baked into the model. Consumers that keep
+    /// geometry outside the main model ledger (such as cephalometry visuals) use the
+    /// committed delta to move their stored coordinates into the new baked space.
+    /// </summary>
+    public event Action<Matrix3D>? NhpCommitted;
+
     // _cumulativeNhpMatrix: product of ALL committed NHP deltas since DICOM load.
     // Used by MPR (cumulative × delta = total transform from DICOM space).
     // CORRECT multiplication order: _cumulativeNhpMatrix = _cumulativeNhpMatrix * delta
@@ -173,7 +186,7 @@ public partial class MainViewModel
         if (VolumePivot.HasValue)
             VolumePivot = deltaMatrix.Transform(VolumePivot.Value);
 
-        // 6. Bake cephalometric 3D coordinates
+        // 6. Bake cephalometric 3D coordinates (2D is reprojected by the ceph overlay)
         if (SavedCephLandmarks.Count > 0)
         {
             var updatedLandmarks = new List<CephLandmarkSave>(SavedCephLandmarks.Count);
@@ -203,6 +216,8 @@ public partial class MainViewModel
         // 10. Re-apply transforms and refresh
         OnPropertyChanged(nameof(IsNhpDirty));
         ApplyNhpToAllTrackedObjects();
+        OnPropertyChanged(nameof(NhpPreviewTransform));
+        NhpCommitted?.Invoke(deltaMatrix);
         RefreshCombinedModel();
         UpdateAllSlices();
         StatusText = $"{_activeNhpProfile?.Name ?? "NHP"} committed and baked into geometry.";
@@ -367,6 +382,7 @@ public partial class MainViewModel
         _nhpTransform = new MatrixTransform3D(previewMatrix);
 
         ApplyNhpToAllTrackedObjects();
+        OnPropertyChanged(nameof(NhpPreviewTransform));
 
         var center = VolumePivot ?? new Point3D(
             BoneOnlyBounds.X + BoneOnlyBounds.SizeX / 2,

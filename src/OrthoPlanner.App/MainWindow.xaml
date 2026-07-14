@@ -69,6 +69,22 @@
             </Border>
         </DataTemplate>
 
+        <DataTemplate DataType="{x:Type vm:CephPlaneViewModel}">
+            <Border Padding="4,3" Margin="0,1" CornerRadius="3" Background="#10FFFFFF"
+                    ContextMenu="{StaticResource ThreeDModelContextMenu}">
+                <DockPanel Background="Transparent">
+                    <CheckBox IsChecked="{Binding IsVisible}" DockPanel.Dock="Left"
+                              VerticalAlignment="Center" Margin="0,0,4,0" />
+                    <Button DockPanel.Dock="Right" Content="✕"
+                            Background="Transparent" BorderThickness="0" Foreground="#888"
+                            Padding="3,0" VerticalAlignment="Center" Cursor="Hand"
+                            Command="{Binding DataContext.DeleteCephPlaneItemCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}" ToolTip="Delete plane" />
+                    <TextBlock Text="{Binding Name}" FontSize="10" VerticalAlignment="Center" />
+                </DockPanel>
+            </Border>
+        </DataTemplate>
+
         <Style x:Key="PanelTabButtonStyle" TargetType="RadioButton">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="#FFA0AAB5" />
@@ -1026,6 +1042,21 @@
                         <TextBlock Text="3D MODELS" Style="{StaticResource PanelHeader}" FontSize="9" Margin="0,0,0,4" />
                         <ScrollViewer MaxHeight="200" VerticalScrollBarVisibility="Auto">
                             <ItemsControl ItemsSource="{Binding ThreeDModelsPanelItems}" />
+                        </ScrollViewer>
+                        <TextBlock Text="PLANES" FontSize="9" Margin="0,8,0,4">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock" BasedOn="{StaticResource PanelHeader}">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasCephalometryPlanes}" Value="False">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <ScrollViewer MaxHeight="120" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding CephalometryPlaneItems}" />
                         </ScrollViewer>
                     </StackPanel>
                 </Border>

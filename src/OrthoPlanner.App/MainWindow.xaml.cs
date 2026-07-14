@@ -123,6 +123,7 @@ public partial class MainWindow : Window
                             // Subscribe once so the tree rebuilds whenever measurements change
                             CephalometryPanel.MeasurementsChanged -= RebuildCephMeasurementTree;
                             CephalometryPanel.MeasurementsChanged += RebuildCephMeasurementTree;
+                            RebuildCephMeasurementTree();
                         }
                         break;
 
@@ -227,7 +228,7 @@ public partial class MainWindow : Window
 
     // ═══ Projection toggle ═══
 
-    private void OnProjectionChanged(object sender, RoutedEventArgs e)
+    internal void OnProjectionChanged(object sender, RoutedEventArgs e)
     {
         var isOrtho = (sender as CheckBox)?.IsChecked == true;
         var currentCam = Viewport3D.Camera;
@@ -1016,6 +1017,11 @@ public partial class MainWindow : Window
     private const double CornerZoneFraction = 0.54;       // 3× previous 0.18
     private const double CornerZoneMaxPx = 360;           // 3× previous 120
 
+    public void OpenNhpEditor()
+    {
+        NhpToggleButton.IsChecked = true;
+    }
+
     private bool IsNhpPanelOpen => NhpToggleButton.IsChecked == true;
 
     private bool _nhpTrackCameraOnDown;
@@ -1313,6 +1319,10 @@ public partial class MainWindow : Window
         Dispatcher.InvokeAsync(() =>
         {
             var measurements = CephalometryPanel.GetMeasurements();
+            VM?.SetCephalometryPlanes(
+                measurements.Where(m => m.ToolType == OrthoPlanner.Core.Imaging.CephTool.InfinitePlane),
+                _ => CephalometryPanel.RefreshMeasurementDisplayFromExternalChange(),
+                plane => CephalometryPanel.DeleteMeasurementFromTree(plane.Source));
 
             CephPointsPanel.Children.Clear();
             CephPlanesPanel.Children.Clear();

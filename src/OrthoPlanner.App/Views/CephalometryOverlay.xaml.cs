@@ -1,11 +1,15 @@
+using System.ComponentModel;
 using System.Numerics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Media.Media3D;
 using System.Windows.Shapes;
 using OrthoPlanner.Core.Imaging;
+using OrthoPlanner.Core.Imaging.Cephalometry;
+using OrthoPlanner.App.Helpers;
 using OrthoPlanner.App.ViewModels;
 using HelixToolkit.Wpf.SharpDX;
 using HxGeom = HelixToolkit.SharpDX;
@@ -55,10 +59,9 @@ public partial class CephalometryOverlay : UserControl
     // ── 3D Mode ───────────────────────────────────────────────────────────────
     private bool _is3DMode;
     private readonly List<MeshGeometryModel3D> _landmarkSpheres3D = new();
+    private readonly Dictionary<MeshGeometryModel3D, CephalometricLandmark> _landmarkSphereMap = new();
     private Vector3? _pending3DHit;
     private System.Windows.Point _mouseDown3DScreenPos;
-    private bool _shiftHeld;
-    private Window? _hostWindow;
 
     // ÔöÇÔöÇ 3D Measurements ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     private sealed class Meas3D
@@ -79,9 +82,24 @@ public partial class CephalometryOverlay : UserControl
     private readonly CephToolState _toolState = new();
     private CephPoint? _rubberBandEnd;
 
-    // ÔöÇÔöÇ Generation ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // ── Generation ─────────────────────────────────────────────────────────────
     private CancellationTokenSource? _genCts;
     private bool _initialized;
+    private string? _lateralDrrKey;
+    private string? _paDrrKey;
+
+    private readonly CephAnalysisPanelViewModel _analysisPanel = new();
+    private bool _showCephGrid;
+    private System.Windows.Point _cephGridCenter = new(-1, -1);
+    private System.Windows.Point _cephGridNewCenter = new(-1, -1);
+    private bool _isDraggingCephGrid;
+    private System.Windows.Point _cephGridDragStart;
+    private System.Windows.Point _cephGridDragInitialCenter;
+    private MainViewModel? _subscribedVm;
+    private bool _syncingGridCheckbox;
+
+    /// <summary>View-model for the Steiner / Tweed / Ricketts analysis result tables.</summary>
+    public CephAnalysisPanelViewModel AnalysisPanel => _analysisPanel;
 
     // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     // Constructor
@@ -90,12 +108,15 @@ public partial class CephalometryOverlay : UserControl
     public CephalometryOverlay()
     {
         InitializeComponent();
+        AnalysisTabControl.DataContext = _analysisPanel;
 
         CmbProjection.Items.Add("Lateral");
         CmbProjection.Items.Add("PA");
         CmbProjection.SelectedIndex = 0;
 
         ViewportBorder.SizeChanged += (_, _) => UpdateImageTransform();
+
+        ViewportGrid.SizeChanged += (_, _) => DrawCephGrid();
 
         // Keyboard shortcuts
         PreviewKeyDown += (_, e) =>
@@ -125,6 +146,8 @@ public partial class CephalometryOverlay : UserControl
                 _toolState.SelectedMeasurement = null;
                 RefreshMeasurementOverlay();
                 RefreshMeasurementPanel();
+                Refresh3DMeasurements();
+                MeasurementsChanged?.Invoke();
                 e.Handled = true;
             }
         };
@@ -173,6 +196,14 @@ public partial class CephalometryOverlay : UserControl
         m.IsVisible = visible;
         RefreshMeasurementOverlay();
         RefreshMeasurementPanel();
+        MeasurementsChanged?.Invoke();
+    }
+
+    public void RefreshMeasurementDisplayFromExternalChange()
+    {
+        RefreshMeasurementOverlay();
+        RefreshMeasurementPanel();
+        Refresh3DMeasurements();
     }
 
     /// <summary>
@@ -185,31 +216,59 @@ public partial class CephalometryOverlay : UserControl
             _toolState.SelectedMeasurement = null;
         RefreshMeasurementOverlay();
         RefreshMeasurementPanel();
+        Refresh3DMeasurements();
         MeasurementsChanged?.Invoke();
     }
 
     public void SetVolume(VolumeData volume)
     {
-        if (volume == _volume && _initialized) return;
+        bool sameVolume = volume == _volume && _initialized;
         _volume = volume;
-        _lateralDrr = null;
-        _paDrr = null;
-        _activeDrr = null;
-        _landmarks = CephalometricLandmarkDefinitions.GetAll();
+        if (!sameVolume)
+        {
+            _lateralDrr = null;
+            _paDrr = null;
+            _activeDrr = null;
+            _lateralDrrKey = null;
+            _paDrrKey = null;
+            _landmarks = CephalometricLandmarkDefinitions.GetAll();
+
+            // Restore any previously saved landmark positions from the project
+            RestoreLandmarkData();
+            BuildLandmarkSidebar();
+        }
+        else
+        {
+            InvalidateDrrCache();
+        }
+
         _initialized = true;
-
-        // Restore any previously saved landmark positions from the project
-        RestoreLandmarkData();
-
-        BuildLandmarkSidebar();
-        _ = GenerateDrrAsync(lateral: true);
+        RefreshAnalysis();
+        bool lateral = CmbProjection.SelectedIndex == 0;
+        _ = GenerateDrrAsync(lateral, resetView: !sameVolume, reprojectGeometry: sameVolume);
     }
 
-    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
-    // DRR Generation
-    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+    private void InvalidateDrrCache()
+    {
+        _lateralDrr = null;
+        _paDrr = null;
+        _lateralDrrKey = null;
+        _paDrrKey = null;
+    }
 
-    private async Task GenerateDrrAsync(bool lateral)
+    private static string BuildDrrCacheKey(DrrProjectionParams projection, bool lateral)
+    {
+        var inv = projection.InverseNhp;
+        return $"{(lateral ? "L" : "P")}:{projection.MinX:R}:{projection.MaxX:R}:{projection.MinY:R}:{projection.MaxY:R}:{projection.MinZ:R}:{projection.MaxZ:R}:" +
+               $"{inv.M11:R}:{inv.M12:R}:{inv.M13:R}:{inv.M21:R}:{inv.M22:R}:{inv.M23:R}:" +
+               $"{inv.M31:R}:{inv.M32:R}:{inv.M33:R}:{inv.M41:R}:{inv.M42:R}:{inv.M43:R}";
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DRR Generation
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private async Task GenerateDrrAsync(bool lateral, bool resetView = false, bool reprojectGeometry = false)
     {
         if (_volume == null) return;
 
@@ -225,30 +284,51 @@ public partial class CephalometryOverlay : UserControl
 
         try
         {
+            var vm = GetMainVm();
+            if (vm == null || !vm.TryGetDrrProjectionParams(out var projection))
+                return;
+
+            string cacheKey = BuildDrrCacheKey(projection, lateral);
             DrrResult drr;
             if (lateral)
             {
-                _lateralDrr ??= await Task.Run(() => DrrGenerator.GenerateLateral(_volume, ct), ct);
+                if (_lateralDrr == null || _lateralDrrKey != cacheKey)
+                {
+                    _lateralDrr = await Task.Run(() => DrrGenerator.GenerateLateral(_volume, projection, ct), ct);
+                    _lateralDrrKey = cacheKey;
+                }
                 drr = _lateralDrr;
             }
             else
             {
-                _paDrr ??= await Task.Run(() => DrrGenerator.GeneratePA(_volume, ct), ct);
+                if (_paDrr == null || _paDrrKey != cacheKey)
+                {
+                    _paDrr = await Task.Run(() => DrrGenerator.GeneratePA(_volume, projection, ct), ct);
+                    _paDrrKey = cacheKey;
+                }
                 drr = _paDrr;
             }
 
             _activeDrr = drr;
-            _windowWidth = 1.0;
-            _windowCenter = 0.5;
-            _zoom = 1.0;
-            _panX = 0;
-            _panY = 0;
+            if (resetView)
+            {
+                _windowWidth = 1.0;
+                _windowCenter = 0.5;
+                _zoom = 1.0;
+                _panX = 0;
+                _panY = 0;
+            }
 
             RenderDrr();
-            FitToViewport();
+            if (resetView)
+                FitToViewport();
 
-            StatusLeft.Text = "Ready -- Left-click to place landmark, right-drag for W/L";
+            if (reprojectGeometry)
+                ReprojectLandmarksAndMeasurements2D();
+
+            StatusLeft.Text = "Ready — Left-click place landmark, right-drag W/L (Shift+right-click on dot to delete)";
             UpdateStatusInfo();
+            RefreshAnalysis();
         }
         catch (OperationCanceledException) { StatusLeft.Text = "Cancelled"; }
         catch (Exception ex)
@@ -459,7 +539,8 @@ public partial class CephalometryOverlay : UserControl
 
     private void ImageCanvas_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.OriginalSource is Ellipse dot && dot.Tag is CephalometricLandmark lm)
+        if (e.OriginalSource is Ellipse dot && dot.Tag is CephalometricLandmark lm
+            && (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift)
         {
             lm.Position = null;
             lm.Position3D = null;
@@ -576,9 +657,15 @@ public partial class CephalometryOverlay : UserControl
         return new System.Windows.Point(imgX, imgY);
     }
 
-    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+    // ═══════════════════════════════════════════════════════════════════════════
     // 3D Mode: Toggle
-    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private void ChkOrtho_Changed(object sender, RoutedEventArgs e)
+    {
+        if (Application.Current.MainWindow is MainWindow mw)
+            mw.OnProjectionChanged(sender, e);
+    }
 
     private void Toggle3D_Changed(object sender, RoutedEventArgs e)
     {
@@ -603,8 +690,8 @@ public partial class CephalometryOverlay : UserControl
             Refresh3DMeasurements();
 
             StatusLeft.Text = _toolState.ActiveTool == CephTool.Select
-                ? "3D Mode — landmark spheres visible on model"
-                : "3D Mode — Click to measure (Esc to cancel)";
+                ? "3D — Left-click place/drag landmark (Shift+right-click near dot to delete)"
+                : "3D — Click to measure (Esc to cancel)";
         }
         else
         {
@@ -622,10 +709,11 @@ public partial class CephalometryOverlay : UserControl
             // Show DRR overlay again
             ViewportBorder.Visibility = Visibility.Visible;
             RefreshLandmarkOverlay();
-            StatusLeft.Text = "2D Mode — Left-click to place landmark, right-drag for W/L";
+            StatusLeft.Text = "2D — Left-click place/drag landmark, right-drag W/L (Shift+right-click on dot to delete)";
         }
 
         UpdateViewportGridHitTest();
+        DrawCephGrid();
     }
 
     private HelixToolkit.Wpf.SharpDX.Viewport3DX? SharedViewport3D =>
@@ -639,18 +727,14 @@ public partial class CephalometryOverlay : UserControl
     // actually being placed. No synthetic event forwarding (RaiseEvent) is used.
     // In 2D mode, the DRR canvas remains fully interactive.
 
-    private bool ShouldCaptureLeftClickForPlacement()
-    {
-        if (!_is3DMode) return false;
-        bool shift = _shiftHeld
-                  || Keyboard.IsKeyDown(Key.LeftShift)
-                  || Keyboard.IsKeyDown(Key.RightShift);
-        return _toolState.ActiveTool != CephTool.Select || shift;
-    }
-
     private void UpdateViewportGridHitTest()
     {
-        bool shouldCapture = !_is3DMode;
+        // In 3D mode the grid overlay is normally mouse-transparent so the Helix
+        // viewport gets native navigation. When "Move Grid" is active we let the
+        // ViewportGrid capture input so the grid can be dragged over the 3D view too.
+        bool gridDrag = BtnGridDrag?.IsChecked == true
+                        && CephGridOverlay?.Visibility == Visibility.Visible;
+        bool shouldCapture = !_is3DMode || gridDrag;
 
         ViewportGrid.IsHitTestVisible = shouldCapture;
         ViewportGrid.Background = shouldCapture ? Brushes.Transparent : null;
@@ -667,6 +751,8 @@ public partial class CephalometryOverlay : UserControl
         _hookedViewport = vp;
         vp.PreviewMouseLeftButtonDown += Viewport3D_PreviewMouseLeftButtonDown;
         vp.PreviewMouseLeftButtonUp   += OnViewport3DMouseLeftButtonUp;
+        vp.PreviewMouseMove           += Viewport3D_PreviewMouseMove;
+        vp.PreviewMouseRightButtonDown += Viewport3D_PreviewMouseRightButtonDown;
     }
 
     private void DetachViewportPlacementHandlers()
@@ -674,50 +760,188 @@ public partial class CephalometryOverlay : UserControl
         if (_hookedViewport == null) return;
         _hookedViewport.PreviewMouseLeftButtonDown -= Viewport3D_PreviewMouseLeftButtonDown;
         _hookedViewport.PreviewMouseLeftButtonUp   -= OnViewport3DMouseLeftButtonUp;
+        _hookedViewport.PreviewMouseMove           -= Viewport3D_PreviewMouseMove;
+        _hookedViewport.PreviewMouseRightButtonDown -= Viewport3D_PreviewMouseRightButtonDown;
         _hookedViewport = null;
     }
 
-    private void AttachHostKeyboardHandlers()
+    // ── Cephalometry reference grid ───────────────────────────────────────────
+
+    private MainViewModel? GetMainVm() =>
+        (Application.Current.MainWindow as MainWindow)?.DataContext as MainViewModel;
+
+    private void SubscribeMainVm()
     {
-        var window = Window.GetWindow(this) ?? Application.Current.MainWindow;
-        if (window == null) return;
-
-        if (_hostWindow != null && _hostWindow != window)
-            DetachHostKeyboardHandlers();
-
-        _hostWindow = window;
-        _hostWindow.PreviewKeyDown -= CephOverlay_PreviewKeyDown;
-        _hostWindow.PreviewKeyUp -= CephOverlay_PreviewKeyUp;
-        _hostWindow.PreviewKeyDown += CephOverlay_PreviewKeyDown;
-        _hostWindow.PreviewKeyUp += CephOverlay_PreviewKeyUp;
+        var vm = GetMainVm();
+        if (vm == null || vm == _subscribedVm) return;
+        UnsubscribeMainVm();
+        _subscribedVm = vm;
+        _subscribedVm.PropertyChanged += OnMainVmPropertyChanged;
+        _subscribedVm.NhpCommitted += OnNhpCommitted;
+        _syncingGridCheckbox = true;
+        ChkShowGrid.IsChecked = _showCephGrid;
+        _syncingGridCheckbox = false;
+        UpdateCephGrid();
     }
 
-    private void DetachHostKeyboardHandlers()
+    private void UnsubscribeMainVm()
     {
-        if (_hostWindow == null) return;
-
-        _hostWindow.PreviewKeyDown -= CephOverlay_PreviewKeyDown;
-        _hostWindow.PreviewKeyUp -= CephOverlay_PreviewKeyUp;
-        _hostWindow = null;
-        _shiftHeld = false;
+        if (_subscribedVm == null) return;
+        _subscribedVm.PropertyChanged -= OnMainVmPropertyChanged;
+        _subscribedVm.NhpCommitted -= OnNhpCommitted;
+        _subscribedVm = null;
     }
 
-    private void CephOverlay_PreviewKeyDown(object sender, KeyEventArgs e)
+    private void OnMainVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.Key == Key.LeftShift || e.Key == Key.RightShift)
+        // The cephalometry grid is intentionally local to this overlay. Do not
+        // mirror MainViewModel.ShowGrid here, otherwise the main viewport grid
+        // renders underneath and creates a double-grid layer.
+        if (e.PropertyName == nameof(MainViewModel.ShowGrid) && IsVisible)
+            Dispatcher.InvokeAsync(() => SetMainViewportGridLayerVisible(false));
+        else if (e.PropertyName == nameof(MainViewModel.NhpPreviewTransform))
+            Dispatcher.InvokeAsync(ApplyNhpToCephalometryVisuals);
+    }
+
+    private void OnNhpCommitted(Matrix3D delta)
+    {
+        Dispatcher.InvokeAsync(() =>
         {
-            _shiftHeld = true;
-            UpdateViewportGridHitTest();
-        }
+            // MainViewModel has already baked and saved landmark coordinates.
+            RestoreLandmarkData();
+
+            foreach (var measurement in _measurements3D)
+            {
+                for (int i = 0; i < measurement.Pts.Count; i++)
+                    measurement.Pts[i] = TransformPoint(measurement.Pts[i], delta);
+            }
+
+            for (int i = 0; i < _pending3DPts.Count; i++)
+                _pending3DPts[i] = TransformPoint(_pending3DPts[i], delta);
+
+            foreach (var plane in _toolState.Measurements)
+            {
+                if (plane.PlaneOrigin3D is { } origin)
+                    plane.PlaneOrigin3D = TransformPoint(origin, delta);
+                if (plane.PlaneNormal3D is { } normal)
+                    plane.PlaneNormal3D = TransformVector(normal, delta);
+                if (plane.PlaneAxisU3D is { } axisU)
+                    plane.PlaneAxisU3D = TransformVector(axisU, delta);
+                if (plane.PlaneAxisV3D is { } axisV)
+                    plane.PlaneAxisV3D = TransformVector(axisV, delta);
+            }
+
+            Refresh3DLandmarks();
+            Refresh3DMeasurements();
+            InvalidateDrrCache();
+            EnsureGeometry3DFrom2D();
+            bool lateral = CmbProjection.SelectedIndex == 0;
+            _ = GenerateDrrAsync(lateral, resetView: false, reprojectGeometry: true);
+        });
     }
 
-    private void CephOverlay_PreviewKeyUp(object sender, KeyEventArgs e)
+    private void ChkShowGrid_Changed(object sender, RoutedEventArgs e)
     {
-        if (e.Key == Key.LeftShift || e.Key == Key.RightShift)
+        if (_syncingGridCheckbox) return;
+        _showCephGrid = ChkShowGrid.IsChecked == true;
+        UpdateCephGrid();
+    }
+
+    private void UpdateCephGrid()
+    {
+        bool show = _showCephGrid;
+        CephGridOverlay.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        BtnGridDrag.IsEnabled = show;
+
+        if (!show)
         {
-            _shiftHeld = false;
-            UpdateViewportGridHitTest();
+            BtnGridDrag.IsChecked = false;
+            CephGridOverlay.IsHitTestVisible = false;
+            _isDraggingCephGrid = false;
         }
+        else
+        {
+            CephGridOverlay.IsHitTestVisible = BtnGridDrag.IsChecked == true;
+            DrawCephGrid();
+        }
+        UpdateViewportGridHitTest();
+    }
+
+    private void DrawCephGrid()
+    {
+        if (CephGridOverlay.Visibility != Visibility.Visible) return;
+        ScreenGridRenderer.Draw(
+            CephGridOverlay,
+            ViewportGrid.ActualWidth,
+            ViewportGrid.ActualHeight,
+            _cephGridCenter);
+    }
+
+    // ── Grid drag (screen-space reposition, shared with main-viewport behaviour) ──
+
+    private void BtnGridDrag_Changed(object sender, RoutedEventArgs e)
+    {
+        bool dragging = BtnGridDrag.IsChecked == true
+                        && CephGridOverlay.Visibility == Visibility.Visible;
+        CephGridOverlay.IsHitTestVisible = dragging;
+        if (!dragging) _isDraggingCephGrid = false;
+        UpdateViewportGridHitTest();
+
+        StatusLeft.Text = dragging
+            ? "Move Grid: drag to reposition. Right-click the button for center options."
+            : "";
+    }
+
+    private System.Windows.Point CephGridResolvedCenter() =>
+        _cephGridCenter.X >= 0
+            ? _cephGridCenter
+            : new System.Windows.Point(ViewportGrid.ActualWidth / 2.0, ViewportGrid.ActualHeight / 2.0);
+
+    private void CephGridOverlay_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (BtnGridDrag.IsChecked != true) return;
+        _isDraggingCephGrid = true;
+        _cephGridDragStart = e.GetPosition(CephGridOverlay);
+        _cephGridDragInitialCenter = CephGridResolvedCenter();
+        CephGridOverlay.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void CephGridOverlay_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_isDraggingCephGrid) return;
+        var pos = e.GetPosition(CephGridOverlay);
+        _cephGridCenter = new System.Windows.Point(
+            _cephGridDragInitialCenter.X + (pos.X - _cephGridDragStart.X),
+            _cephGridDragInitialCenter.Y + (pos.Y - _cephGridDragStart.Y));
+        DrawCephGrid();
+        e.Handled = true;
+    }
+
+    private void CephGridOverlay_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_isDraggingCephGrid) return;
+        _isDraggingCephGrid = false;
+        CephGridOverlay.ReleaseMouseCapture();
+        e.Handled = true;
+    }
+
+    private void CephGrid_SetCenter_Click(object sender, RoutedEventArgs e) =>
+        _cephGridNewCenter = CephGridResolvedCenter();
+
+    private void CephGrid_Recentre_Click(object sender, RoutedEventArgs e)
+    {
+        _cephGridCenter = _cephGridNewCenter.X >= 0
+            ? _cephGridNewCenter
+            : new System.Windows.Point(-1, -1);
+        DrawCephGrid();
+    }
+
+    private void CephGrid_Reset_Click(object sender, RoutedEventArgs e)
+    {
+        _cephGridCenter = new System.Windows.Point(-1, -1);
+        _cephGridNewCenter = new System.Windows.Point(-1, -1);
+        DrawCephGrid();
     }
 
     // ─── Ceph overlay visibility: refresh spheres on enter, hide on exit ────
@@ -726,23 +950,30 @@ public partial class CephalometryOverlay : UserControl
     {
         if ((bool)e.NewValue)
         {
-            AttachHostKeyboardHandlers();
+            SubscribeMainVm();
+            SetMainViewportGridLayerVisible(false);
             AttachViewportPlacementHandlers();
-            // Became visible: rebuild landmark spheres on the shared viewport
             if (_initialized) Refresh3DLandmarks();
             UpdateViewportGridHitTest();
+            DrawCephGrid();
         }
         else
         {
-            DetachHostKeyboardHandlers();
+            UnsubscribeMainVm();
             DetachViewportPlacementHandlers();
-            // Became hidden: respect the global "show in 3D" toggle on MainWindow's
-            // Measurements tab — landmark data stays in the ViewModel but visuals
-            // disappear from the 3D viewport unless explicitly kept visible.
-            var vm = (Application.Current.MainWindow as MainWindow)?.DataContext as ViewModels.MainViewModel;
+            CephGridOverlay.Visibility = Visibility.Collapsed;
+            var vm = GetMainVm();
+            SetMainViewportGridLayerVisible(vm?.ShowGrid == true);
             bool keepVisible = vm?.ShowCephLandmarksIn3D ?? false;
             foreach (var s in _landmarkSpheres3D) s.IsRendering = keepVisible;
         }
+    }
+
+    private static void SetMainViewportGridLayerVisible(bool visible)
+    {
+        if (Application.Current.MainWindow is not MainWindow mainWindow) return;
+        if (mainWindow.FindName("GridOverlay") is not UIElement gridOverlay) return;
+        gridOverlay.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>
@@ -765,25 +996,100 @@ public partial class CephalometryOverlay : UserControl
 
     private void Viewport3D_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        // Only intercept the left click when we are about to place something.
-        // Otherwise let it fall through to HelixToolkit (camera rotation) —
-        // this handler sits on the real viewport, so not handling the event
-        // is all that's needed.
-        if (!ShouldCaptureLeftClickForPlacement()) return;
+        if (!_is3DMode) return;
         var vp = SharedViewport3D;
         if (vp == null) return;
-        var hit = vp.FindHits(e.GetPosition(vp)).FirstOrDefault();
-        if (hit != null && hit.IsValid)
+
+        var screenPos = e.GetPosition(vp);
+        var hits = vp.FindHits(screenPos);
+        if (hits == null || hits.Count == 0) return;
+
+        if (_toolState.ActiveTool == CephTool.Select)
         {
-            _pending3DHit = (Vector3)hit.PointHit;
+            // Drag an existing landmark sphere
+            foreach (var hit in hits)
+            {
+                if (hit.ModelHit is MeshGeometryModel3D marker
+                    && _landmarkSphereMap.TryGetValue(marker, out var lm))
+                {
+                    _isDraggingLandmark = true;
+                    _draggingLandmark = lm;
+                    _activeLandmark = lm;
+                    RebuildSidebarHighlights();
+                    Refresh3DLandmarks();
+                    e.Handled = true;
+                    return;
+                }
+            }
+
+            // Click on mesh surface → place the active sidebar landmark
+            if (_activeLandmark != null)
+            {
+                foreach (var hit in hits)
+                {
+                    if (!hit.IsValid) continue;
+                    if (hit.ModelHit is MeshGeometryModel3D m && _landmarkSphereMap.ContainsKey(m)) continue;
+
+                    _pending3DHit = (Vector3)hit.PointHit;
+                    _mouseDown3DScreenPos = e.GetPosition(ViewportGrid);
+                    e.Handled = true;
+                    return;
+                }
+            }
+
+            return;
+        }
+
+        // Measurement tools: capture first valid mesh hit
+        var meshHit = hits.FirstOrDefault(h => h.IsValid);
+        if (meshHit != null)
+        {
+            _pending3DHit = (Vector3)meshHit.PointHit;
             _mouseDown3DScreenPos = e.GetPosition(ViewportGrid);
-            // Consume so HelixToolkit doesn't also start a camera rotation.
             e.Handled = true;
+        }
+    }
+
+    private void Viewport3D_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_is3DMode || !_isDraggingLandmark || _draggingLandmark == null) return;
+        if (e.LeftButton != MouseButtonState.Pressed) return;
+
+        var vp = SharedViewport3D;
+        if (vp == null) return;
+
+        var hits = vp.FindHits(e.GetPosition(vp));
+        if (hits == null) return;
+
+        foreach (var hit in hits)
+        {
+            if (!hit.IsValid) continue;
+            if (hit.ModelHit is MeshGeometryModel3D marker && _landmarkSphereMap.ContainsKey(marker)) continue;
+
+            var baked = WorldToBaked((Vector3)hit.PointHit);
+            _draggingLandmark.Position3D = (baked.X, baked.Y, baked.Z);
+            var pos2D = Project3DTo2D(baked.X, baked.Y, baked.Z);
+            if (pos2D.HasValue) _draggingLandmark.Position = pos2D.Value;
+
+            Refresh3DLandmarks();
+            RefreshLandmarkOverlay();
+            UpdateLandmarkSidebarItem(_draggingLandmark);
+            e.Handled = true;
+            return;
         }
     }
 
     private void OnViewport3DMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        if (_is3DMode && _isDraggingLandmark && _draggingLandmark != null)
+        {
+            _isDraggingLandmark = false;
+            _draggingLandmark = null;
+            SyncLandmarksToVm();
+            e.Handled = true;
+            return;
+        }
+
         if (!_is3DMode || !_pending3DHit.HasValue)
         {
             _pending3DHit = null;
@@ -806,8 +1112,9 @@ public partial class CephalometryOverlay : UserControl
 
         // Landmark placement (Select mode)
         if (_activeLandmark == null) return;
-        _activeLandmark.Position3D = (hit.X, hit.Y, hit.Z);
-        var pos2D = Project3DTo2D(hit.X, hit.Y, hit.Z);
+        var baked = WorldToBaked(hit);
+        _activeLandmark.Position3D = (baked.X, baked.Y, baked.Z);
+        var pos2D = Project3DTo2D(baked.X, baked.Y, baked.Z);
         if (pos2D.HasValue) _activeLandmark.Position = pos2D.Value;
         Refresh3DLandmarks();
         RefreshLandmarkOverlay();
@@ -816,48 +1123,78 @@ public partial class CephalometryOverlay : UserControl
         SyncLandmarksToVm();
     }
 
+    /// <summary>
+    /// Shift+right-click near a placed landmark sphere deletes it; plain right-click is left to
+    /// HelixToolkit for camera pan/zoom.
+    /// </summary>
+    private void Viewport3D_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (!_is3DMode || (Keyboard.Modifiers & ModifierKeys.Shift) != ModifierKeys.Shift)
+            return;
+        if (_landmarks == null) return;
+
+        var vp = SharedViewport3D;
+        if (vp == null) return;
+
+        var hit = vp.FindHits(e.GetPosition(vp)).FirstOrDefault();
+        if (hit == null || !hit.IsValid) return;
+
+        var hitPt = (Vector3)hit.PointHit;
+        CephalometricLandmark? nearest = null;
+        double bestDist = 3.0; // mm — must click close to the sphere
+
+        foreach (var lm in _landmarks)
+        {
+            if (!lm.IsPlaced3D) continue;
+            var (px, py, pz) = lm.Position3D!.Value;
+            var world = BakedToWorld(px, py, pz);
+            double d = Vector3.Distance(hitPt, new Vector3((float)world.X, (float)world.Y, (float)world.Z));
+            if (d < bestDist)
+            {
+                bestDist = d;
+                nearest = lm;
+            }
+        }
+
+        if (nearest == null) return;
+
+        nearest.Position = null;
+        nearest.Position3D = null;
+        Refresh3DLandmarks();
+        RefreshLandmarkOverlay();
+        UpdateLandmarkSidebarItem(nearest);
+        SyncLandmarksToVm();
+        e.Handled = true;
+    }
+
     // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     // 3D -> 2D Projection
     // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
 
     /// <summary>
-    /// Projects a 3D physical-space point (mm) onto the 2D DRR image pixel coordinates.
-    /// MarchingCubes vertices are in physical space: voxel_index * spacing.
+    /// Projects a baked 3D physical-space point (mm) onto the 2D DRR image pixel coordinates.
     /// </summary>
     private (double X, double Y)? Project3DTo2D(double physX, double physY, double physZ)
     {
         if (_volume == null || _activeDrr == null) return null;
-
-        // Convert physical (mm) back to voxel indices
-        double voxelX = physX / _volume.Spacing[0];
-        double voxelY = physY / _volume.Spacing[1];
-        double voxelZ = physZ / _volume.Spacing[2];
 
         bool isLateral = CmbProjection.SelectedIndex == 0;
 
         double drrCol, drrRow;
         if (isLateral)
         {
-            // Lateral DRR projects along X axis:
-            // col = volH - 1 - y  (flipped anteroposterior)
-            // row = volD - 1 - z  (flipped superoinferior, superior at top)
-            drrCol = (_volume.Height - 1) - voxelY;
-            drrRow = (_volume.Depth - 1) - voxelZ;
+            drrCol = (_activeDrr.SpaceMaxY - physY) / _activeDrr.SpacingX;
+            drrRow = (_activeDrr.SpaceMaxZ - physZ) / _activeDrr.SpacingY;
         }
         else
         {
-            // PA DRR projects along Y axis:
-            // col = x  (left-right)
-            // row = volD - 1 - z  (flipped superoinferior)
-            drrCol = voxelX;
-            drrRow = (_volume.Depth - 1) - voxelZ;
+            drrCol = (physX - _activeDrr.SpaceMinX) / _activeDrr.SpacingX;
+            drrRow = (_activeDrr.SpaceMaxZ - physZ) / _activeDrr.SpacingY;
         }
 
-        // Adjust for auto-crop offset applied during DRR generation
         drrCol -= _activeDrr.CropOffsetX;
         drrRow -= _activeDrr.CropOffsetY;
 
-        // Bounds check
         if (drrCol < 0 || drrCol >= _activeDrr.Width || drrRow < 0 || drrRow >= _activeDrr.Height)
             return null;
 
@@ -865,46 +1202,100 @@ public partial class CephalometryOverlay : UserControl
     }
 
     /// <summary>
-    /// Projects a DRR pixel coordinate to a 3D physical-space point (mm).
-    /// Uses the midplane of the volume along the projection axis since the DRR is a
-    /// sum projection ÔÇö there is no depth information in a single 2D click.
+    /// Projects a DRR pixel coordinate to a baked 3D physical-space point (mm).
+    /// Uses the midplane of the projection along the ray axis.
     /// </summary>
     private Vector3? Project2DTo3D(double drrCol, double drrRow)
     {
         if (_volume == null || _activeDrr == null) return null;
 
-        // Reverse the auto-crop offset that was applied during DRR generation
         double col = drrCol + _activeDrr.CropOffsetX;
         double row = drrRow + _activeDrr.CropOffsetY;
-
         bool isLateral = CmbProjection.SelectedIndex == 0;
 
-        double voxelX, voxelY, voxelZ;
         if (isLateral)
         {
-            // Lateral DRR projects along X:
-            //   col = (Height - 1) - voxelY  ÔåÆ  voxelY = (Height - 1) - col
-            //   row = (Depth  - 1) - voxelZ  ÔåÆ  voxelZ = (Depth  - 1) - row
-            //   voxelX = midplane along projection axis
-            voxelY = (_volume.Height - 1) - col;
-            voxelZ = (_volume.Depth  - 1) - row;
-            voxelX = _volume.Width / 2.0;
-        }
-        else
-        {
-            // PA DRR projects along Y:
-            //   col = voxelX
-            //   row = (Depth - 1) - voxelZ  ÔåÆ  voxelZ = (Depth - 1) - row
-            //   voxelY = midplane along projection axis
-            voxelX = col;
-            voxelZ = (_volume.Depth - 1) - row;
-            voxelY = _volume.Height / 2.0;
+            double y = _activeDrr.SpaceMaxY - col * _activeDrr.SpacingX;
+            double z = _activeDrr.SpaceMaxZ - row * _activeDrr.SpacingY;
+            double x = (_activeDrr.SpaceMinX + _activeDrr.SpaceMaxX) / 2.0;
+            return new Vector3((float)x, (float)y, (float)z);
         }
 
-        return new Vector3(
-            (float)(voxelX * _volume.Spacing[0]),
-            (float)(voxelY * _volume.Spacing[1]),
-            (float)(voxelZ * _volume.Spacing[2]));
+        double xPa = _activeDrr.SpaceMinX + col * _activeDrr.SpacingX;
+        double zPa = _activeDrr.SpaceMaxZ - row * _activeDrr.SpacingY;
+        double yPa = (_activeDrr.SpaceMinY + _activeDrr.SpaceMaxY) / 2.0;
+        return new Vector3((float)xPa, (float)yPa, (float)zPa);
+    }
+
+    private void EnsureGeometry3DFrom2D()
+    {
+        if (_landmarks == null || _activeDrr == null) return;
+
+        foreach (var lm in _landmarks)
+        {
+            if (lm.IsPlaced && !lm.IsPlaced3D && lm.Position is { } pos)
+            {
+                if (Project2DTo3D(pos.X, pos.Y) is Vector3 v)
+                    lm.Position3D = (v.X, v.Y, v.Z);
+            }
+        }
+
+        foreach (var m in _toolState.Measurements)
+        {
+            if (_measurements3D.Any(x => x.Label == m.Label) || m.Points.Count == 0)
+                continue;
+
+            var pts3d = new List<Vector3>();
+            foreach (var pt in m.Points)
+            {
+                if (Project2DTo3D(pt.X, pt.Y) is Vector3 v)
+                    pts3d.Add(v);
+            }
+
+            if (pts3d.Count == 0) continue;
+            _measurements3D.Add(new Meas3D
+            {
+                Tool = m.ToolType,
+                Label = m.Label,
+                Pts = pts3d,
+                Value = m.Value,
+                Unit = m.Unit,
+                Color = Color.FromRgb(m.ColorR, m.ColorG, m.ColorB),
+            });
+        }
+    }
+
+    private void ReprojectLandmarksAndMeasurements2D()
+    {
+        if (_landmarks != null)
+        {
+            foreach (var lm in _landmarks)
+            {
+                if (!lm.IsPlaced3D || lm.Position3D is not { } p3) continue;
+                var p2d = Project3DTo2D(p3.X, p3.Y, p3.Z);
+                if (p2d.HasValue)
+                    lm.Position = p2d.Value;
+            }
+        }
+
+        foreach (var m in _toolState.Measurements)
+        {
+            var m3 = _measurements3D.FirstOrDefault(x => x.Label == m.Label);
+            if (m3 == null || m3.Pts.Count == 0) continue;
+
+            m.Points.Clear();
+            foreach (var p in m3.Pts)
+            {
+                var p2d = Project3DTo2D(p.X, p.Y, p.Z);
+                if (p2d.HasValue)
+                    m.Points.Add(new CephPoint(p2d.Value.X, p2d.Value.Y));
+            }
+        }
+
+        RefreshLandmarkOverlay();
+        RefreshMeasurementOverlay();
+        SyncLandmarksToVm();
+        MeasurementsChanged?.Invoke();
     }
 
     // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
@@ -917,6 +1308,7 @@ public partial class CephalometryOverlay : UserControl
         foreach (var sphere in _landmarkSpheres3D)
             SharedViewport3D?.Items.Remove(sphere);
         _landmarkSpheres3D.Clear();
+        _landmarkSphereMap.Clear();
 
         if (_landmarks == null) return;
 
@@ -943,12 +1335,51 @@ public partial class CephalometryOverlay : UserControl
                     SpecularColor = new HelixToolkit.Maths.Color4(0.3f, 0.3f, 0.3f, 1f),
                     SpecularShininess = 10f,
                 },
-                IsHitTestVisible = false,
+                IsHitTestVisible = true,
             };
 
             _landmarkSpheres3D.Add(sphere);
+            _landmarkSphereMap[sphere] = lm;
             SharedViewport3D?.Items.Add(sphere);
         }
+
+        ApplyNhpToCephalometryVisuals();
+    }
+
+    /// <summary>
+    /// Applies the current NHP preview transform to landmark spheres so they move with
+    /// mesh segments during slider preview (same pattern as ApplyNhpToAllTrackedObjects).
+    /// Stored landmark coordinates remain in baked volume space.
+    /// </summary>
+    private void ApplyNhpToCephalometryVisuals()
+    {
+        var transform = GetMainVm()?.NhpPreviewTransform ?? Transform3D.Identity;
+        foreach (var sphere in _landmarkSpheres3D)
+            sphere.Transform = transform;
+        foreach (var visual in _meas3DVisuals)
+            visual.Transform = transform;
+        foreach (var sphere in _pending3DSpheres)
+            sphere.Transform = transform;
+    }
+
+    private Point3D BakedToWorld(double x, double y, double z)
+    {
+        var transform = GetMainVm()?.NhpPreviewTransform ?? Transform3D.Identity;
+        return transform.Transform(new Point3D(x, y, z));
+    }
+
+    private Point3D WorldToBaked(Vector3 world)
+    {
+        var transform = GetMainVm()?.NhpPreviewTransform ?? Transform3D.Identity;
+        if (transform.Value.IsIdentity)
+            return new Point3D(world.X, world.Y, world.Z);
+
+        var inverse = transform.Value;
+        if (!inverse.HasInverse)
+            return new Point3D(world.X, world.Y, world.Z);
+
+        inverse.Invert();
+        return inverse.Transform(new Point3D(world.X, world.Y, world.Z));
     }
 
     // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
@@ -1454,7 +1885,8 @@ public partial class CephalometryOverlay : UserControl
 
     private void DrawMeasurement(CephMeasurement m)
     {
-        var brush = new SolidColorBrush(Color.FromRgb(m.ColorR, m.ColorG, m.ColorB));
+        var alpha = (byte)Math.Round(Math.Clamp(m.Opacity, 0.0, 1.0) * 255.0);
+        var brush = new SolidColorBrush(Color.FromArgb(alpha, m.ColorR, m.ColorG, m.ColorB));
         bool selected = m == _toolState.SelectedMeasurement;
         double strokeW = selected ? 1.0 : 0.5;
 
@@ -1474,13 +1906,22 @@ public partial class CephalometryOverlay : UserControl
                 DrawMeasurementLabel(mid, 0, -4, $"{m.Label}: {m.Value:F1} mm", brush, m);
                 break;
 
-            case CephTool.InfinitePlane when m.Points.Count >= 2:
-                DrawInfiniteLine(m.Points[0], m.Points[1], brush, strokeW, m);
-                DrawMeasurementDot(m.Points[0], 1, brush, m);
-                DrawMeasurementDot(m.Points[1], 1, brush, m);
-                var pmid = new CephPoint((m.Points[0].X + m.Points[1].X) / 2,
-                                         (m.Points[0].Y + m.Points[1].Y) / 2);
-                DrawMeasurementLabel(pmid, 0, -4, m.Label, brush, m);
+            case CephTool.InfinitePlane when m.Points.Count >= 2 || m.PlaneOrigin3D != null:
+                if (m.PlaneKind != CephPlaneKind.Manual && TryProjectGeneratedPlaneLine(m, out var ga, out var gb))
+                {
+                    DrawInfiniteLine(ga, gb, brush, strokeW, m);
+                    var gmid = new CephPoint((ga.X + gb.X) / 2, (ga.Y + gb.Y) / 2);
+                    DrawMeasurementLabel(gmid, 0, -4, m.Label, brush, m);
+                }
+                else if (m.Points.Count >= 2)
+                {
+                    DrawInfiniteLine(m.Points[0], m.Points[1], brush, strokeW, m);
+                    DrawMeasurementDot(m.Points[0], 1, brush, m);
+                    DrawMeasurementDot(m.Points[1], 1, brush, m);
+                    var pmid = new CephPoint((m.Points[0].X + m.Points[1].X) / 2,
+                                             (m.Points[0].Y + m.Points[1].Y) / 2);
+                    DrawMeasurementLabel(pmid, 0, -4, m.Label, brush, m);
+                }
                 break;
 
             case CephTool.DistancePoints when m.Points.Count >= 2:
@@ -1560,6 +2001,37 @@ public partial class CephalometryOverlay : UserControl
             Tag = tag, IsHitTestVisible = true, Cursor = Cursors.Hand,
         };
         MeasurementsCanvas.Children.Add(line);
+    }
+
+    private bool TryProjectGeneratedPlaneLine(
+        CephMeasurement plane,
+        out CephPoint a,
+        out CephPoint b)
+    {
+        a = default;
+        b = default;
+        if (plane.PlaneOrigin3D == null) return false;
+
+        var origin = ToVector3(plane.PlaneOrigin3D.Value);
+        var axis = CmbProjection.SelectedIndex == 0
+            ? plane.PlaneAxisV3D
+            : plane.PlaneAxisU3D;
+        if (axis == null) return false;
+
+        var dir = ToVector3(axis.Value);
+        if (dir.Length() < 1e-4f) return false;
+        dir = Vector3.Normalize(dir);
+
+        // DrawInfiniteLine extends this segment to the overlay bounds.
+        var p1 = origin - dir * 80f;
+        var p2 = origin + dir * 80f;
+        var p1Proj = Project3DTo2D(p1.X, p1.Y, p1.Z);
+        var p2Proj = Project3DTo2D(p2.X, p2.Y, p2.Z);
+        if (!p1Proj.HasValue || !p2Proj.HasValue) return false;
+
+        a = new CephPoint(p1Proj.Value.X, p1Proj.Value.Y);
+        b = new CephPoint(p2Proj.Value.X, p2Proj.Value.Y);
+        return true;
     }
 
     private void DrawMeasurementLabel(CephPoint pos, double offsetX, double offsetY,
@@ -1658,6 +2130,8 @@ public partial class CephalometryOverlay : UserControl
                     _toolState.SelectedMeasurement = null;
                 RefreshMeasurementOverlay();
                 RefreshMeasurementPanel();
+                Refresh3DMeasurements();
+                MeasurementsChanged?.Invoke();
             };
 
             var stack = new StackPanel { Orientation = Orientation.Horizontal };
@@ -1693,7 +2167,8 @@ public partial class CephalometryOverlay : UserControl
     private void CmbProjection_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!IsLoaded || _volume == null) return;
-        _ = GenerateDrrAsync(CmbProjection.SelectedIndex == 0);
+        InvalidateDrrCache();
+        _ = GenerateDrrAsync(CmbProjection.SelectedIndex == 0, resetView: true);
     }
 
     private void ChkInvert_Changed(object sender, RoutedEventArgs e)
@@ -1702,7 +2177,55 @@ public partial class CephalometryOverlay : UserControl
         RenderDrr();
     }
 
-    private void ResetView_Click(object sender, RoutedEventArgs e) => ResetView();
+    private void AddFrankfortPlane_Click(object sender, RoutedEventArgs e)
+    {
+        if (_landmarks == null)
+        {
+            StatusLeft.Text = "Load cephalometry landmarks before creating Frankfort plane.";
+            return;
+        }
+
+        if (!CephPlaneBuilder.TryBuildFrankfortHorizontal(_landmarks, out var plane, out var error))
+        {
+            StatusLeft.Text = error;
+            MessageBox.Show(error, "Frankfort Plane", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var existing = _toolState.Measurements.FirstOrDefault(
+            m => m.PlaneKind == CephPlaneKind.FrankfortHorizontal);
+        if (existing != null)
+            _toolState.Measurements.Remove(existing);
+
+        _toolState.Measurements.Add(plane);
+        _toolState.SelectedMeasurement = plane;
+        RefreshMeasurementOverlay();
+        RefreshMeasurementPanel();
+        Refresh3DMeasurements();
+        MeasurementsChanged?.Invoke();
+        StatusLeft.Text = "Frankfort plane created from Porion (L/R) and Orbitale (L/R).";
+    }
+
+    private void EditNhp_Click(object sender, RoutedEventArgs e)
+    {
+        if (Application.Current.MainWindow is MainWindow mainWindow)
+            mainWindow.OpenNhpEditor();
+    }
+
+    private void ResetView_Click(object sender, RoutedEventArgs e)
+    {
+        var owner = Window.GetWindow(this);
+        var result = MessageBox.Show(
+            owner,
+            "This will clear all cephalometric landmarks, measurements, pending tools, and analysis values. Continue?",
+            "Reset cephalometry?",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+
+        if (result == MessageBoxResult.Yes)
+            ResetCephalometry();
+    }
 
     // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     // Helpers
@@ -1717,6 +2240,44 @@ public partial class CephalometryOverlay : UserControl
         FitToViewport();
         RenderDrr();
         UpdateStatusInfo();
+    }
+
+    private void ResetCephalometry()
+    {
+        _toolState.Reset();
+        _rubberBandEnd = null;
+        _activeLandmark = null;
+        _draggingDot = null;
+        _draggingLandmark = null;
+        _isDraggingLandmark = false;
+        _pending3DHit = null;
+        _measurements3D.Clear();
+        ClearPending3DSpheres();
+
+        if (_landmarks != null)
+        {
+            foreach (var lm in _landmarks)
+            {
+                lm.Position = null;
+                lm.Position3D = null;
+            }
+        }
+
+        var vm = GetMainVm();
+        if (vm != null)
+            vm.SavedCephLandmarks = new List<CephLandmarkSave>();
+
+        BuildLandmarkSidebar();
+        RefreshLandmarkOverlay();
+        RefreshMeasurementOverlay();
+        RefreshMeasurementPanel();
+        Refresh3DLandmarks();
+        Refresh3DMeasurements();
+        RefreshAnalysis();
+        MeasurementsChanged?.Invoke();
+        UpdateToolButtonHighlights();
+        UpdateToolStatus();
+        StatusLeft.Text = "Cephalometry reset.";
     }
 
     private void UpdateStatusInfo()
@@ -1807,10 +2368,13 @@ public partial class CephalometryOverlay : UserControl
 
     private void Handle3DToolClick(Vector3 hit)
     {
-        _pending3DPts.Add(hit);
+        var bakedPoint = WorldToBaked(hit);
+        var baked = new Vector3((float)bakedPoint.X, (float)bakedPoint.Y, (float)bakedPoint.Z);
+        _pending3DPts.Add(baked);
 
         // Show pending sphere at hit point
-        var pendingSphere = Make3DSphere(hit, 1.5f, System.Windows.Media.Colors.White);
+        var pendingSphere = Make3DSphere(baked, 1.5f, System.Windows.Media.Colors.White);
+        pendingSphere.Transform = GetMainVm()?.NhpPreviewTransform ?? Transform3D.Identity;
         _pending3DSpheres.Add(pendingSphere);
         SharedViewport3D?.Items.Add(pendingSphere);
 
@@ -1939,10 +2503,18 @@ public partial class CephalometryOverlay : UserControl
                     break;
             }
         }
+
+        foreach (var plane in _toolState.Measurements)
+        {
+            if (!plane.IsVisible || plane.PlaneOrigin3D == null || plane.PlaneNormal3D == null)
+                continue;
+            Add3DVisual(Make3DPlane(plane));
+        }
     }
 
     private void Add3DVisual(Element3D el)
     {
+        el.Transform = GetMainVm()?.NhpPreviewTransform ?? Transform3D.Identity;
         _meas3DVisuals.Add(el);
         SharedViewport3D?.Items.Add(el);
     }
@@ -1976,6 +2548,76 @@ public partial class CephalometryOverlay : UserControl
         };
     }
 
+    private MeshGeometryModel3D Make3DPlane(CephMeasurement plane)
+    {
+        var origin = ToVector3(plane.PlaneOrigin3D!.Value);
+        var axisU = plane.PlaneAxisU3D is { } u ? Vector3.Normalize(ToVector3(u)) : Vector3.UnitX;
+        var axisV = plane.PlaneAxisV3D is { } v ? Vector3.Normalize(ToVector3(v)) : Vector3.UnitY;
+        var size = EstimatePlaneDisplaySize();
+        var halfU = axisU * (float)(size * 0.5);
+        var halfV = axisV * (float)(size * 0.5);
+
+        var a = origin - halfU - halfV;
+        var b = origin + halfU - halfV;
+        var c = origin + halfU + halfV;
+        var d = origin - halfU + halfV;
+
+        var builder = new HelixToolkit.Geometry.MeshBuilder();
+        builder.AddTriangle(a, b, c);
+        builder.AddTriangle(a, c, d);
+
+        var alpha = (float)Math.Clamp(plane.Opacity, 0.05, 1.0);
+        var color = new HelixToolkit.Maths.Color4(
+            plane.ColorR / 255f, plane.ColorG / 255f, plane.ColorB / 255f, alpha);
+
+        return new MeshGeometryModel3D
+        {
+            Geometry = HxGeom.Converter.ToMeshGeometry3D(builder.ToMesh()),
+            Material = new PhongMaterial
+            {
+                DiffuseColor = color,
+                EmissiveColor = new HelixToolkit.Maths.Color4(
+                    plane.ColorR / 255f * 0.12f,
+                    plane.ColorG / 255f * 0.12f,
+                    plane.ColorB / 255f * 0.12f,
+                    alpha)
+            },
+            Transform = GetMainVm()?.NhpPreviewTransform ?? Transform3D.Identity,
+            CullMode = SharpDX.Direct3D11.CullMode.None,
+            IsTransparent = alpha < 0.98f,
+            IsHitTestVisible = false
+        };
+    }
+
+    private double EstimatePlaneDisplaySize()
+    {
+        var bounds = GetMainVm()?.BoneOnlyBounds ?? Rect3D.Empty;
+        if (!bounds.IsEmpty)
+            return Math.Max(80.0, Math.Max(bounds.SizeX, Math.Max(bounds.SizeY, bounds.SizeZ)) * 1.2);
+        return 180.0;
+    }
+
+    private static Vector3 ToVector3(CephPoint3D point) =>
+        new((float)point.X, (float)point.Y, (float)point.Z);
+
+    private static Vector3 TransformPoint(Vector3 point, Matrix3D matrix)
+    {
+        var transformed = matrix.Transform(new Point3D(point.X, point.Y, point.Z));
+        return new Vector3((float)transformed.X, (float)transformed.Y, (float)transformed.Z);
+    }
+
+    private static CephPoint3D TransformPoint(CephPoint3D point, Matrix3D matrix)
+    {
+        var transformed = matrix.Transform(new Point3D(point.X, point.Y, point.Z));
+        return new CephPoint3D(transformed.X, transformed.Y, transformed.Z);
+    }
+
+    private static CephPoint3D TransformVector(CephPoint3D vector, Matrix3D matrix)
+    {
+        var transformed = matrix.Transform(new Vector3D(vector.X, vector.Y, vector.Z));
+        return new CephPoint3D(transformed.X, transformed.Y, transformed.Z);
+    }
+
     private void ClearPending3DSpheres()
     {
         foreach (var s in _pending3DSpheres) SharedViewport3D?.Items.Remove(s);
@@ -2003,6 +2645,25 @@ public partial class CephalometryOverlay : UserControl
                 lm.Position?.X,   lm.Position?.Y,
                 lm.Position3D?.X, lm.Position3D?.Y, lm.Position3D?.Z))
             .ToList();
+
+        RefreshAnalysis();
+    }
+
+    /// <summary>
+    /// Recomputes Steiner / Tweed / Ricketts from the current landmark set and DRR spacing.
+    /// </summary>
+    private void RefreshAnalysis()
+    {
+        if (_landmarks == null || _activeDrr == null)
+            return;
+
+        double sx = _activeDrr.SpacingX;
+        double sy = _activeDrr.SpacingY;
+
+        _analysisPanel.Update(
+            CephAnalysisEngine.Compute(CephAnalysisType.Steiner, _landmarks, sx, sy),
+            CephAnalysisEngine.Compute(CephAnalysisType.Tweed, _landmarks, sx, sy),
+            CephAnalysisEngine.Compute(CephAnalysisType.Ricketts, _landmarks, sx, sy));
     }
 
     /// <summary>

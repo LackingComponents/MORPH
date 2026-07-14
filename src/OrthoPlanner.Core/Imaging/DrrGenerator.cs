@@ -7,18 +7,60 @@
 /// </summary>
 public static class DrrGenerator
 {
-    // ÔöÇÔöÇ Tuning Constants ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // ── Tuning Constants ─────────────────────────────────────────────────────
     private const double Gamma = 0.55;
     private const double LowPercentile = 1.0;
     private const double HighPercentile = 99.0;
     private const int CropMargin = 10;
     private const double CropThreshold = 15.0 / 255.0; // ~0.06 normalized
+    private const int MaxDrrExpansion = 4;
 
     /// <summary>
     /// Generates a lateral cephalogram by projecting along the X axis (mediolateral).
     /// Output: width = Height (anterior -> posterior), height = Depth (inferior -> superior, flipped).
     /// </summary>
-    public static DrrResult GenerateLateral(VolumeData volume, CancellationToken ct = default)
+    public static DrrResult GenerateLateral(VolumeData volume, CancellationToken ct = default) =>
+        GenerateLateral(volume, DrrProjectionParams.FromVolume(volume), ct);
+
+    public static DrrResult GenerateLateral(
+        VolumeData volume, DrrProjectionParams projection, CancellationToken ct = default)
+    {
+        if (!projection.UsesNhpSampling)
+            return GenerateLateralAxisAligned(volume, ct);
+
+        double sy = volume.Spacing[1];
+        double sz = volume.Spacing[2];
+        int imgW = Math.Max(1, (int)Math.Ceiling((projection.MaxY - projection.MinY) / sy));
+        int imgH = Math.Max(1, (int)Math.Ceiling((projection.MaxZ - projection.MinZ) / sz));
+        imgW = Math.Min(imgW, volume.Height * MaxDrrExpansion);
+        imgH = Math.Min(imgH, volume.Depth * MaxDrrExpansion);
+
+        int steps = Math.Max(1, (int)Math.Ceiling((projection.MaxX - projection.MinX) / volume.Spacing[0]));
+        var raw = new double[imgH * imgW];
+
+        System.Threading.Tasks.Parallel.For(0, imgH, row =>
+        {
+            ct.ThrowIfCancellationRequested();
+            double zNhp = projection.MaxZ - row * sz;
+            for (int col = 0; col < imgW; col++)
+            {
+                double yNhp = projection.MaxY - col * sy;
+                double sum = 0;
+                for (int s = 0; s <= steps; s++)
+                {
+                    double t = steps == 0 ? 0 : (double)s / steps;
+                    double xNhp = projection.MinX + t * (projection.MaxX - projection.MinX);
+                    var dicom = projection.InverseNhp.TransformPoint(xNhp, yNhp, zNhp);
+                    sum += HUToBrightness(volume.SamplePhysicalMm(dicom.x, dicom.y, dicom.z));
+                }
+                raw[row * imgW + col] = sum;
+            }
+        });
+
+        return PostProcess(raw, imgW, imgH, sy, sz, projection);
+    }
+
+    private static DrrResult GenerateLateralAxisAligned(VolumeData volume, CancellationToken ct)
     {
         int volW = volume.Width;   // X ÔÇö ray direction
         int volH = volume.Height;  // Y ÔÇö image width
@@ -47,14 +89,56 @@ public static class DrrGenerator
             }
         }
 
-        return PostProcess(raw, imgW, imgH, volume.Spacing[1], volume.Spacing[2]);
+        return PostProcess(raw, imgW, imgH, volume.Spacing[1], volume.Spacing[2],
+            DrrProjectionParams.FromVolume(volume));
     }
 
     /// <summary>
     /// Generates a PA cephalogram by projecting along the Y axis.
     /// Output: width = Width (left -> right), height = Depth (inferior -> superior, flipped).
     /// </summary>
-    public static DrrResult GeneratePA(VolumeData volume, CancellationToken ct = default)
+    public static DrrResult GeneratePA(VolumeData volume, CancellationToken ct = default) =>
+        GeneratePA(volume, DrrProjectionParams.FromVolume(volume), ct);
+
+    public static DrrResult GeneratePA(
+        VolumeData volume, DrrProjectionParams projection, CancellationToken ct = default)
+    {
+        if (!projection.UsesNhpSampling)
+            return GeneratePaAxisAligned(volume, ct);
+
+        double sx = volume.Spacing[0];
+        double sz = volume.Spacing[2];
+        int imgW = Math.Max(1, (int)Math.Ceiling((projection.MaxX - projection.MinX) / sx));
+        int imgH = Math.Max(1, (int)Math.Ceiling((projection.MaxZ - projection.MinZ) / sz));
+        imgW = Math.Min(imgW, volume.Width * MaxDrrExpansion);
+        imgH = Math.Min(imgH, volume.Depth * MaxDrrExpansion);
+
+        int steps = Math.Max(1, (int)Math.Ceiling((projection.MaxY - projection.MinY) / volume.Spacing[1]));
+        var raw = new double[imgH * imgW];
+
+        System.Threading.Tasks.Parallel.For(0, imgH, row =>
+        {
+            ct.ThrowIfCancellationRequested();
+            double zNhp = projection.MaxZ - row * sz;
+            for (int col = 0; col < imgW; col++)
+            {
+                double xNhp = projection.MinX + col * sx;
+                double sum = 0;
+                for (int s = 0; s <= steps; s++)
+                {
+                    double t = steps == 0 ? 0 : (double)s / steps;
+                    double yNhp = projection.MinY + t * (projection.MaxY - projection.MinY);
+                    var dicom = projection.InverseNhp.TransformPoint(xNhp, yNhp, zNhp);
+                    sum += HUToBrightness(volume.SamplePhysicalMm(dicom.x, dicom.y, dicom.z));
+                }
+                raw[row * imgW + col] = sum;
+            }
+        });
+
+        return PostProcess(raw, imgW, imgH, sx, sz, projection);
+    }
+
+    private static DrrResult GeneratePaAxisAligned(VolumeData volume, CancellationToken ct)
     {
         int volW = volume.Width;
         int volH = volume.Height;  // Y ÔÇö ray direction
@@ -82,12 +166,14 @@ public static class DrrGenerator
             }
         }
 
-        return PostProcess(raw, imgW, imgH, volume.Spacing[0], volume.Spacing[2]);
+        return PostProcess(raw, imgW, imgH, volume.Spacing[0], volume.Spacing[2],
+            DrrProjectionParams.FromVolume(volume));
     }
 
-    // ÔöÇÔöÇ Post-Processing Pipeline ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // ── Post-Processing Pipeline ───────────────────────────────────────────────
 
-    private static DrrResult PostProcess(double[] raw, int w, int h, double spacingX, double spacingY)
+    private static DrrResult PostProcess(
+        double[] raw, int w, int h, double spacingX, double spacingY, DrrProjectionParams projection)
     {
         // 1. Percentile-based normalization to [0, 1]
         var pixels = PercentileNormalize(raw, w * h);
@@ -102,7 +188,9 @@ public static class DrrGenerator
         var cropped = AutoCrop(pixels, w, h, out int cropX, out int cropY,
                                out int cropW, out int cropH);
 
-        return new DrrResult(cropped, cropW, cropH, spacingX, spacingY, cropX, cropY);
+        return new DrrResult(cropped, cropW, cropH, spacingX, spacingY, cropX, cropY,
+            projection.MinX, projection.MaxX, projection.MinY, projection.MaxY,
+            projection.MinZ, projection.MaxZ);
     }
 
     // ÔöÇÔöÇ Percentile Normalization ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
@@ -302,9 +390,18 @@ public sealed class DrrResult
     public double SpacingY { get; }
     public int CropOffsetX { get; }
     public int CropOffsetY { get; }
+    public double SpaceMinX { get; }
+    public double SpaceMaxX { get; }
+    public double SpaceMinY { get; }
+    public double SpaceMaxY { get; }
+    public double SpaceMinZ { get; }
+    public double SpaceMaxZ { get; }
 
     public DrrResult(float[] pixels, int width, int height, double spacingX, double spacingY,
-                     int cropOffsetX = 0, int cropOffsetY = 0)
+                     int cropOffsetX = 0, int cropOffsetY = 0,
+                     double spaceMinX = 0, double spaceMaxX = 0,
+                     double spaceMinY = 0, double spaceMaxY = 0,
+                     double spaceMinZ = 0, double spaceMaxZ = 0)
     {
         Pixels = pixels;
         Width = width;
@@ -313,5 +410,11 @@ public sealed class DrrResult
         SpacingY = spacingY;
         CropOffsetX = cropOffsetX;
         CropOffsetY = cropOffsetY;
+        SpaceMinX = spaceMinX;
+        SpaceMaxX = spaceMaxX;
+        SpaceMinY = spaceMinY;
+        SpaceMaxY = spaceMaxY;
+        SpaceMinZ = spaceMinZ;
+        SpaceMaxZ = spaceMaxZ;
     }
 }

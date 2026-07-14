@@ -38,6 +38,18 @@ public class CephToolState
         PendingPoints.Clear();
     }
 
+    public void Reset()
+    {
+        ActiveTool = CephTool.Select;
+        PendingPoints.Clear();
+        Measurements.Clear();
+        SelectedMeasurement = null;
+        _lineCounter = 0;
+        _planeCounter = 0;
+        _angleCounter = 0;
+        _distCounter = 0;
+    }
+
     /// <summary>
     /// Returns the next auto-label for the given tool type.
     /// For CustomPoint: uses "CP{n}" where n = max existing CP index + 1.

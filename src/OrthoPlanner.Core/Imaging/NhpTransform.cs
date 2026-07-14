@@ -13,6 +13,13 @@ public struct NhpTransform
 
     public static NhpTransform Identity => new NhpTransform { M11=1, M22=1, M33=1, M44=1 };
 
+    public bool IsIdentity =>
+        M11 == 1 && M22 == 1 && M33 == 1 && M44 == 1 &&
+        M12 == 0 && M13 == 0 && M14 == 0 &&
+        M21 == 0 && M23 == 0 && M24 == 0 &&
+        M31 == 0 && M32 == 0 && M34 == 0 &&
+        M41 == 0 && M42 == 0 && M43 == 0;
+
     public (double x, double y, double z) TransformPoint(double x, double y, double z)
     {
         // Simple affine transformation (assuming M14, M24, M34 are 0 and M44 is 1 for typical NHP transforms)

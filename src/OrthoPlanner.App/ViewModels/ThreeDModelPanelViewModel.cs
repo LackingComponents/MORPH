@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.Input;
 using OrthoPlanner.Core.Geometry;
+using OrthoPlanner.Core.Imaging;
 
 namespace OrthoPlanner.App.ViewModels;
 
@@ -13,6 +14,8 @@ public partial class MainViewModel
 {
     /// <summary>Segments plus panel-listed imported meshes (e.g. splint) for the bottom 3D MODELS list.</summary>
     public ObservableCollection<object> ThreeDModelsPanelItems { get; } = new();
+    public ObservableCollection<CephPlaneViewModel> CephalometryPlaneItems { get; } = new();
+    public bool HasCephalometryPlanes => CephalometryPlaneItems.Count > 0;
 
     private void InitializeThreeDModelsPanel()
     {
@@ -51,6 +54,17 @@ public partial class MainViewModel
             ThreeDModelsPanelItems.Add(mesh);
     }
 
+    public void SetCephalometryPlanes(
+        IEnumerable<CephMeasurement> planes,
+        Action<CephPlaneViewModel>? planeChanged = null,
+        Action<CephPlaneViewModel>? deleteRequested = null)
+    {
+        CephalometryPlaneItems.Clear();
+        foreach (var plane in planes)
+            CephalometryPlaneItems.Add(new CephPlaneViewModel(plane, planeChanged, deleteRequested));
+        OnPropertyChanged(nameof(HasCephalometryPlanes));
+    }
+
     /// <summary>Apply a palette colour to a segment or imported mesh.</summary>
     public void ApplyModelColor(object model, Color color)
     {
@@ -67,7 +81,23 @@ public partial class MainViewModel
                 mesh.ColorG = color.G;
                 mesh.ColorB = color.B;
                 break;
+            case CephPlaneViewModel plane:
+                plane.ColorR = color.R;
+                plane.ColorG = color.G;
+                plane.ColorB = color.B;
+                break;
         }
+    }
+
+    [RelayCommand]
+    private void DeleteCephPlaneItem(CephPlaneViewModel plane)
+    {
+        if (plane == null) return;
+        if (System.Windows.MessageBox.Show($"Are you sure you want to delete plane '{plane.Name}'?", "Confirm Delete",
+            System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Question) != System.Windows.MessageBoxResult.Yes)
+            return;
+
+        plane.RequestDelete();
     }
 
     [RelayCommand]
@@ -85,6 +115,9 @@ public partial class MainViewModel
             case MeshViewModel mesh:
                 vertices = mesh.Vertices;
                 modelName = mesh.Name;
+                break;
+            case CephPlaneViewModel plane:
+                modelName = plane.Name;
                 break;
         }
 

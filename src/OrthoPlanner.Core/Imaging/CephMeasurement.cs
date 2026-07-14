@@ -5,6 +5,16 @@ namespace OrthoPlanner.Core.Imaging;
 /// </summary>
 public record struct CephPoint(double X, double Y);
 
+public enum CephPlaneKind
+{
+    Manual,
+    FrankfortHorizontal,
+    PlanningHeadPositionMsp,
+    ClinicalMidfaceMsp
+}
+
+public record struct CephPoint3D(double X, double Y, double Z);
+
 /// <summary>
 /// A completed cephalometric measurement: point, line, angle, or distance.
 /// </summary>
@@ -19,6 +29,13 @@ public class CephMeasurement
     public byte ColorR { get; set; } = 255;
     public byte ColorG { get; set; } = 255;
     public byte ColorB { get; set; } = 255;
+    public double Opacity { get; set; } = 1.0;
+    public CephPlaneKind PlaneKind { get; set; } = CephPlaneKind.Manual;
+    public CephPoint3D? PlaneOrigin3D { get; set; }
+    public CephPoint3D? PlaneNormal3D { get; set; }
+    public CephPoint3D? PlaneAxisU3D { get; set; }
+    public CephPoint3D? PlaneAxisV3D { get; set; }
+    public string ConstructionNote { get; set; } = "";
 
     /// <summary>Visibility toggle: when false the measurement is hidden from the DRR canvas.</summary>
     public bool IsVisible { get; set; } = true;

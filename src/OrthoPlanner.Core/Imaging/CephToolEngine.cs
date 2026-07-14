@@ -76,6 +76,33 @@ public static class CephToolEngine
         return (foot, DistanceMm(point, foot, spacingX, spacingY));
     }
 
+    /// <summary>
+    /// Signed perpendicular distance from a point to an infinite line through <paramref name="lineA"/>
+    /// and <paramref name="lineB"/>, in mm. The sign follows the right-lateral profile convention
+    /// used throughout MORPH cephalometry (DRR column 0 = anterior, increasing X = posterior):
+    /// positive when <paramref name="point"/> lies on the anterior side of the directed line
+    /// lineA→lineB, negative when posterior. Magnitude matches
+    /// <see cref="PerpendicularToLine"/>; only the sign differs.
+    /// </summary>
+    public static (CephPoint Foot, double SignedDistMm) SignedPerpendicularToLine(
+        CephPoint point, CephPoint lineA, CephPoint lineB,
+        double spacingX, double spacingY)
+    {
+        var (foot, distMm) = PerpendicularToLine(point, lineA, lineB, spacingX, spacingY);
+
+        double dx = (lineB.X - lineA.X) * spacingX;
+        double dy = (lineB.Y - lineA.Y) * spacingY;
+        double len = Math.Sqrt(dx * dx + dy * dy);
+        if (len < 1e-10)
+            return (foot, distMm);
+
+        double wx = (point.X - lineA.X) * spacingX;
+        double wy = (point.Y - lineA.Y) * spacingY;
+        double cross = dx * wy - dy * wx;
+        double sign = cross >= 0 ? 1.0 : -1.0;
+        return (foot, sign * distMm);
+    }
+
     /// <summary>Intersection of two infinite lines (image-pixel coords). Null if parallel.</summary>
     public static CephPoint? LineIntersection(CephPoint a1, CephPoint a2,
                                               CephPoint b1, CephPoint b2)

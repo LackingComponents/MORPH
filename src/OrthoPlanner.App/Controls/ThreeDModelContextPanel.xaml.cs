@@ -15,6 +15,15 @@ public partial class ThreeDModelContextPanel : UserControl
     {
         InitializeComponent();
         Loaded += (_, _) => BuildColorPalette();
+        DataContextChanged += (_, _) => UpdateExportState();
+    }
+
+    private void UpdateExportState()
+    {
+        bool canExport = DataContext is not CephPlaneViewModel;
+        ExpButton.IsEnabled = canExport;
+        ExpButton.Opacity = canExport ? 1.0 : 0.45;
+        ExpButton.ToolTip = canExport ? "Save as STL or OBJ" : "Cephalometric planes are not mesh exports";
     }
 
     private void BuildColorPalette()

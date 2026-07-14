@@ -62,16 +62,16 @@ public static class CephAnalysisEngine
                                       q.Get("Nasion"), q.Get("Point A"), sx, sy)));
 
         results.Add(Measure("U1-NA distance", "U1-NA mm", CephUnit.Millimeters, 4, 2, lm, q =>
-            CephToolEngine.PerpendicularToLine(q.Get("U1"),
-                                               q.Get("Nasion"), q.Get("Point A"), sx, sy).DistMm));
+            CephToolEngine.SignedPerpendicularToLine(q.Get("U1"),
+                                                     q.Get("Nasion"), q.Get("Point A"), sx, sy).SignedDistMm));
 
         results.Add(Measure("L1-NB angle", "L1-NB°", CephUnit.Degrees, 25, 2, lm, q =>
             CephToolEngine.AngleLines(q.Get("L1"), q.Get("L1 Root"),
                                       q.Get("Nasion"), q.Get("Point B"), sx, sy)));
 
         results.Add(Measure("L1-NB distance", "L1-NB mm", CephUnit.Millimeters, 4, 2, lm, q =>
-            CephToolEngine.PerpendicularToLine(q.Get("L1"),
-                                               q.Get("Nasion"), q.Get("Point B"), sx, sy).DistMm));
+            CephToolEngine.SignedPerpendicularToLine(q.Get("L1"),
+                                                     q.Get("Nasion"), q.Get("Point B"), sx, sy).SignedDistMm));
 
         results.Add(Measure("Interincisal angle", "U1-L1", CephUnit.Degrees, 131, 5, lm, q =>
             InterincisalAngle(q, sx, sy)));
@@ -184,10 +184,10 @@ public static class CephAnalysisEngine
             CephToolEngine.AngleLines(q.Get("Porion"), q.Get("Orbitale"),
                                       q.Get("Gonion"), q.Get("Gnathion"), sx, sy)));
 
-        // Convexity: perpendicular distance from Point A to facial plane (N→Pog).
+        // Convexity: signed perpendicular distance from Point A to facial plane (N→Pog).
         results.Add(Measure("Convexity", "Conv", CephUnit.Millimeters, 2, 2, lm, q =>
-            CephToolEngine.PerpendicularToLine(q.Get("Point A"),
-                                               q.Get("Nasion"), q.Get("Pogonion"), sx, sy).DistMm));
+            CephToolEngine.SignedPerpendicularToLine(q.Get("Point A"),
+                                                     q.Get("Nasion"), q.Get("Pogonion"), sx, sy).SignedDistMm));
 
         return results;
     }

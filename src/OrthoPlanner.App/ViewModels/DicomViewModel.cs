@@ -5,6 +5,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Media.Media3D;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OrthoPlanner.App.Helpers;
 using OrthoPlanner.Core.Imaging;
 using OrthoPlanner.Core.Segmentation;
 
@@ -644,6 +645,39 @@ public partial class MainViewModel
             minY = Math.Min(minY, tp.Y); maxY = Math.Max(maxY, tp.Y);
             minZ = Math.Min(minZ, tp.Z); maxZ = Math.Max(maxZ, tp.Z);
         }
+    }
+
+    /// <summary>
+    /// Builds DRR projection parameters for the current total NHP pose (cumulative × preview).
+    /// </summary>
+    public bool TryGetDrrProjectionParams(out DrrProjectionParams parameters)
+    {
+        if (Volume == null)
+        {
+            parameters = new DrrProjectionParams();
+            return false;
+        }
+
+        GetInverseNhpTransform(out var invNhp);
+        if (invNhp.IsIdentity)
+        {
+            parameters = DrrProjectionParams.FromVolume(Volume);
+            return true;
+        }
+
+        GetNhpVolumeBounds(out double minX, out double maxX, out double minY, out double maxY,
+            out double minZ, out double maxZ);
+        parameters = new DrrProjectionParams
+        {
+            InverseNhp = NhpMatrixConverter.ToNhpTransform(invNhp),
+            MinX = minX,
+            MaxX = maxX,
+            MinY = minY,
+            MaxY = maxY,
+            MinZ = minZ,
+            MaxZ = maxZ,
+        };
+        return true;
     }
 
     // ÔöÇÔöÇÔöÇ Bitmap Helpers ÔöÇÔöÇÔöÇ

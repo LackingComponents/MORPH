@@ -119,6 +119,115 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="CephAnalysisTabControl" TargetType="TabControl">
+            <Setter Property="Background" Value="#FF151B23"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid Background="#FF151B23">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <TabPanel Grid.Row="0" IsItemsHost="True" Background="#FF151B23"/>
+                            <Border Grid.Row="1" Background="#FF151B23" BorderThickness="0">
+                                <ContentPresenter ContentSource="SelectedContent"/>
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="CephAnalysisTabItem" TargetType="TabItem">
+            <Setter Property="Foreground" Value="#FFD0D8E0"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabBd" Background="#FF1E2D3D" Margin="0,0,2,0" Padding="12,5"
+                                BorderBrush="#FF3A5A7A" BorderThickness="1" CornerRadius="3,3,0,0">
+                            <ContentPresenter x:Name="HeaderText" ContentSource="Header"
+                                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              TextElement.Foreground="#FFD0D8E0" TextElement.FontSize="10"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="TabBd" Property="Background" Value="#FF2A4A6B"/>
+                                <Setter TargetName="TabBd" Property="BorderBrush" Value="#FF3A5A7A"/>
+                                <Setter TargetName="HeaderText" Property="TextElement.FontWeight" Value="Bold"/>
+                                <Setter TargetName="HeaderText" Property="TextElement.Foreground" Value="#FFFFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="TabBd" Property="Background" Value="#FF253A50"/>
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsSelected" Value="True"/>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="TabBd" Property="Background" Value="#FF2A4A6B"/>
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="CephAnalysisDataGrid" TargetType="DataGrid">
+            <Setter Property="Background" Value="#FF151B23"/>
+            <Setter Property="Foreground" Value="#FFD0D8E0"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="GridLinesVisibility" Value="None"/>
+            <Setter Property="HeadersVisibility" Value="Column"/>
+            <Setter Property="AutoGenerateColumns" Value="False"/>
+            <Setter Property="CanUserAddRows" Value="False"/>
+            <Setter Property="CanUserDeleteRows" Value="False"/>
+            <Setter Property="CanUserReorderColumns" Value="False"/>
+            <Setter Property="CanUserResizeRows" Value="False"/>
+            <Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="SelectionMode" Value="Single"/>
+            <Setter Property="RowBackground" Value="Transparent"/>
+            <Setter Property="AlternatingRowBackground" Value="#10FFFFFF"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="RowHeight" Value="22"/>
+        </Style>
+        <Style x:Key="CephAnalysisColumnHeader" TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="#FF1E2730"/>
+            <Setter Property="Foreground" Value="#FF6E7F90"/>
+            <Setter Property="FontSize" Value="9"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="4,4"/>
+            <Setter Property="BorderBrush" Value="#FF232E3A"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+        </Style>
+        <Style x:Key="CephAnalysisCellText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#FFD0D8E0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Padding" Value="4,0"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsMissing}" Value="True">
+                    <Setter Property="Foreground" Value="#FF6E7F90"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsOutOfNorm}" Value="True">
+                    <Setter Property="Foreground" Value="#FFFF8A65"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="CephAnalysisValueText" TargetType="TextBlock" BasedOn="{StaticResource CephAnalysisCellText}">
+            <Style.Triggers>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsMissing}" Value="False"/>
+                        <Condition Binding="{Binding IsOutOfNorm}" Value="False"/>
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="Foreground" Value="#FF00E5FF"/>
+                </MultiDataTrigger>
+            </Style.Triggers>
+        </Style>
     </UserControl.Resources>
 
     <Grid>
@@ -142,6 +251,11 @@
                                   Content="3D" Style="{StaticResource DarkToggleButton}"
                                   Margin="4,0,0,0"
                                   Checked="Toggle3D_Changed" Unchecked="Toggle3D_Changed"/>
+                    <CheckBox DockPanel.Dock="Right" x:Name="ChkOrtho" Content="Ortho"
+                              IsChecked="{Binding IsOrthographic}"
+                              Foreground="#FFD0D8E0" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0"
+                              IsEnabled="{Binding IsChecked, ElementName=Btn3DToggle}"
+                              Checked="ChkOrtho_Changed" Unchecked="ChkOrtho_Changed"/>
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="Projection:" Foreground="#FF6E7F90" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11"/>
                         <ComboBox x:Name="CmbProjection" Width="100" SelectedIndex="0"
@@ -153,7 +267,27 @@
                                   Foreground="#FFD0D8E0" VerticalAlignment="Center"
                                   Checked="ChkInvert_Changed" Unchecked="ChkInvert_Changed"/>
                         <Rectangle Width="1" Fill="#FF232E3A" Margin="10,6"/>
-                        <Button Content="Reset (R)" Padding="8,3" Margin="2,0" Click="ResetView_Click"/>
+                        <CheckBox x:Name="ChkShowGrid" Content="Grid"
+                                  Foreground="#FFD0D8E0" FontSize="11" VerticalAlignment="Center"
+                                  Checked="ChkShowGrid_Changed" Unchecked="ChkShowGrid_Changed"/>
+                        <ToggleButton x:Name="BtnGridDrag" Content="Move Grid"
+                                      Style="{StaticResource DarkToggleButton}"
+                                      Margin="6,0,0,0" FontSize="10" IsEnabled="False"
+                                      ToolTip="Drag to reposition the grid. Right-click for center options."
+                                      Checked="BtnGridDrag_Changed" Unchecked="BtnGridDrag_Changed">
+                            <ToggleButton.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Set as new center" Click="CephGrid_SetCenter_Click"/>
+                                    <MenuItem Header="Recentre" Click="CephGrid_Recentre_Click"/>
+                                    <MenuItem Header="Reset" Click="CephGrid_Reset_Click"/>
+                                </ContextMenu>
+                            </ToggleButton.ContextMenu>
+                        </ToggleButton>
+                        <Rectangle Width="1" Fill="#FF232E3A" Margin="10,6"/>
+                        <Button Content="Edit NHP" Padding="8,3" Margin="2,0"
+                                Click="EditNhp_Click"
+                                ToolTip="Adjust Natural Head Position while keeping cephalometric geometry attached"/>
+                        <Button Content="Reset Ceph" Padding="8,3" Margin="2,0" Click="ResetView_Click"/>
                     </StackPanel>
                 </DockPanel>
             </Border>
@@ -165,6 +299,7 @@
                     <Button x:Name="BtnToolPoint"    Content="Point"     Padding="6,2" Margin="1,0" FontSize="10" Click="ToolBtn_Click" Tag="CustomPoint"/>
                     <Button x:Name="BtnToolLine"     Content="Line"      Padding="6,2" Margin="1,0" FontSize="10" Click="ToolBtn_Click" Tag="Line"/>
                     <Button x:Name="BtnToolPlane"    Content="Plane"     Padding="6,2" Margin="1,0" FontSize="10" Click="ToolBtn_Click" Tag="InfinitePlane"/>
+                    <Button x:Name="BtnAddFrankfort" Content="FH Plane"  Padding="6,2" Margin="1,0" FontSize="10" Click="AddFrankfortPlane_Click"/>
                     <Rectangle Width="1" Fill="#FF232E3A" Margin="4,4"/>
                     <Button x:Name="BtnToolAngPlane" Content="&#x2220; Planes" Padding="6,2" Margin="1,0" FontSize="10" Click="ToolBtn_Click" Tag="AnglePlanes"/>
                     <Button x:Name="BtnToolAng3"     Content="&#x2220; 3pts"   Padding="6,2" Margin="1,0" FontSize="10" Click="ToolBtn_Click" Tag="Angle3Points"/>
@@ -245,40 +380,148 @@
                 </Grid>
             </Border>
 
+            <!-- Screen-space reference grid — on top in 2D and 3D. Mouse-transparent unless
+                 the "Move Grid" toggle enables hit-testing for dragging. -->
+            <Canvas x:Name="CephGridOverlay" ClipToBounds="True"
+                    Background="Transparent"
+                    IsHitTestVisible="False" Visibility="Collapsed"
+                    MouseLeftButtonDown="CephGridOverlay_MouseLeftButtonDown"
+                    MouseMove="CephGridOverlay_MouseMove"
+                    MouseLeftButtonUp="CephGridOverlay_MouseLeftButtonUp"/>
         </Grid>
 
-        <!-- == Sidebar (Landmarks + Measurements) == -->
+        <!-- == Sidebar (Landmarks + Analysis + Custom tools) == -->
         <Border Grid.Row="1" Grid.Column="1" Background="#FF151B23"
                 BorderThickness="1,0,0,0" BorderBrush="#FF232E3A">
-            <DockPanel>
-                <!-- Measurements panel docked at bottom -->
-                <Border DockPanel.Dock="Bottom" BorderThickness="0,1,0,0" BorderBrush="#FF232E3A">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto" MaxHeight="220"/>
-                        </Grid.RowDefinitions>
-                        <Border Grid.Row="0" Background="#FF1E2730" Padding="10,7"
-                                BorderThickness="0,0,0,1" BorderBrush="#FF232E3A">
-                            <TextBlock Text="MEASUREMENTS" Foreground="#FF6E7F90" FontSize="10" FontWeight="SemiBold"/>
-                        </Border>
-                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" MaxHeight="200" Padding="4">
-                            <StackPanel x:Name="MeasurementListPanel" Margin="0,4"/>
-                        </ScrollViewer>
-                    </Grid>
-                </Border>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="220"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="100"/>
+                </Grid.RowDefinitions>
 
-                <!-- Landmarks header -->
-                <Border DockPanel.Dock="Top" Background="#FF1E2730" Padding="10,7"
+                <Border Grid.Row="0" Background="#FF1E2730" Padding="10,7"
                         BorderThickness="0,0,0,1" BorderBrush="#FF232E3A">
                     <TextBlock Text="LANDMARKS" Foreground="#FF6E7F90" FontSize="10" FontWeight="SemiBold"/>
                 </Border>
 
-                <!-- Landmark list fills remaining space -->
-                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="4">
                     <StackPanel x:Name="LandmarkListPanel" Margin="0,4"/>
                 </ScrollViewer>
-            </DockPanel>
+
+                <Border Grid.Row="2" Background="#FF1E2730" Padding="10,7"
+                        BorderThickness="0,1,0,1" BorderBrush="#FF232E3A">
+                    <DockPanel DataContext="{Binding ElementName=AnalysisTabControl}">
+                        <TextBlock Text="ANALYSIS" Foreground="#FF6E7F90" FontSize="10" FontWeight="SemiBold"/>
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding StatusNote}"
+                                   Foreground="#FF6E7F90" FontSize="9" FontStyle="Italic"
+                                   TextTrimming="CharacterEllipsis" MaxWidth="120"
+                                   HorizontalAlignment="Right"/>
+                    </DockPanel>
+                </Border>
+
+                <TabControl Grid.Row="3" x:Name="AnalysisTabControl"
+                            Style="{StaticResource CephAnalysisTabControl}"
+                            ItemContainerStyle="{StaticResource CephAnalysisTabItem}"
+                            Padding="0" Margin="0">
+                    <TabItem Header="Steiner">
+                        <DataGrid ItemsSource="{Binding SteinerRows}"
+                                  Style="{StaticResource CephAnalysisDataGrid}"
+                                  ColumnHeaderStyle="{StaticResource CephAnalysisColumnHeader}">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Meas" Binding="{Binding Abbreviation}" Width="52">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource CephAnalysisCellText}"/>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Value" Binding="{Binding ValueText}" Width="58">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource CephAnalysisValueText}"/>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Norm" Binding="{Binding NormText}" Width="*">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource CephAnalysisCellText}"/>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Δ" Binding="{Binding DeviationText}" Width="36">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource CephAnalysisCellText}"/>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </TabItem>
+                    <TabItem Header="Tweed">
+                        <DataGrid ItemsSource="{Binding TweedRows}"
+                                  Style="{StaticResource CephAnalysisDataGrid}"
+                                  ColumnHeaderStyle="{StaticResource CephAnalysisColumnHeader}">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Meas" Binding="{Binding Abbreviation}" Width="52">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource CephAnalysisCellText}"/>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Value" Binding="{Binding ValueText}" Width="58">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource CephAnalysisValueText}"/>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Norm" Binding="{Binding NormText}" Width="*">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource CephAnalysisCellText}"/>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Δ" Binding="{Binding DeviationText}" Width="36">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource CephAnalysisCellText}"/>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </TabItem>
+                    <TabItem Header="Ricketts">
+                        <DataGrid ItemsSource="{Binding RickettsRows}"
+                                  Style="{StaticResource CephAnalysisDataGrid}"
+                                  ColumnHeaderStyle="{StaticResource CephAnalysisColumnHeader}">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Meas" Binding="{Binding Abbreviation}" Width="52">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource CephAnalysisCellText}"/>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Value" Binding="{Binding ValueText}" Width="58">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource CephAnalysisValueText}"/>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Norm" Binding="{Binding NormText}" Width="*">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource CephAnalysisCellText}"/>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Δ" Binding="{Binding DeviationText}" Width="36">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource CephAnalysisCellText}"/>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </TabItem>
+                </TabControl>
+
+                <Border Grid.Row="4" Background="#FF1E2730" Padding="10,7"
+                        BorderThickness="0,1,0,1" BorderBrush="#FF232E3A">
+                    <TextBlock Text="CUSTOM TOOLS" Foreground="#FF6E7F90" FontSize="10" FontWeight="SemiBold"/>
+                </Border>
+
+                <ScrollViewer Grid.Row="5" VerticalScrollBarVisibility="Auto" Padding="4">
+                    <StackPanel x:Name="MeasurementListPanel" Margin="0,4"/>
+                </ScrollViewer>
+            </Grid>
         </Border>
 
         <!-- == Status Bar == -->

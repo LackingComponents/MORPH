@@ -533,6 +533,9 @@ public class VolumeData
     }
 
     /// <summary>Trilinearly sample the volume at fractional voxel coordinates.</summary>
+    public short SamplePhysicalMm(double xMm, double yMm, double zMm) =>
+        SampleTrilinear(xMm / Spacing[0], yMm / Spacing[1], zMm / Spacing[2]);
+
     private short SampleTrilinear(double ix, double iy, double iz)
     {
         int x0 = (int)Math.Floor(ix);
