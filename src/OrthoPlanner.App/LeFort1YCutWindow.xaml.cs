@@ -189,32 +189,6 @@ public partial class LeFort1YCutWindow : Window
 
     private void Next_Click(object s,RoutedEventArgs e){StepTitle.Text="LeFort 1 — 3-Piece: Adjust Y & Cut";StepInstructions.Text="Drag any handle to adjust. Each handle moves independently in all 3D directions. Click Perform Cut when ready.";NextBtn.Visibility=Visibility.Collapsed;CutBtn.Visibility=Visibility.Visible;CutBtn.IsEnabled=true;}
 
-    // Orient plane normal of triangle (a,b,c) to point AWAY from 'away'
-    static Vector3D TriNorm(Point3D a,Point3D b,Point3D c,Point3D away)
-    {
-        var n=Norm(Cross(Sub(b,a),Sub(c,a)));
-        if(Dot(n,Sub(away,a))>0)n=new(-n.X,-n.Y,-n.Z);
-        return n;
-    }
-
-    // Signed distance from point P to plane through 'o' with normal 'n'
-    static double PlaneD(Point3D p,Point3D o,Vector3D n)=>Dot(Sub(p,o),n);
-
-    // Returns true if point P, projected orthogonally onto the plane of triangle (a,b,c), lands inside it.
-    static bool InsideTri(Point3D P,Point3D a,Point3D b,Point3D c,Vector3D n)
-    {
-        // Project P onto triangle plane
-        double dist=Dot(Sub(P,a),n);
-        var Pp=new Point3D(P.X-dist*n.X,P.Y-dist*n.Y,P.Z-dist*n.Z);
-        // Barycentric test via cross products (same-side method)
-        var ab=Sub(b,a);var bc=Sub(c,b);var ca=Sub(a,c);
-        var ap=Sub(Pp,a);var bp=Sub(Pp,b);var cp=Sub(Pp,c);
-        double d0=Dot(n,Cross(ab,ap));
-        double d1=Dot(n,Cross(bc,bp));
-        double d2=Dot(n,Cross(ca,cp));
-        return (d0>=0&&d1>=0&&d2>=0)||(d0<=0&&d1<=0&&d2<=0);
-    }
-
 
     private async void Cut_Click(object s, RoutedEventArgs e)
     {
@@ -238,45 +212,16 @@ public partial class LeFort1YCutWindow : Window
         // never misses (the quads must be large enough to intercept any
         // vertex-to-reference segment). Junction corners stay shared.
         float[] F(Point3D p) => new float[]{ (float)p.X, (float)p.Y, (float)p.Z };
-        const float E = 150f;
-
-        // Extend arm far-end corners along arm direction + vertically
-        float[] ExtF(Point3D far, Point3D jun, Point3D junOther, float signV)
-        {
-            // Arm direction: away from junction
-            double ax=far.X-jun.X, ay=far.Y-jun.Y, az=far.Z-jun.Z;
-            double al=Math.Sqrt(ax*ax+ay*ay+az*az); if(al>0){ax/=al;ay/=al;az/=al;}
-            // Vertical direction: from junT to junB (or vice versa)
-            double vx=junOther.X-jun.X, vy=junOther.Y-jun.Y, vz=junOther.Z-jun.Z;
-            double vl=Math.Sqrt(vx*vx+vy*vy+vz*vz); if(vl>0){vx/=vl;vy/=vl;vz/=vl;}
-            return new[]{(float)(far.X+ax*E+vx*signV*E),(float)(far.Y+ay*E+vy*signV*E),(float)(far.Z+az*E+vz*signV*E)};
-        }
-        // Extend stem far-end corners along stem direction + vertically
-        float[] ExtS(Point3D far, Point3D jun, Point3D junOther, float signV)
-        {
-            double sx=far.X-jun.X, sy=far.Y-jun.Y, sz=far.Z-jun.Z;
-            double sl=Math.Sqrt(sx*sx+sy*sy+sz*sz); if(sl>0){sx/=sl;sy/=sl;sz/=sl;}
-            double vx=junOther.X-jun.X, vy=junOther.Y-jun.Y, vz=junOther.Z-jun.Z;
-            double vl=Math.Sqrt(vx*vx+vy*vy+vz*vz); if(vl>0){vx/=vl;vy/=vl;vz/=vl;}
-            return new[]{(float)(far.X+sx*E+vx*signV*E),(float)(far.Y+sy*E+vy*signV*E),(float)(far.Z+sz*E+vz*signV*E)};
-        }
-
-        var erFT = ExtF(rFT, jT, jB, -1); // extend right far-top: away from junction, upward
-        var erFB = ExtF(rFB, jB, jT, -1);  // extend right far-bot: away from junction, downward
-        var elFT = ExtF(lFT, jT, jB, -1);
-        var elFB = ExtF(lFB, jB, jT, -1);
-        var esBT = ExtS(sBT, jT, jB, -1);  // extend stem far-top: away from junction, upward
-        var esBB = ExtS(sBB, jB, jT, -1);  // extend stem far-bot: away from junction, downward
 
         var ppRight = new Polyplane(0.0);
         ppRight.SetMeshFromQuads(new List<(float[],float[],float[],float[])>{
-            (erFT, F(jT), F(jB), erFB),       // right arm (extended far end)
-            (F(jT), esBT,  esBB,  F(jB))      // stem (extended far end)
+            (F(rFT), F(jT), F(jB), F(rFB)),       // right arm
+            (F(jT), F(sBT),  F(sBB),  F(jB))      // stem
         });
         var ppLeft = new Polyplane(0.0);
         ppLeft.SetMeshFromQuads(new List<(float[],float[],float[],float[])>{
-            (elFT, F(jT), F(jB), elFB),       // left arm (extended far end)
-            (F(jT), esBT,  esBB,  F(jB))      // stem (extended far end)
+            (F(lFT), F(jT), F(jB), F(lFB)),       // left arm
+            (F(jT), F(sBT),  F(sBB),  F(jB))      // stem
         });
 
         List<float[]> L, R, C;
