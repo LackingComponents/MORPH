@@ -351,26 +351,25 @@ public partial class MainViewModel
                 segVolume.Depth == Volume.Depth &&
                 segVolume.CountVoxels(boneLabel) > 0;
 
-            // ponytail: build bone-only mask on-demand from _segVolume instead of
-            // keeping a 100 MB copy around forever. Released after the dialog closes.
-            //
-            // IMPORTANT: never pass _segVolume directly (fast-path removed in fix for d64d2b3
-            // regression). _segVolume may have bone-label voxels overwritten to 0 or to
-            // seed-split preview labels (1/2/3) if the user opened the seed-split preview
-            // earlier in the same session. Always rebuild a pristine bone-only copy with a
-            // single linear pass (~50 ms on 512³). This restores the invariant that the old
-            // _boneOnlySegVolume eager-copy provided.
+            // Bone membership is read from the frozen _boneMask snapshot taken at
+            // bone-segmentation time (SegmentationViewModel), NOT from the mutable _segVolume.
+            // ThresholdSegment is last-writer-wins with no guard on the existing label, so a
+            // later Dental/Soft/Custom segmentation overwrites the tooth-bearing bone voxels to
+            // its own label — reading _segVolume by label-equality then carves the dentition out
+            // of the mask the split navigates, and the malformed result looks like the dental
+            // mesh was subtracted from the bone mesh. _boneMask is faithful to the displayed bone
+            // mesh (captured after morph-close / component-keep / smoothing). Returns null when
+            // the mask is missing or stale (dim change after an NHP reslice) → caller re-segments.
             OrthoPlanner.Core.Segmentation.SegmentationVolume? boneOnlyMask = null;
             OrthoPlanner.Core.Segmentation.SegmentationVolume? GetValidSplitTargetVolume(byte boneLabel)
             {
-                if (_segVolume == null || Volume == null) return null;
-                // Prefer the label recorded at bone-segmentation time; fall back to the
-                // segment's current label in case _boneLabel was never set.
-                byte target = _boneLabel ?? boneLabel;
+                if (Volume == null || _boneMask == null) return null;
+                if (_boneMask.Length != (long)Volume.Width * Volume.Height * Volume.Depth) return null;
+
                 boneOnlyMask = new OrthoPlanner.Core.Segmentation.SegmentationVolume(Volume);
-                int n = _segVolume.Labels.Length;
-                for (int i = 0; i < n; i++)
-                    if (_segVolume.Labels[i] == target)
+                byte target = _boneLabel ?? boneLabel;
+                for (int i = 0; i < _boneMask.Length; i++)
+                    if (_boneMask.Get(i))
                         boneOnlyMask.Labels[i] = target;
                 return HasUsableBoneMask(boneOnlyMask, target) ? boneOnlyMask : null;
             }

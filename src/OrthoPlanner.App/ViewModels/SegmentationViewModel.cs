@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.ObjectModel;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -22,6 +23,14 @@ public partial class MainViewModel
     // ponytail: no more _boneOnlySegVolume — was a 100 MB eager copy held forever.
     // Now we just record which label is "bone" and build the mask on-demand in OsteotomyViewModel.
     private byte? _boneLabel;
+
+    // Frozen bone-membership snapshot taken at bone-segmentation time (BitArray ≈ 16 MB at 512³,
+    // 8× smaller than the byte[] it replaced). Faithful to the displayed bone mesh: captured after
+    // morph-closing / component-keep / smoothing. Read by OsteotomyViewModel's split instead of the
+    // mutable _segVolume, whose bone-label voxels a later Dental/Soft/Custom segmentation silently
+    // overwrites to its own label (ThresholdSegment is last-writer-wins) — that carve produced a
+    // malformed split that looked like the dental mesh was subtracted from the bone mask.
+    private BitArray? _boneMask;
 
     // ÔöÇÔöÇÔöÇ Live 3D Preview ÔöÇÔöÇÔöÇ
     [ObservableProperty] private HelixToolkit.SharpDX.Geometry3D? _livePreviewGeometry;
@@ -456,9 +465,19 @@ public partial class MainViewModel
         StatusText = $"Segmented {count:N0} voxels ({min}\u2013{max} HU)";
         LoadProgress = 100;
 
-        // Record which label was bone (used on-demand by CondyleSplit), don't copy the 100 MB mask
+        // Record which label was bone (used on-demand by CondyleSplit), and freeze a bone-only
+        // BitArray the split can read without being carved by a later Dental/Soft/Custom
+        // segmentation overwriting those voxels to its own label.
         if (name.Contains("Bone"))
+        {
             _boneLabel = label;
+            var labels = _segVolume!.Labels;
+            var mask = new BitArray(labels.Length);
+            for (int i = 0; i < labels.Length; i++)
+                if (labels[i] == label)
+                    mask.Set(i, true);
+            _boneMask = mask;
+        }
 
         IsLoading = false;
     }
