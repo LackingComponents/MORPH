@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text;
 using g3;
 
 namespace OrthoPlanner.Core.Geometry;
@@ -989,6 +991,368 @@ public static class MeshOps
     [System.Diagnostics.Conditional("DEBUG")]
     private static void CapLog(string msg) => System.Diagnostics.Debug.WriteLine(msg);
 
+    // ponytail: temporary cap-overspill investigation log. Appends a block per
+    // CapFromCutSurface call to ~/Documents/Orthoplanner/cap-diag.log. Behavior-neutral
+    // for the cut itself; any log failure is swallowed so it can never break a cut.
+    private static void WriteCapDiag(
+        List<float[]> originalSoup,
+        List<(float[] A, float[] B)> cutEdges,
+        Polyplane polyplane, int subVerts,
+        List<(float[] a, float[] b, float[] c)> isInsideTiles,
+        List<(float[] a, float[] b, float[] c)> pipTiles,
+        bool pipRan,
+        DMeshAABBTree3 tree,
+        float bxMin, float bxMax, float byMin, float byMax, float bzMin, float bzMax)
+    {
+        try
+        {
+            string dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                "Orthoplanner");
+            Directory.CreateDirectory(dir);
+            string path = Path.Combine(dir, "cap-diag.log");
+
+            // openEnds: cut-edge endpoints with no matching partner -> open contour.
+            var ep = new Dictionary<string, int>();
+            string K(float[] p) => $"{p[0]:F3},{p[1]:F3},{p[2]:F3}";
+            foreach (var (A, B) in cutEdges)
+            {
+                ep[K(A)] = ep.GetValueOrDefault(K(A)) + 1;
+                ep[K(B)] = ep.GetValueOrDefault(K(B)) + 1;
+            }
+            int openEnds = ep.Values.Count(c => c == 1);
+
+            // ponytail: cutEdges-INDEPENDENT probe. Distance from each accepted
+            // cap-tile centroid to the nearest BONE-surface triangle (AABB tree
+            // descent, log-time). An overspilling cap sits in open sinus/gap
+            // space, far from any bone triangle; a legit cut-face centroid is
+            // inside the slab, within ~half-thickness of a cortex. The prior
+            // cutEdges-distance metric falsely flagged clean BSSO tiles far from
+            // the drawn cut line but hugging bone — >5mm band is the real signal.
+            void BoneBands(List<(float[] a, float[] b, float[] c)> tiles, out string bands, out float maxDmm)
+            {
+                int[] bb = {0,0,0,0}; float mx = 0f;
+                if (tree != null && tree.SupportsNearestTriangle && tiles.Count > 0)
+                {
+                    foreach (var (a, b, c) in tiles)
+                    {
+                        float cx=(a[0]+b[0]+c[0])/3f, cy=(a[1]+b[1]+c[1])/3f, cz=(a[2]+b[2]+c[2])/3f;
+                        int tid = tree.FindNearestTriangle(new Vector3d(cx,cy,cz), out double dsq, double.MaxValue);
+                        float d = tid >= 0 ? MathF.Sqrt((float)dsq) : 0f;
+                        if (d>mx) mx=d;
+                        if (d<1f) bb[0]++; else if (d<2f) bb[1]++; else if (d<5f) bb[2]++; else bb[3]++;
+                    }
+                }
+                maxDmm = mx;
+                bands = $"<1mm:{bb[0]} 1-2:{bb[1]} 2-5:{bb[2]} >5mm:{bb[3]}";
+            }
+            BoneBands(isInsideTiles, out string ihBands, out float ihMax);
+            BoneBands(pipTiles,      out string pipBands, out float pipMax);
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"=== CapFromCutSurface {DateTime.Now:HH:mm:ss.fff} ===");
+            sb.AppendLine($"  soupTris={originalSoup.Count/3} polyTris={polyplane.MeshVertices.Count/3} isSinglePlane={polyplane.IsSinglePlane} subTris={subVerts/3}");
+            sb.AppendLine($"  cutEdges={cutEdges.Count} openEnds={openEnds}");
+            sb.AppendLine($"  boneBBox=[{bxMin:F1}..{bxMax:F1}]x[{byMin:F1}..{byMax:F1}]x[{bzMin:F1}..{bzMax:F1}]");
+            sb.AppendLine($"  boneDist(isInsideTiles={isInsideTiles.Count}) {ihBands}  max={ihMax:F2}mm");
+            sb.AppendLine($"  pipRan={pipRan} pipTiles={pipTiles.Count} {pipBands}  max={pipMax:F2}mm");
+            sb.Append(FacetSummary());
+            sb.Append(RasterCapPlane(polyplane, cutEdges, isInsideTiles, pipTiles));
+            File.AppendAllText(path, sb.ToString());
+
+            // Group polyplane triangles into facets by shared (canonical) plane.
+            // Rounded n+d collapses the 2 coplanar tris of a flat quad to ONE
+            // facet (matches IsSinglePlane); a step / L yields several facets.
+            string FacetSummary()
+            {
+                var pv = polyplane.MeshVertices;
+                if (pv.Count < 6) return "  facets: <2 tris\n";
+                var fN = new List<float[]>();   // unit normal, canonical sign
+                var fD = new List<float>();      // plane offset
+                var fKey = new List<string>();
+                int nFacets = 0;
+                for (int i = 0; i + 2 < pv.Count; i += 3)
+                {
+                    float ax=pv[i][0], ay=pv[i][1], az=pv[i][2];
+                    float bx=pv[i+1][0], by=pv[i+1][1], bz=pv[i+1][2];
+                    float cx=pv[i+2][0], cy=pv[i+2][1], cz=pv[i+2][2];
+                    float nx=(by-ay)*(cz-az)-(bz-az)*(cy-ay);
+                    float ny=(bz-az)*(cx-ax)-(bx-ax)*(cz-az);
+                    float nz=(bx-ax)*(cy-ay)-(by-ay)*(cx-ax);
+                    float nl=MathF.Sqrt(nx*nx+ny*ny+nz*nz);
+                    if (nl < 1e-9f) continue;
+                    nx/=nl; ny/=nl; nz/=nl;
+                    float dd = nx*ax+ny*ay+nz*az;
+                    float sg = MathF.Abs(nx)>1e-6f?MathF.Sign(nx):MathF.Abs(ny)>1e-6f?MathF.Sign(ny):MathF.Sign(nz);
+                    string key=$"{nx*sg:F3},{ny*sg:F3},{nz*sg:F3}|{dd*sg:F1}";
+                    int idx=fKey.IndexOf(key);
+                    if (idx<0){ fKey.Add(key); fN.Add(new[]{nx*sg,ny*sg,nz*sg}); fD.Add(dd*sg); idx=nFacets++; }
+                }
+                if (nFacets==0) return "  facets: none (degenerate)\n";
+                var edgeCount=new int[nFacets];
+                var deg=new Dictionary<string,int>[nFacets];
+                for (int k=0;k<nFacets;k++) deg[k]=new Dictionary<string,int>();
+                int straddlers=0;
+                string EP(float[] p)=>$"{p[0]:F3},{p[1]:F3},{p[2]:F3}";
+                foreach (var (A,B) in cutEdges)
+                {
+                    float mx=(A[0]+B[0])*.5f, my=(A[1]+B[1])*.5f, mz=(A[2]+B[2])*.5f;
+                    int best=-1; float bestD=float.MaxValue;
+                    for (int k=0;k<nFacets;k++)
+                    { float dl=MathF.Abs(fN[k][0]*mx+fN[k][1]*my+fN[k][2]*mz-fD[k]); if(dl<bestD){bestD=dl;best=k;} }
+                    if (best<0 || bestD>1.0f){ straddlers++; continue; }
+                    edgeCount[best]++;
+                    string ka=EP(A), kb=EP(B);
+                    deg[best][ka]=deg[best].GetValueOrDefault(ka)+1;
+                    deg[best][kb]=deg[best].GetValueOrDefault(kb)+1;
+                }
+                var sb2=new StringBuilder();
+                sb2.AppendLine($"  facets={nFacets} straddlerEdges(>1mm off any facet)={straddlers}");
+                for (int k=0;k<nFacets;k++)
+                {
+                    int oe=deg[k].Values.Count(c=>c==1);
+                    sb2.AppendLine($"    facet#{k} n=({fN[k][0]:F2},{fN[k][1]:F2},{fN[k][2]:F2}) d={fD[k]:F1} edges={edgeCount[k]} openEnds={oe}");
+                }
+                return sb2.ToString();
+            }
+        }
+        catch { /* diagnostic only */ }
+    }
+
+    // ponytail: ASCII raster of the cutting plane — cut edges drawn as 'E', accepted
+    // cap-tile centroids as '#'. Lets us SEE whether the accepted cap blob is bounded
+    // by the cut-edgeloop (legit cut face) or spills past it (overspill), which the
+    // distance metric above cannot distinguish for a large legitimate cut face.
+    private static string RasterCapPlane(
+        Polyplane polyplane,
+        List<(float[] A, float[] B)> cutEdges,
+        List<(float[] a, float[] b, float[] c)> isInsideTiles,
+        List<(float[] a, float[] b, float[] c)> pipTiles)
+    {
+        try
+        {
+            var pv = polyplane.MeshVertices;
+            if (pv.Count < 3) return "";
+            float[] p0 = pv[0], p1 = pv[1], p2 = pv[2];
+            float nx = (p1[1]-p0[1])*(p2[2]-p0[2]) - (p1[2]-p0[2])*(p2[1]-p0[1]);
+            float ny = (p1[2]-p0[2])*(p2[0]-p0[0]) - (p1[0]-p0[0])*(p2[2]-p0[2]);
+            float nz = (p1[0]-p0[0])*(p2[1]-p0[1]) - (p1[1]-p0[1])*(p2[0]-p0[0]);
+            float nl = MathF.Sqrt(nx*nx+ny*ny+nz*nz);
+            if (nl < 1e-6f) return "";
+            nx/=nl; ny/=nl; nz/=nl;
+            float ux,uy,uz;
+            if (MathF.Abs(nx) < 0.9f) { ux=0;   uy=nz; uz=-ny; }
+            else                      { ux=-nz; uy=0;  uz=nx;  }
+            float ul=MathF.Sqrt(ux*ux+uy*uy+uz*uz); ux/=ul; uy/=ul; uz/=ul;
+            float vx=ny*uz-nz*uy, vy=nz*ux-nx*uz, vz=nx*uy-ny*ux;
+
+            float PU(float x,float y,float z)=> x*ux+y*uy+z*uz;
+            float PV(float x,float y,float z)=> x*vx+y*vy+z*vz;
+
+            // Project accept-centroids (IsInside '#', PIP '+').
+            var aPts = new List<(float u,float v,char s)>();
+            foreach (var (a,b,c) in isInsideTiles) { float cx=(a[0]+b[0]+c[0])/3f,cy=(a[1]+b[1]+c[1])/3f,cz=(a[2]+b[2]+c[2])/3f; aPts.Add((PU(cx,cy,cz),PV(cx,cy,cz),'#')); }
+            foreach (var (a,b,c) in pipTiles)      { float cx=(a[0]+b[0]+c[0])/3f,cy=(a[1]+b[1]+c[1])/3f,cz=(a[2]+b[2]+c[2])/3f; aPts.Add((PU(cx,cy,cz),PV(cx,cy,cz),'+')); }
+
+            float umn=float.MaxValue,umx=float.MinValue,vmn=float.MaxValue,vmx=float.MinValue;
+            void Acc(float u,float v){ if(u<umn)umn=u; if(u>umx)umx=u; if(v<vmn)vmn=v; if(v>vmx)vmx=v; }
+            foreach (var (A,B) in cutEdges) { Acc(PU(A[0],A[1],A[2]),PV(A[0],A[1],A[2])); Acc(PU(B[0],B[1],B[2]),PV(B[0],B[1],B[2])); }
+            foreach (var (u,v,_) in aPts) Acc(u,v);
+            if (umx<=umn || vmx<=vmn) return "";
+            umn-=1f; umx+=1f; vmn-=1f; vmx+=1f;
+
+            const int cols=72, rows=26;
+            float cw=(umx-umn)/cols, ch=(vmx-vmn)/rows;
+            var grid=new char[rows*cols];
+            for (int i=0;i<grid.Length;i++) grid[i]='.';
+
+            int Col(float u)=>Math.Clamp((int)((u-umn)/cw),0,cols-1);
+            int Row(float v)=>Math.Clamp(rows-1-(int)((v-vmn)/ch),0,rows-1); // top = maxV
+
+            foreach (var (u,v,s) in aPts) grid[Row(v)*cols+Col(u)]=s;
+
+            // Draw cut edges continuously by walking each segment in small steps.
+            foreach (var (A,B) in cutEdges)
+            {
+                float au=PU(A[0],A[1],A[2]), av=PV(A[0],A[1],A[2]);
+                float bu=PU(B[0],B[1],B[2]), bv=PV(B[0],B[1],B[2]);
+                float du=bu-au, dv=bv-av, len=MathF.Sqrt(du*du+dv*dv);
+                int steps=Math.Clamp((int)(len/(MathF.Min(cw,ch)*0.6f))+1,1,4000);
+                for (int s=0;s<=steps;s++){ float t=(float)s/steps; int r=Row(av+dv*t),c=Col(au+du*t); grid[r*cols+c]='E'; }
+            }
+
+            var rs=new StringBuilder();
+            rs.AppendLine($"  RASTER cutting-plane (u∈[{umn:F1}..{umx:F1}], v∈[{vmn:F1}..{vmx:F1}])  E=cut edge  #=IsInside cap  +pip cap");
+            for (int r=0;r<rows;r++){ rs.Append("    "); rs.Append(grid, r*cols, cols); rs.AppendLine(); }
+            return rs.ToString();
+        }
+        catch { return ""; }
+    }
+
+    // ponytail: definitive cap-spill probe. Dumps the post-slice half-meshes,
+    // the cut edges, and every half-mesh boundary loop as OBJ files (the whole
+    // geometry, importable), and classifies each boundary loop of each half as
+    // ALL-ON-PLANE / ALL-OFF-PLANE / MIXED by counting vertices that sit on a
+    // polyplane facet plane (tol 0.5mm).
+    //   ALL-ON-PLANE  = isolated cut hole (planar-fill -> no spill possible)
+    //   ALL-OFF-PLANE = sinus/other opening the cut did not touch (leave open)
+    //   MIXED        = open cut chain bled into a pre-existing rim (sinus) ->
+    //                  explains why a naive fill closes the wrong region.
+    private static void DumpCapGeometry(
+        List<float[]> above, List<float[]> below,
+        List<(float[] A, float[] B)> cutEdges, Polyplane polyplane)
+    {
+        try
+        {
+            string stamp = DateTime.Now.ToString("HHmmss_fff");
+            string dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                "Orthoplanner", "cap-geo");
+            Directory.CreateDirectory(dir);
+            string fA = $"cap-above-{stamp}.obj";
+            string fB = $"cap-below-{stamp}.obj";
+            string fC = $"cap-cutedges-{stamp}.obj";
+            string fLA = $"loops-above-{stamp}.obj";
+            string fLB = $"loops-below-{stamp}.obj";
+            WriteSoupObj(Path.Combine(dir, fA), above);
+            WriteSoupObj(Path.Combine(dir, fB), below);
+            WritePolylineObj(Path.Combine(dir, fC), cutEdges);
+
+            var facets = ExtractFacets(polyplane);
+            var sb = new StringBuilder();
+            sb.AppendLine($"=== CapGeometry {stamp} ===");
+            sb.AppendLine($"  obj above    {fA} ({above.Count/3} tris)");
+            sb.AppendLine($"  obj below    {fB} ({below.Count/3} tris)");
+            sb.AppendLine($"  obj cutedges {fC} ({cutEdges.Count} edges, {CountOpenEnds(cutEdges)} open ends)");
+            sb.AppendLine($"  polyplane facets={facets.Count}");
+            ClassifyHalf("above", above, Path.Combine(dir, fLA), facets, sb);
+            ClassifyHalf("below", below, Path.Combine(dir, fLB), facets, sb);
+            File.AppendAllText(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                "Orthoplanner", "cap-diag.log"), sb.ToString());
+        }
+        catch { /* diagnostic only */ }
+    }
+
+    private static void ClassifyHalf(string half, List<float[]> soup, string loopsObjPath,
+        List<(float[] n, float d)> facets, StringBuilder sb)
+    {
+        try
+        {
+            var dm = ToIndexedMesh(soup);
+            var loops = new MeshBoundaryLoops(dm);
+            WriteLoopsObj(loopsObjPath, dm, loops);
+            sb.AppendLine($"  BOUNDARY LOOPS {half} = {loops.Count}  (loops obj: {Path.GetFileName(loopsObjPath)})");
+            for (int i = 0; i < loops.Count; i++)
+            {
+                var loop = loops[i];
+                int on = 0;
+                for (int v = 0; v < loop.VertexCount; v++)
+                {
+                    var p = loop.GetVertex(v);
+                    double best = double.MaxValue;
+                    foreach (var (n, d) in facets)
+                    {
+                        double dd = Math.Abs(n[0]*p.x + n[1]*p.y + n[2]*p.z - d);
+                        if (dd < best) best = dd;
+                    }
+                    if (best < 0.5) on++;
+                }
+                int off = loop.VertexCount - on;
+                string cls = on == loop.VertexCount ? "ALL-ON-PLANE"
+                           : on == 0            ? "ALL-OFF-PLANE"
+                           :                       "MIXED";
+                sb.AppendLine($"    loop#{i} verts={loop.VertexCount} onPlane={on} offPlane={off} internal={loop.IsInternalLoop()} => {cls}");
+            }
+        }
+        catch (System.Exception ex) { sb.AppendLine($"  BOUNDARY LOOPS {half}: FAILED {ex.GetType().Name}: {ex.Message}"); }
+    }
+
+    private static List<(float[] n, float d)> ExtractFacets(Polyplane polyplane)
+    {
+        var facets = new List<(float[] n, float d)>();
+        var keys = new List<string>();
+        var pv = polyplane.MeshVertices;
+        for (int i = 0; i + 2 < pv.Count; i += 3)
+        {
+            float ax=pv[i][0],ay=pv[i][1],az=pv[i][2];
+            float bx=pv[i+1][0],by=pv[i+1][1],bz=pv[i+1][2];
+            float cx=pv[i+2][0],cy=pv[i+2][1],cz=pv[i+2][2];
+            float nx=(by-ay)*(cz-az)-(bz-az)*(cy-ay);
+            float ny=(bz-az)*(cx-ax)-(bx-ax)*(cz-az);
+            float nz=(bx-ax)*(cy-ay)-(by-ay)*(cx-ax);
+            float nl=MathF.Sqrt(nx*nx+ny*ny+nz*nz);
+            if (nl<1e-9f) continue;
+            nx/=nl; ny/=nl; nz/=nl;
+            float dd=nx*ax+ny*ay+nz*az;
+            float sg=MathF.Abs(nx)>1e-6f?MathF.Sign(nx):MathF.Abs(ny)>1e-6f?MathF.Sign(ny):MathF.Sign(nz);
+            string key=$"{nx*sg:F3},{ny*sg:F3},{nz*sg:F3}|{dd*sg:F1}";
+            if (!keys.Contains(key)) { keys.Add(key); facets.Add((new[]{nx*sg,ny*sg,nz*sg}, dd*sg)); }
+        }
+        return facets;
+    }
+
+    private static int CountOpenEnds(List<(float[] A, float[] B)> edges)
+    {
+        var ep = new Dictionary<string, int>();
+        string K(float[] p)=>$"{p[0]:F3},{p[1]:F3},{p[2]:F3}";
+        foreach (var (A,B) in edges){ var ka=K(A); ep[ka]=ep.GetValueOrDefault(ka)+1; var kb=K(B); ep[kb]=ep.GetValueOrDefault(kb)+1; }
+        return ep.Values.Count(c=>c==1);
+    }
+
+    private static void WriteSoupObj(string path, List<float[]> soup)
+    {
+        var sb = new StringBuilder();
+        var vmap = new Dictionary<(int,int,int), int>();
+        int Get(float[] v){
+            var key=((int)Math.Round(v[0]*100),(int)Math.Round(v[1]*100),(int)Math.Round(v[2]*100));
+            if (vmap.TryGetValue(key,out int idx)) return idx;
+            int nv = vmap.Count+1; vmap[key]=nv;
+            sb.Append($"v {v[0]:F4} {v[1]:F4} {v[2]:F4}\n");
+            return nv;
+        }
+        var faces = new StringBuilder();
+        for (int i=0;i+2<soup.Count;i+=3){
+            int a=Get(soup[i]),b=Get(soup[i+1]),c=Get(soup[i+2]);
+            if (a!=b&&b!=c&&a!=c) faces.Append($"f {a} {b} {c}\n");
+        }
+        sb.Append(faces);
+        File.WriteAllText(path, sb.ToString());
+    }
+
+    private static void WritePolylineObj(string path, List<(float[] A,float[] B)> edges)
+    {
+        var sb=new StringBuilder();
+        int idx=0;
+        foreach (var (A,B) in edges){
+            idx++; var a=idx;
+            sb.Append($"v {A[0]:F4} {A[1]:F4} {A[2]:F4}\n");
+            idx++; var b=idx;
+            sb.Append($"v {B[0]:F4} {B[1]:F4} {B[2]:F4}\n");
+            sb.Append($"l {a} {b}\n");
+        }
+        File.WriteAllText(path, sb.ToString());
+    }
+
+    private static void WriteLoopsObj(string path, DMesh3 dm, MeshBoundaryLoops loops)
+    {
+        var sb=new StringBuilder();
+        int totalV=0;
+        for (int i=0;i<loops.Count;i++){
+            var loop=loops[i];
+            int start=totalV;
+            var ls=new StringBuilder();
+            for (int v=0; v<loop.VertexCount; v++){
+                var p=loop.GetVertex(v);
+                totalV++; sb.Append($"v {p.x:F4} {p.y:F4} {p.z:F4}\n");
+                ls.Append($"{totalV} ");
+            }
+            if (totalV>start) ls.Append($"{start+1}"); // close loop back to first vert
+            sb.Append($"l {ls}\n");
+        }
+        File.WriteAllText(path, sb.ToString());
+    }
+
     /// <summary>
     /// Caps the open cut boundary by using the cutting polyplane surface itself:
     ///   1. Builds a spatial index (AABB tree) from the original unsplit bone mesh.
@@ -1009,6 +1373,7 @@ public static class MeshOps
         var pverts = polyplane.MeshVertices;
         CapLog($"CapFromCutSurface ENTER: originalSoup={originalSoup.Count/3} tris, cutEdges={cutEdges.Count}, polyplane tris={pverts.Count/3}");
         if (pverts.Count < 3) { CapLog("EARLY EXIT: pverts < 3"); return; }
+        DumpCapGeometry(above, below, cutEdges, polyplane);
 
         // -- 1. Build AABB tree from original mesh for inside/outside queries --
         DMesh3 boneMesh = ToIndexedMesh(originalSoup);
@@ -1084,6 +1449,10 @@ public static class MeshOps
         // Fall back to 2D PIP against cutEdges if IsInside returns 0 tiles
         // (happens for thin-shell meshes like the capped LeFort maxilla).
         var accepted = new List<(float[] a, float[] b, float[] c)>();
+        // ponytail: temporary per-source trackers for cap-overspill investigation.
+        var isInsideTiles = new List<(float[] a, float[] b, float[] c)>();
+        var pipTiles      = new List<(float[] a, float[] b, float[] c)>();
+        bool pipRan = false;
         for (int i = 0; i + 2 < subTris.Count; i += 3)
         {
             var pa = subTris[i]; var pb = subTris[i+1]; var pc = subTris[i+2];
@@ -1091,13 +1460,17 @@ public static class MeshOps
             float cy = (pa[1]+pb[1]+pc[1]) / 3f;
             float cz = (pa[2]+pb[2]+pc[2]) / 3f;
             if (tree.IsInside(new Vector3d(cx, cy, cz)))
+            {
                 accepted.Add((pa, pb, pc));
+                isInsideTiles.Add((pa, pb, pc));
+            }
         }
         CapLog($"  IsInside accepted: {accepted.Count} tiles out of {subTris.Count/3}");
 
         // -- 2b. Fallback: 2D PIP against cutEdges projected onto cutting plane --
         if (accepted.Count == 0 && cutEdges.Count >= 3)
         {
+            pipRan = true;
             // Compute cutting plane normal from first polyplane triangle
             float[] pn0 = pverts[0], pn1 = pverts[1], pn2 = pverts[2];
             float nx = (pn1[1]-pn0[1])*(pn2[2]-pn0[2]) - (pn1[2]-pn0[2])*(pn2[1]-pn0[1]);
@@ -1145,11 +1518,17 @@ public static class MeshOps
                     float cz = (pa[2]+pb[2]+pc[2]) / 3f;
                     float cu = cx*ux+cy*uy+cz*uz, cv = cx*vx+cy*vy+cz*vz;
                     if (PIP(cu, cv))
+                    {
                         accepted.Add((pa, pb, pc));
+                        pipTiles.Add((pa, pb, pc));
+                    }
                 }
             }
         CapLog($"  After PIP fallback: {accepted.Count} tiles");
         }
+        WriteCapDiag(originalSoup, cutEdges, polyplane, subTris.Count,
+                     isInsideTiles, pipTiles, pipRan, tree,
+                     bxMin, bxMax, byMin, byMax, bzMin, bzMax);
         if (accepted.Count == 0) { CapLog("EARLY EXIT: 0 accepted tiles after both stages"); return; }
 
         // -- 3. Identify boundary cap vertices via edge adjacency -------------

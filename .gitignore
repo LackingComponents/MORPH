@@ -62,3 +62,7 @@ dcm_temp/
 # Temporary test/scratch projects
 /src/TestHelix/
 /src/TestLocal/
+
+# Cap-overspill diagnostic output (regenerated at runtime, not source)
+/cap-diag.log
+/cap-geo/
