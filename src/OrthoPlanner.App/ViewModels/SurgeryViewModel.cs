@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Collections.ObjectModel;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -157,7 +157,7 @@ public partial class MainViewModel
         if (NeedsCondyleFulcrum(param) && !EnsureCondyleFulcrum())
             return;
 
-        double step = 0.5;
+        double step = 0.1;
         if (param.StartsWith("Maxilla"))
         {
             if (param.Contains("Lat"))        SurgMaxillaLat   += param.EndsWith("+") ? step : -step;
@@ -319,7 +319,7 @@ public partial class MainViewModel
             .FirstOrDefault();
     }
 
-    private System.Windows.Media.Media3D.Transform3D BuildSurgeryTransform(
+    internal System.Windows.Media.Media3D.Transform3D BuildSurgeryTransform(
         double ant, double lat, double vert,
         double roll, double pitch, double yaw,
         System.Windows.Media.Media3D.Point3D center)
@@ -346,8 +346,8 @@ public partial class MainViewModel
         void ApplySurgical(SegmentViewModel? seg, System.Windows.Media.Media3D.Transform3D surgTx)
         {
             if (seg == null) return;
-            seg.SurgicalTransform = surgTx;
-            seg.Transform = ComposeTransforms(_nhpTransform, surgTx);
+            seg.SurgicalTransform = surgTx;   // = seg.LocalTransform (alias) — persisted per-piece
+            seg.Transform = ComposeTransforms(NhpSharedTransform, surgTx);  // Compose(NhpShared, LocalTransform)
         }
 
         var center = ModelCenter;

@@ -23,7 +23,7 @@ public partial class MainViewModel : ObservableObject
         // (covers project load, undo/redo, and segment deletion).
         Segments.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasLeFort1Maxilla));
 
-        // NHP Ledger: auto-apply NHP transform to any object entering the viewport collections
+        // NHP Ledger: auto-compose NhpShared onto any object entering the viewport collections
         InitNhpLedger();
         InitNhpProfiles();
         InitializeThreeDModelsPanel();
@@ -51,7 +51,7 @@ public partial class MainViewModel : ObservableObject
 
 
     // ÔöÇÔöÇÔöÇ Volume State (see DicomViewModel.cs) ÔöÇÔöÇÔöÇ
-    // _volume, _isVolumeLoaded, _originalVolume, _lastDicomPath ÔåÆ DicomViewModel.cs
+    // _volume, _isVolumeLoaded, _lastDicomPath ÔåÆ DicomViewModel.cs
     // PatientName, StudyDate, SeriesDescription, VolumeDimensions ÔåÆ DicomViewModel.cs
     // TotalSlices, CurrentSlice, AxialIndex, CoronalIndex, SagittalIndex ÔåÆ DicomViewModel.cs
     // AxialMax, CoronalMax, SagittalMax, *DisplayHeight ÔåÆ DicomViewModel.cs
@@ -231,27 +231,55 @@ public partial class SegmentViewModel : ObservableObject
     [ObservableProperty] private System.Windows.Media.Media3D.Transform3D _transform = System.Windows.Media.Media3D.Transform3D.Identity;
 
     /// <summary>
-    /// When true, the segment's vertices already have the cumulative NHP transform baked in.
-    /// Managed by the NHP ledger — do NOT set manually. Use <see cref="DerivedFrom"/> instead
-    /// to declare parent-child lineage; the ledger infers bake state from the parent.
-    /// </summary>
-    public bool NhpBaked { get; internal set; }
-
-    /// <summary>
     /// The parent segment this was derived from (e.g., Bone → Cranium/Mandible, Mandible → Ramus).
-    /// The NHP ledger checks this: if the parent is already NHP-baked, the child inherits that
-    /// state automatically and the ledger skips re-baking. Set this when creating a segment
-    /// whose vertices come from an already-existing segment's vertex data.
+    /// Lineage record only — set when creating a segment whose vertices came from another
+    /// segment's vertex data. (Under the lazy model no vertices are baked, so this carries no
+    /// pose meaning; the segment poses itself via its own LocalTransform in the shared stack.)
     /// </summary>
     public SegmentViewModel? DerivedFrom { get; set; }
 
     /// <summary>The surgical movement component of this segment's transform (NHP-independent).</summary>
     public System.Windows.Media.Media3D.Transform3D SurgicalTransform { get; set; } = System.Windows.Media.Media3D.Transform3D.Identity;
 
+    /// <summary>Alias of <see cref="SurgicalTransform"/> — the per-piece displacement record used by
+    /// the lazy transform stack. Same value, the formula's name.</summary>
+    public System.Windows.Media.Media3D.Transform3D LocalTransform
+    {
+        get => SurgicalTransform;
+        set => SurgicalTransform = value;
+    }
+
     /// <summary>True when dental scan geometry has been merged into this segment's vertices
     /// (via clean-and-merge or alignment wizard). Used by splint generation to suppress
     /// the false "CT bone only" warning.</summary>
     public bool HasMergedDental { get; set; }
+
+    // ── Splint Wizard: snapshot/restore helpers ─────────────────────────────
+    /// <summary>True when <see cref="BaseVerticesBackup"/> holds a pre-transform copy
+    /// of <see cref="Vertices"/> (set by the splint wizard, never by scene code).</summary>
+    public bool SurgicalBaked { get; internal set; }
+
+    /// <summary>A copy of the base (CT-position) vertices before any surgical bake.
+    /// Null unless <see cref="BackupBaseVertices"/> has been called.</summary>
+    public float[]? BaseVerticesBackup { get; private set; }
+
+    /// <summary>Snapshot the current vertices into <see cref="BaseVerticesBackup"/>.
+    /// Call before applying a surgical bake so the scene can be restored later.</summary>
+    public void BackupBaseVertices()
+    {
+        if (Vertices == null) return;
+        BaseVerticesBackup = (float[])Vertices.Clone();
+    }
+
+    /// <summary>Restore <see cref="Vertices"/> from <see cref="BaseVerticesBackup"/>
+    /// and clear the backup. No-op if no backup exists.</summary>
+    public void RestoreBaseVertices()
+    {
+        if (BaseVerticesBackup == null) return;
+        Vertices = BaseVerticesBackup;
+        BaseVerticesBackup = null;
+        SurgicalBaked = false;
+    }
 
     /// <summary>Callback so the parent ViewModel can refresh 3D when visibility toggles.</summary>
     public Action? OnVisibilityChanged { get; set; }
@@ -284,9 +312,11 @@ public partial class MeshViewModel : ObservableObject
     public HelixToolkit.Wpf.SharpDX.Material? Material { get; set; }
     [ObservableProperty] private System.Windows.Media.Media3D.Transform3D _transform = System.Windows.Media.Media3D.Transform3D.Identity;
 
-    /// <summary>True when vertices already have cumulative NHP baked in (set before
-    /// adding to ImportedMeshes to prevent double-baking by the NHP ledger).</summary>
-    public bool NhpBaked { get; set; }
+    /// <summary>The per-piece displacement record (lazy transform stack): surgical movement for an
+    /// operated segment; Identity for an imported mesh / registered cast; Identity for a splint
+    /// (its verts are surgical-frame-baked by BakeToCopy, so NhpShared composed on top seats it with
+    /// the teeth under any NHP — INV9). Never mutated by pose; persists across NHP changes.</summary>
+    public System.Windows.Media.Media3D.Transform3D LocalTransform { get; set; } = System.Windows.Media.Media3D.Transform3D.Identity;
 
     // Relative transforms based on occlusion
     [ObservableProperty] private System.Windows.Media.Media3D.Matrix3D _maxillaOcclusionTransform = System.Windows.Media.Media3D.Matrix3D.Identity;

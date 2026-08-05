@@ -79,11 +79,13 @@
 
                     <StackPanel Grid.Row="0">
                         <TextBlock Text="SEED POINT SELECTION" Style="{StaticResource PanelHeader}" Margin="0,0,0,4"/>
+                        <TextBlock Text="Select a label, then click the coronal image to place seeds."
+                                   FontSize="10" Foreground="#88AABB" TextWrapping="Wrap" Margin="0,0,0,6"/>
                         <UniformGrid Columns="3" Margin="0,0,0,8">
                             <RadioButton x:Name="CraniumRadio" Content="Cranium" GroupName="SeedClass" IsChecked="True"
-                                         Checked="SeedClass_Checked" Foreground="#FFAAB6FF" FontSize="11"/>
+                                         Checked="SeedClass_Checked" Foreground="#FFDDC8AA" FontSize="11"/>
                             <RadioButton x:Name="MandibleRadio" Content="Mandible" GroupName="SeedClass"
-                                         Checked="SeedClass_Checked" Foreground="#FFFFB36B" FontSize="11"/>
+                                         Checked="SeedClass_Checked" Foreground="#FFDC8C78" FontSize="11"/>
                             <RadioButton x:Name="ExcludeRadio" Content="Exclude" GroupName="SeedClass"
                                          Checked="SeedClass_Checked" Foreground="#FFFF7777" FontSize="11"/>
                         </UniformGrid>

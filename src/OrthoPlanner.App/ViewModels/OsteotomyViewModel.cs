@@ -351,27 +351,27 @@ public partial class MainViewModel
                 segVolume.Depth == Volume.Depth &&
                 segVolume.CountVoxels(boneLabel) > 0;
 
-            // ponytail: build bone-only mask on-demand from _segVolume instead of
-            // keeping a 100 MB copy around forever. Released after the dialog closes.
+            // Bone membership is read from the frozen _boneMask snapshot taken at
+            // bone-segmentation time (SegmentationViewModel), NOT from the mutable _segVolume.
+            // ThresholdSegment is last-writer-wins with no guard on the existing label, so a
+            // later Dental/Soft/Custom segmentation overwrites the tooth-bearing bone voxels to
+            // its own label — reading _segVolume by label-equality then carves the dentition out
+            // of the mask the split navigates, and the malformed result looks like the dental
+            // mesh was subtracted from the bone mesh. _boneMask is faithful to the displayed bone
+            // mesh (captured after morph-close / component-keep / smoothing). Returns null when
+            // the mask is missing or stale (dim change after an NHP reslice) → caller re-segments.
             OrthoPlanner.Core.Segmentation.SegmentationVolume? boneOnlyMask = null;
             OrthoPlanner.Core.Segmentation.SegmentationVolume? GetValidSplitTargetVolume(byte boneLabel)
             {
-                // First: try the live seg volume (fast path, no allocation)
-                if (HasUsableBoneMask(_segVolume, boneLabel))
-                    return _segVolume;
-                // Second: build a bone-only mask from _segVolume on-demand
-                if (_segVolume != null && Volume != null && _boneLabel.HasValue)
-                {
-                    boneOnlyMask = new OrthoPlanner.Core.Segmentation.SegmentationVolume(Volume);
-                    byte target = _boneLabel.Value;
-                    int n = _segVolume.Labels.Length;
-                    for (int i = 0; i < n; i++)
-                        if (_segVolume.Labels[i] == target)
-                            boneOnlyMask.Labels[i] = target;
-                    if (HasUsableBoneMask(boneOnlyMask, boneLabel))
-                        return boneOnlyMask;
-                }
-                return null;
+                if (Volume == null || _boneMask == null) return null;
+                if (_boneMask.Length != (long)Volume.Width * Volume.Height * Volume.Depth) return null;
+
+                boneOnlyMask = new OrthoPlanner.Core.Segmentation.SegmentationVolume(Volume);
+                byte target = _boneLabel ?? boneLabel;
+                for (int i = 0; i < _boneMask.Length; i++)
+                    if (_boneMask.Get(i))
+                        boneOnlyMask.Labels[i] = target;
+                return HasUsableBoneMask(boneOnlyMask, target) ? boneOnlyMask : null;
             }
 
             var splitTargetVolume = GetValidSplitTargetVolume(boneSegment.Label);
@@ -399,9 +399,9 @@ public partial class MainViewModel
             var wizard = new CondyleSplitWindow(
                 MeshHelper.ToVertexList(boneSegment.Vertices),
                 Volume, splitTargetVolume, boneSegment.Label, BoneMinHU,
-                inverseNhpMatrix: _cumulativeNhpMatrix.IsIdentity
+                inverseNhpMatrix: _nhpShared.IsIdentity
                     ? (System.Windows.Media.Media3D.Matrix3D?)null
-                    : InvertMatrix(_cumulativeNhpMatrix));
+                    : InvertMatrix(_nhpShared));
             wizard.Owner = System.Windows.Application.Current.MainWindow;
 
             if (wizard.ShowDialog() == true && wizard.Accepted)

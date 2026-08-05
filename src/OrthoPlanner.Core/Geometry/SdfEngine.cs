@@ -235,7 +235,7 @@ public static class SdfOps
             p[0]=(wx0,wy0,wz0);p[1]=(wx1,wy0,wz0);p[2]=(wx1,wy1,wz0);p[3]=(wx0,wy1,wz0);
             p[4]=(wx0,wy0,wz1);p[5]=(wx1,wy0,wz1);p[6]=(wx1,wy1,wz1);p[7]=(wx0,wy1,wz1);
 
-            int em=MarchingCubesTables.EdgeTable[ci];
+            int em = OrthoPlanner.Core.Imaging.MarchingCubes.GetEdgeFlags(ci);
             if((em&   1)!=0)e[0] =L(p[0],v[0],p[1],v[1],isoValue);
             if((em&   2)!=0)e[1] =L(p[1],v[1],p[2],v[2],isoValue);
             if((em&   4)!=0)e[2] =L(p[2],v[2],p[3],v[3],isoValue);
@@ -249,7 +249,7 @@ public static class SdfOps
             if((em&1024)!=0)e[10]=L(p[2],v[2],p[6],v[6],isoValue);
             if((em&2048)!=0)e[11]=L(p[3],v[3],p[7],v[7],isoValue);
 
-            int[] tt=MarchingCubesTables.TriTable[ci];
+            var tt = OrthoPlanner.Core.Imaging.MarchingCubes.GetTriangles(ci);
             for(int k=0;tt[k]!=-1;k+=3)
             {
                 var a=e[tt[k]];var b=e[tt[k+1]];var c=e[tt[k+2]];

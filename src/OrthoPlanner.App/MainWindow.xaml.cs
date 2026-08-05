@@ -17,11 +17,7 @@ public partial class MainWindow : Window
 {
 
 
-    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
-    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
-
-    private const int DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19;
-    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    // ponytail: DWM dark-mode P/Invoke removed — App.OnWindowLoaded handles all windows globally
 
     public HelixToolkit.Wpf.SharpDX.Viewport3DX MainViewport => Viewport3D;
     public Border SharedViewportHost => ViewportHostBorder;
@@ -36,7 +32,7 @@ public partial class MainWindow : Window
             Viewport3D.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
         }
 
-        SourceInitialized += MainWindow_SourceInitialized;
+    // ponytail: DWM SourceInitialized handler removed — App.OnWindowLoaded handles all windows globally
         Loaded += OnLoaded;
         PreviewKeyDown += MainWindow_PreviewKeyDown;
     }
@@ -53,22 +49,14 @@ public partial class MainWindow : Window
         }
     }
 
-    private void MainWindow_SourceInitialized(object? sender, EventArgs e)
-    {
-        var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
-        int useImmersiveDarkMode = 1;
-        try
-        {
-            DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useImmersiveDarkMode, sizeof(int));
-        }
-        catch { /* Ignore on older OS */ }
-    }
-
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         // ── Center camera on model when bone bounds change ──
         if (VM != null)
         {
+            // ponytail: MainWindow lives for the app lifetime, so no unsubscribe needed.
+            VM.ProjectReset += ClearMeasurements;
+
             VM.PropertyChanged += (s, args) =>
             {
                 switch (args.PropertyName)
@@ -1260,6 +1248,43 @@ public partial class MainWindow : Window
             Mouse.OverrideCursor = null;
     }
 
+    private void NumericTextBox_PreviewTextInput(object sender, System.Windows.Input.TextCompositionEventArgs e)
+    {
+        if (sender is not TextBox tb) return;
+        // Allow digits, one minus at start, one dot
+        string proposed = tb.Text.Remove(tb.SelectionStart, tb.SelectionLength).Insert(tb.SelectionStart, e.Text);
+        e.Handled = !double.TryParse(proposed, System.Globalization.NumberStyles.AllowLeadingSign | System.Globalization.NumberStyles.AllowDecimalPoint,
+            System.Globalization.CultureInfo.InvariantCulture, out _);
+    }
+
+    private void NumericTextBox_Pasting(object sender, System.Windows.DataObjectPastingEventArgs e)
+    {
+        if (e.DataObject.GetDataPresent(typeof(string)))
+        {
+            string pasted = (string)e.DataObject.GetData(typeof(string));
+            if (sender is TextBox tb)
+            {
+                string proposed = tb.Text.Remove(tb.SelectionStart, tb.SelectionLength).Insert(tb.SelectionStart, pasted);
+                if (!double.TryParse(proposed, System.Globalization.NumberStyles.AllowLeadingSign | System.Globalization.NumberStyles.AllowDecimalPoint,
+                    System.Globalization.CultureInfo.InvariantCulture, out _))
+                    e.CancelCommand();
+            }
+        }
+        else e.CancelCommand();
+    }
+
+    private void NumericTextBox_LostFocus(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (sender is TextBox tb)
+        {
+            if (!double.TryParse(tb.Text, System.Globalization.NumberStyles.AllowLeadingSign | System.Globalization.NumberStyles.AllowDecimalPoint,
+                System.Globalization.CultureInfo.InvariantCulture, out double val))
+                tb.Text = "0.0";
+            else if (tb.Text.Trim() == "" || tb.Text == "-")
+                tb.Text = "0.0";
+        }
+    }
+
     // ═══ NavCube: Orbital arrow rotation ═══
 
     private void OrbitCamera(double dAzimuthDeg, double dElevationDeg)
@@ -1604,6 +1629,21 @@ public partial class MainWindow : Window
         foreach (var s in _pendingMeasVisuals) Viewport3D.Items.Remove(s);
         _pendingMeasVisuals.Clear();
         _pendingMeasPts.Clear();
+    }
+
+    /// <summary>
+    /// Drop every committed distance/angle measurement from the viewport + measurements
+    /// tree. Invoked via <see cref="ViewModels.MainViewModel.ProjectReset"/> when a new
+    /// DICOM load or project open resets the session, so session-bound visuals don't carry
+    /// across patients/projects.
+    /// </summary>
+    public void ClearMeasurements()
+    {
+        foreach (var m in _customMeasurements)
+            foreach (var v in m.Visuals) Viewport3D.Items.Remove(v);
+        ClearPendingMeasurements();
+        _customMeasurements.Clear();
+        RebuildCxMeasurementTree();
     }
 
     private HelixToolkit.Wpf.SharpDX.MeshGeometryModel3D Make3DSphere(System.Numerics.Vector3 center, float radius, System.Windows.Media.Color col)

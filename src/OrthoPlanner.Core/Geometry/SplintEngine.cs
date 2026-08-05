@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using g3;
@@ -16,6 +17,7 @@ public class ArchCurve
     public void RemoveAt(int i) { if (i >= 0 && i < _ctrl.Count) _ctrl.RemoveAt(i); }
     public void Clear() => _ctrl.Clear();
     public (float x,float y,float z) GetPoint(int i) => _ctrl[i];
+    public List<(float x,float y,float z)> GetPoints() => new(_ctrl);
     public void UpdatePoint(int i, float x, float y, float z)
     {
         if (i >= 0 && i < _ctrl.Count) _ctrl[i] = (x, y, z);
@@ -338,6 +340,10 @@ public static class SplintEngine
         }
 
         float signedAngle = sign * angle;
+        // ponytail: B4 — autorotation scratch (spec §4). rotatedLowerCurve/Mesh are RETURNED COPIES consumed
+        // by the App layer as transient wafer-generation input; never assigned to a persisted piece.Transform nor
+        // written to stored Vertices. The clearance probe below is likewise a pure-function local. (The old
+        // BakeTransformIntoVertices helper was deleted in Task 3 — no scratch→stored sites remain.)
         var rotatedLowerCurve = RotateCurve(lowerCurve, axisA, (ax, ay, az), signedAngle);
         var rotatedLowerMesh = lowerMesh == null || lowerMesh.Length < 3
             ? lowerMesh
@@ -367,7 +373,7 @@ public static class SplintEngine
         float lowerPenetrationMm  = config.LowerPenetrationMm;
         float lingualBuccalBiasMm = config.LingualBuccalBiasMm;
         float bridgeThicknessMm   = config.BridgeThicknessMm;
-        float vestibularTrimMm    = config.VestibularTrimMm;
+        float vestibularTrimBiasMm = config.VestibularTrimBiasMm;
         int sampleCount           = Math.Max(2, config.SampleCount);
         var generationWarnings    = new List<string>();
 
@@ -494,11 +500,12 @@ public static class SplintEngine
             const double CrownMm = 10.0;
             const double Dil1    = 1.0;    // blank dilation: guarantees ≥1mm wall thickness
             const double Dil01   = 0.1;    // pocket dilation: tight 0.1mm clearance for tooth seating
-            const float VestBaseMargin = 3.0f; // teeth (esp. molars) extend ~3mm beyond horseshoe half-width
+            // VestBaseMargin removed — vestibular clip now anchored directly to horseshoe
+            // outer edge (half + |bias| + trimBias). See maxVest in PHASE 1 loop.
             float engagementDepthMm = config.EngagementDepthMm;
             bool blockoutUndercuts  = config.BlockoutUndercuts;
 
-            int blurR = 3, blurPasses = 5;  // SDF blank smoothing (pockets carved AFTER blur stay sharp)
+            int blurR = 3, blurPasses = 3;  // SDF blank smoothing (pockets carved AFTER blur stay sharp)
 
             SplintTrace($"carve params: engagement={engagementDepthMm:F2} blockout={blockoutUndercuts}");
             System.Diagnostics.Debug.WriteLine($"[Splint] upperPen={upperPenetrationMm:F1} lowerPen={lowerPenetrationMm:F1} bias={lingualBuccalBiasMm:F1} engagement={engagementDepthMm:F1} blockout={blockoutUndercuts}");
@@ -634,31 +641,75 @@ public static class SplintEngine
             var bakedGrid = new float[gnx*gny*gnz];
             SplintTrace($"PHASE1 grid={gnx}x{gny}x{gnz} ({gnx*gny*gnz/1_000_000}M voxels)");
             System.Diagnostics.Debug.WriteLine($"[Splint] PHASE1 Baking blank {gnx}x{gny}x{gnz}={gnx*gny*gnz/1_000_000}M voxels...");
-            System.Threading.Tasks.Parallel.For(0, gnz, iz => {
-                for(int iy=0;iy<gny;iy++) for(int ix=0;ix<gnx;ix++) {
-                    double px = gox+ix*VS_MC, py = goy+iy*VS_MC, pz = goz+iz*VS_MC;
-                    int vIdx = iz*gnx*gny+iy*gnx+ix;
+
+            // ── Pre-compute nearest-arch lookup tables (O(1) per voxel) ──────────────
+            // For every XY grid cell, store the index of the nearest upper / lower
+            // arch sample. The nearest sample only depends on XY (not Z), so it can be
+            // resolved once here and reused across all Z slices in the parallel loop.
+            // Build cost: gnx * gny * n ≈ 1.6 M comparisons (negligible).
+            // Savings:    eliminates 4 × O(n) scans per voxel in PHASE 1 (≈ 640 M → 0).
+            var upperIdxGrid = new int[gnx * gny];
+            var lowerIdxGrid = new int[gnx * gny];
+            System.Threading.Tasks.Parallel.For(0, gny, iy2 =>
+            {
+                for (int ix2 = 0; ix2 < gnx; ix2++)
+                {
+                    float px2 = gox + ix2 * (float)VS_MC;
+                    float py2 = goy + iy2 * (float)VS_MC;
+                    float bestUD = float.MaxValue, bestLD = float.MaxValue;
+                    int   bestU  = 0,              bestL  = 0;
+                    for (int k = 0; k < n; k++)
+                    {
+                        float dux = px2 - upper[k].x, duy = py2 - upper[k].y;
+                        float dlx = px2 - lower[k].x, dly = py2 - lower[k].y;
+                        float du = dux*dux + duy*duy;
+                        float dl = dlx*dlx + dly*dly;
+                        if (du < bestUD) { bestUD = du; bestU = k; }
+                        if (dl < bestLD) { bestLD = dl; bestL = k; }
+                    }
+                    int cell = iy2 * gnx + ix2;
+                    upperIdxGrid[cell] = bestU;
+                    lowerIdxGrid[cell] = bestL;
+                }
+            });
+            SplintTrace($"PHASE1 lookup tables built ({gnx}x{gny} cells, n={n})");
+
+            System.Threading.Tasks.Parallel.For(0, gnz, iz =>
+            {
+                for (int iy=0; iy<gny; iy++) for (int ix=0; ix<gnx; ix++) {
+                    float pz = goz + iz * (float)VS_MC;
+                    int vIdx = iz*gnx*gny + iy*gnx + ix;
+
+                    // O(1) lookup: nearest arch sample for this XY cell
+                    int cell = iy * gnx + ix;
+                    int ui   = upperIdxGrid[cell];
+                    int li   = lowerIdxGrid[cell];
+                    float uax = upper[ui].x, uay = upper[ui].y;
+                    float unx = norU[ui].x,  uny = norU[ui].y;
+                    float lax = lower[li].x, lay = lower[li].y;
+                    float lnx = norL[li].x,  lny = norL[li].y;
+                    float px  = gox + ix * (float)VS_MC;
+                    float py  = goy + iy * (float)VS_MC;
 
                     // Z-clip at the arch surface ± user penetration offset.
                     // +penetration = teeth go deeper into the splint → splint body
                     // extends FURTHER from the gap center (up for upper, down for lower).
-                    float upperCutZ = NearestUpperZ(px, py) + upperPenetrationMm;
-                    float lowerCutZ = NearestLowerZ(px, py) - lowerPenetrationMm;
-                    if ((float)pz > upperCutZ || (float)pz < lowerCutZ)
+                    float upperCutZ = upper[ui].z + upperPenetrationMm;
+                    float lowerCutZ = lower[li].z - lowerPenetrationMm;
+                    if (pz > upperCutZ || pz < lowerCutZ)
                     { bakedGrid[vIdx] = 1.0f; continue; }
 
                     // Posterior limit
                     if (!IsAnteriorToPosteriorLimit(px, py))
                     { bakedGrid[vIdx] = 1.0f; continue; }
 
-                    // Vestibular XY clip — applied per-arch independently so that
-                    // differing arch widths (maxilla wider than mandible) don't cause
-                    // one arch's footprint check to clip the other arch's walls.
-                    float maxVest = half + MathF.Abs(lingualBuccalBiasMm) + (float)Dil1 + VestBaseMargin + vestibularTrimMm;
-                    var (uZ2, uax, uay, unx, uny) = NearestUpperInfo(px, py);
-                    float uPerpDist = MathF.Abs(((float)px - uax) * unx + ((float)py - uay) * uny);
-                    var (lZ2, lax, lay, lnx, lny) = NearestLowerInfo(px, py);
-                    float lPerpDist = MathF.Abs(((float)px - lax) * lnx + ((float)py - lay) * lny);
+                    // Vestibular XY clip — anchored to the horseshoe outer edge.
+                    // maxVest = half + |bias|: at trimBias=0 the clip sits exactly at
+                    // the blue ribbon line. Positive bias allows extra vestibular wall;
+                    // negative trims inward from the ribbon.
+                    float maxVest    = half + MathF.Abs(lingualBuccalBiasMm) + vestibularTrimBiasMm;
+                    float uPerpDist  = MathF.Abs((px - uax) * unx + (py - uay) * uny);
+                    float lPerpDist  = MathF.Abs((px - lax) * lnx + (py - lay) * lny);
                     if (uPerpDist > maxVest && lPerpDist > maxVest)
                     { bakedGrid[vIdx] = 1.0f; continue; }
 
@@ -688,7 +739,7 @@ public static class SplintEngine
                     return Result(horseshoeFlat, "Blank SDF had no interior volume; emitted the flat horseshoe blank.");
                 }
 
-                var visited = new bool[totalVox];
+                var visited = new BitArray(totalVox);
                 var queue = new Queue<int>();
                 float seedX = archMidX, seedY = archMidY, seedZ = (upperZ + lowerZ) * 0.5f;
                 int bestSeed = -1; float bestSeedD = float.MaxValue;
@@ -725,6 +776,56 @@ public static class SplintEngine
                 SplintTrace($"PHASE1b main={mainSize} removed={removed} floaters");
             }
 
+            // ╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏
+            //  PHASE 1c: Guided bridge — spine rasterization
+            //
+            //  For each pair of corresponding arch sample points (upper[i], lower[i]),
+            //  voxelize the line segment connecting them directly into the fine grid.
+            //  These segments form a thin solid "curtain" that spans the inter-arch gap
+            //  and guarantees Z-connectivity by construction.
+            //
+            //  Key properties:
+            //  • Only air voxels (> 0) are touched — tooth SDF material is preserved.
+            //  • A 3×3 XY neighbourhood is set per step so the coarse grid (0.5mm/voxel)
+            //    reliably samples at least one spine voxel per coarse cell.
+            //  • The subsequent closing only needs to expand the curtain laterally (XY)
+            //    by half the labio-lingual width — NOT by the full gap height.
+            //    closeR = ceil(half / coarseVS) is therefore gap-independent.
+            // ╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏╏
+            {
+                float bridgeVal = -(config.BridgeSdfBaseMm + bridgeThicknessMm);
+                int spineCount = 0;
+                for (int si = 0; si < n; si++)
+                {
+                    float ux = upper[si].x, uy = upper[si].y, uz = upper[si].z;
+                    float lx = lower[si].x, ly = lower[si].y, lz = lower[si].z;
+                    float segLen = MathF.Sqrt((lx-ux)*(lx-ux) + (ly-uy)*(ly-uy) + (lz-uz)*(lz-uz));
+                    // Step at half a fine-grid voxel to ensure every fine-grid Z level is hit
+                    int steps = Math.Max(1, (int)MathF.Ceiling(segLen / ((float)VS_MC * 0.5f)));
+                    for (int step = 0; step <= steps; step++)
+                    {
+                        float t  = (float)step / steps;
+                        float sx = ux + t * (lx - ux);
+                        float sy = uy + t * (ly - uy);
+                        float sz = uz + t * (lz - uz);
+                        int fx = (int)MathF.Round((sx - gox) / (float)VS_MC);
+                        int fy = (int)MathF.Round((sy - goy) / (float)VS_MC);
+                        int fz = (int)MathF.Round((sz - goz) / (float)VS_MC);
+                        if (fz < 0 || fz >= gnz) continue;
+                        // 3×3 XY footprint so coarse-grid sampling (every 2.5 fine voxels) hits the spine
+                        for (int ddx = -1; ddx <= 1; ddx++) for (int ddy = -1; ddy <= 1; ddy++)
+                        {
+                            int nx2 = fx + ddx, ny2 = fy + ddy;
+                            if (nx2 < 0 || nx2 >= gnx || ny2 < 0 || ny2 >= gny) continue;
+                            int vIdx2 = fz * gnx * gny + ny2 * gnx + nx2;
+                            if (bakedGrid[vIdx2] > 0f) { bakedGrid[vIdx2] = bridgeVal; spineCount++; }
+                        }
+                    }
+                }
+                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE1c spine n={n} voxels={spineCount}");
+                SplintTrace($"PHASE1c spine n={n} voxels={spineCount}");
+            }
+
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             //  PHASE 2: GPU morphological closing on padded coarse grid
             //
@@ -738,8 +839,11 @@ public static class SplintEngine
                 if (gap > maxGap) maxGap = gap;
             }
             const float coarseVS = 0.5f;
-            int closeR = (int)MathF.Ceiling(maxGap * 0.55f / coarseVS);
-            closeR = Math.Clamp(closeR, 2, 30);
+            // Guided bridge spine (PHASE 1c) fills the inter-arch gap along the arch
+            // curve connections, so closing only needs to expand the curtain laterally
+            // (XY) to cover the labio-lingual width. closeR = half / coarseVS.
+            // No need for a large gap-dependent radius.
+            int closeR = Math.Max(2, (int)MathF.Ceiling(half / coarseVS));
             // Erode less aggressively than dilate: full dilation bridges the gap,
             // but symmetric erosion punches through thin bridge areas. Asymmetric
             // erosion (45% of closeR) preserves bridge connectivity.
@@ -822,7 +926,8 @@ public static class SplintEngine
                 // true = upper is more vestibular
                 bool clipUpper = uOut >= lOut;
 
-                float oneSidedMaxVest = half + MathF.Abs(lingualBuccalBiasMm) + (float)Dil1 + VestBaseMargin + vestibularTrimMm;
+                // Clip anchored to horseshoe outer edge — same formula as PHASE 1.
+                float oneSidedMaxVest = half + MathF.Abs(lingualBuccalBiasMm) + vestibularTrimBiasMm;
                 System.Diagnostics.Debug.WriteLine($"[Splint] PHASE2a one-sided vestibular clip: arch={(clipUpper?"upper":"lower")} maxVest={oneSidedMaxVest:F1}");
                 SplintTrace($"PHASE2a one-sided vestibular clip arch={(clipUpper?"upper":"lower")}");
 
@@ -833,15 +938,15 @@ public static class SplintEngine
                         float px = gox + ix * (float)VS_MC;
                         float py = goy + iy * (float)VS_MC;
 
-                        // Signed perpendicular distance to the more-vestibular arch
-                        // positive = buccal/outward, negative = lingual/inward
+                        // O(1) lookup: use pre-computed table from PHASE 1
+                        int cell2 = iy * gnx + ix;
                         float sd;
                         if (clipUpper) {
-                            var (z, ax, ay, nx, ny) = NearestUpperInfo(px, py);
-                            sd = (px - ax) * nx + (py - ay) * ny;
+                            int ui2 = upperIdxGrid[cell2];
+                            sd = (px - upper[ui2].x) * norU[ui2].x + (py - upper[ui2].y) * norU[ui2].y;
                         } else {
-                            var (z, ax, ay, nx, ny) = NearestLowerInfo(px, py);
-                            sd = (px - ax) * nx + (py - ay) * ny;
+                            int li2 = lowerIdxGrid[cell2];
+                            sd = (px - lower[li2].x) * norL[li2].x + (py - lower[li2].y) * norL[li2].y;
                         }
 
                         // Only clip on the buccal side; lingual side is untouched
@@ -1024,6 +1129,45 @@ public static class SplintEngine
                     System.Diagnostics.Debug.WriteLine($"[Splint] PHASE5b Removed {removedTris} floater triangles ({cc.Count-1} small components), kept {dm.TriangleCount} tris");
                     SplintTrace($"PHASE5b removed {removedTris} tris from {cc.Count-1} small components");
                 }
+            }
+
+            // ── PHASE 5c: Taubin mesh smoothing ────────────────────────────────────
+            // Regularises slivered / degenerate triangles that arise at SDF boundary
+            // junctions (e.g., spine-to-tooth-SDF, vestibular clip edge).
+            // Taubin smoothing (alternating λ / μ passes) does NOT shrink the mesh;
+            // the two opposing passes cancel bulk volume change while redistributing
+            // vertex positions toward a locally equilateral configuration.
+            // Conservative settings: λ=0.1, μ=-0.103, 5 iterations.
+            {
+                const double lambda =  0.10;
+                const double mu     = -0.103;
+                const int    taubinIter = 5;
+
+                for (int tpass = 0; tpass < taubinIter; tpass++)
+                {
+                    // Choose λ for even passes, μ for odd passes
+                    double w = (tpass % 2 == 0) ? lambda : mu;
+
+                    // Snapshot current positions so neighbours see the un-moved frame
+                    var snap = new System.Collections.Generic.Dictionary<int, Vector3d>(dm.VertexCount);
+                    foreach (int vid in dm.VertexIndices())
+                        snap[vid] = dm.GetVertex(vid);
+
+                    foreach (int vid in dm.VertexIndices())
+                    {
+                        if (dm.IsBoundaryVertex(vid)) continue;   // do not move open-boundary vertices
+                        var oneRing = dm.VtxVerticesItr(vid);
+                        var avg = Vector3d.Zero;
+                        int cnt = 0;
+                        foreach (int nb in oneRing) { avg += snap[nb]; cnt++; }
+                        if (cnt == 0) continue;
+                        avg /= cnt;
+                        var cur = snap[vid];
+                        dm.SetVertex(vid, cur + w * (avg - cur));
+                    }
+                }
+                System.Diagnostics.Debug.WriteLine($"[Splint] PHASE5c Taubin smooth {taubinIter} passes done");
+                SplintTrace($"PHASE5c Taubin λ={lambda} μ={mu} iter={taubinIter}");
             }
 
             // ── Flatten to soup ──

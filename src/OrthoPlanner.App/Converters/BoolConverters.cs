@@ -4,22 +4,19 @@ using System.Windows.Data;
 
 namespace OrthoPlanner.App.Converters;
 
+/// <summary>Bool-to-Visibility. Set Invert=true for "visible when false".</summary>
 public class BoolToVisibilityConverter : IValueConverter
 {
+    public bool Invert { get; set; }
+
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-        => value is true ? Visibility.Visible : Visibility.Collapsed;
+    {
+        bool b = value is true;
+        return (b ^ Invert) ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-        => value is Visibility.Visible;
-}
-
-public class InverseBoolToVisibilityConverter : IValueConverter
-{
-    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-        => value is true ? Visibility.Collapsed : Visibility.Visible;
-
-    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-        => value is Visibility.Collapsed;
+        => Invert ? value is Visibility.Collapsed : value is Visibility.Visible;
 }
 
 /// <summary>Null-to-Visibility. Set Invert=true for "visible when NOT null".</summary>

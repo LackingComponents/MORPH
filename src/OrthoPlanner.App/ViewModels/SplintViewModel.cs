@@ -58,6 +58,7 @@ public partial class MainViewModel
     {
         try
         {
+            // ── 1. Resolve dental meshes ─────────────────────────────────────────
             var (upper, lower, upperHasDental, lowerHasDental) = ResolveDentalMeshes();
 
             if (upper == null || lower == null)
@@ -75,8 +76,6 @@ public partial class MainViewModel
                 return;
             }
 
-            // Step 3: warn only when a mesh truly lacks dental anatomy
-            // (i.e., it's raw CT bone, not a fused CT+dental osteotomy segment).
             bool fromScans = upperHasDental && lowerHasDental;
             if (!fromScans)
             {
@@ -93,107 +92,264 @@ public partial class MainViewModel
                 if (choice != MessageBoxResult.OK) return;
             }
 
+            // ── 2. Confirm condyle fulcrum ──────────────────────────────────────
             if ((LeftCondyleCenter == null || RightCondyleCenter == null) && !EnsureCondyleFulcrum())
                 return;
 
-            // Step 2: clinical pose/labelling is carried as config, not hard-coded.
-            // (Geometry sliders are merged into this inside the window.)
-            OrthoPlanner.Core.Geometry.CondyleBox? leftCondyleBox = null;
+            // ── 3. Build condyle boxes ──────────────────────────────────────────
+            OrthoPlanner.Core.Geometry.CondyleBox? leftCondyleBox  = null;
             OrthoPlanner.Core.Geometry.CondyleBox? rightCondyleBox = null;
             if (LeftCondyleCenter is { } lc && LeftCondyleHalfExtents is { } lhe)
-            {
-                leftCondyleBox = new OrthoPlanner.Core.Geometry.CondyleBox(
-                    (float)lc.X, (float)lc.Y, (float)lc.Z,
-                    (float)lhe.X, (float)lhe.Y, (float)lhe.Z);
-            }
+                leftCondyleBox  = new OrthoPlanner.Core.Geometry.CondyleBox((float)lc.X,(float)lc.Y,(float)lc.Z,(float)lhe.X,(float)lhe.Y,(float)lhe.Z);
             if (RightCondyleCenter is { } rc && RightCondyleHalfExtents is { } rhe)
-            {
-                rightCondyleBox = new OrthoPlanner.Core.Geometry.CondyleBox(
-                    (float)rc.X, (float)rc.Y, (float)rc.Z,
-                    (float)rhe.X, (float)rhe.Y, (float)rhe.Z);
-            }
+                rightCondyleBox = new OrthoPlanner.Core.Geometry.CondyleBox((float)rc.X,(float)rc.Y,(float)rc.Z,(float)rhe.X,(float)rhe.Y,(float)rhe.Z);
 
-            // ── Step 0: mandibular autorotation (open the bite about the condylar axis) ──
-            // The mandible is opened about the condyle-center hinge in BOTH maxilla-first
-            // and mandible-first plans (clearance is what the wafer needs); the surgical
-            // labelling is chosen separately in the splint planner.
-            float[] lowerForSplint = lower;
-            double manualOpenDegrees = 0;
-            if (LeftCondyleCenter is { } lcC && RightCondyleCenter is { } rcC)
+            // ── 4. Compute moved meshes via BakeToCopy (no scene mutation) ───────
+            // Use the last visible Maxilla/Mandible segment and apply its SurgicalTransform.
+            var maxillaSeg = Segments.LastOrDefault(s => s.IsVisible &&
+                (s.Name?.Contains("Maxilla") == true || s.Name?.Contains("Cranium (Split)") == true));
+            var mandibleSeg = Segments.LastOrDefault(s => s.IsVisible &&
+                s.Name?.Contains("Mandible") == true && s.Name?.Contains("Cranium") != true);
+
+            float[] upperMoved = maxillaSeg?.Vertices != null
+                ? BakeToCopy(maxillaSeg.Vertices, maxillaSeg.SurgicalTransform)
+                : upper;
+            float[] lowerMoved = mandibleSeg?.Vertices != null
+                ? BakeToCopy(mandibleSeg.Vertices, mandibleSeg.SurgicalTransform)
+                : lower;
+
+            // Rami in CT (base) position — used as context ghost meshes in the autorotation window
+            var ramiSegs = Segments
+                .Where(s => s.IsVisible && s.Name?.StartsWith("Ramus") == true && s.Vertices != null)
+                .ToList();
+            float[][]? ramiMeshes = ramiSegs.Count > 0
+                ? ramiSegs.Select(s => s.Vertices!).ToArray()
+                : null;
+
+            var lcC = LeftCondyleCenter!.Value;
+            var rcC = RightCondyleCenter!.Value;
+
+            // ── 5. Screen 1: SplintSequenceWindow (sequence + intermediate autorotation) ──
+            var seq1 = new SplintSequenceWindow(
+                upperBase: upper, lowerBase: lower,
+                upperMoved: upperMoved, lowerMoved: lowerMoved,
+                leftCondyle: lcC, rightCondyle: rcC,
+                isFinalOcclusion: false,
+                maxillaFirstDefault: true,
+                ramiMeshes: ramiMeshes)
             {
+                Owner = Application.Current.MainWindow
+            };
+            seq1.ShowDialog();
+
+            // Persist updated condyle positions if surgeon moved them
+            if (seq1.UpdatedLeftCondyle.HasValue)  LeftCondyleCenter  = seq1.UpdatedLeftCondyle.Value;
+            if (seq1.UpdatedRightCondyle.HasValue)  RightCondyleCenter = seq1.UpdatedRightCondyle.Value;
+            lcC = LeftCondyleCenter!.Value;
+            rcC = RightCondyleCenter!.Value;
+
+            // ── 5b. Bypass → original single-splint flow ─────────────────────────
+            if (seq1.BypassToOriginal)
+            {
+                float[] lowerForSplint = lower;
+                double manualOpenDegrees = 0;
                 var autoWin = new MandibleAutorotationWindow(upper, lower, lcC, rcC)
                 {
                     Owner = Application.Current.MainWindow
                 };
                 autoWin.ShowDialog();
-                if (!autoWin.Accepted)
-                    return; // surgeon backed out of the whole splint flow
+                if (!autoWin.Accepted) return;
                 if (autoWin.RotatedMandible != null && autoWin.RotatedMandible.Length >= 9)
                     lowerForSplint = autoWin.RotatedMandible;
                 manualOpenDegrees = autoWin.OpenDegrees;
-            }
-            bool manualOpenApplied = Math.Abs(manualOpenDegrees) > 0.01;
 
-            var config = new OrthoPlanner.Core.Geometry.SplintConfig
+                bool manualOpenApplied = Math.Abs(manualOpenDegrees) > 0.01;
+                var bypassConfig = new OrthoPlanner.Core.Geometry.SplintConfig
+                {
+                    Type               = OrthoPlanner.Core.Geometry.SplintType.Final,
+                    FirstOperated      = OrthoPlanner.Core.Geometry.MobileJaw.Maxilla,
+                    Scope              = OrthoPlanner.Core.Geometry.JawScope.Bimaxillary,
+                    FromIntraoralScans = fromScans,
+                    LeftCondyleBox     = leftCondyleBox,
+                    RightCondyleBox    = rightCondyleBox,
+                    EnableAutorotation = !manualOpenApplied,
+                };
+                OpenSplintWindow(upper, lowerForSplint, bypassConfig);
+                return;
+            }
+
+            if (!seq1.Accepted) return;
+
+            // ── 6. Build intermediate jaw positions ──────────────────────────────
+            var firstOperated = seq1.IsMaxillaFirst
+                ? OrthoPlanner.Core.Geometry.MobileJaw.Maxilla
+                : OrthoPlanner.Core.Geometry.MobileJaw.Mandible;
+
+            float[] interUpper = seq1.IsMaxillaFirst ? upperMoved : upper;
+            float[] interLower = seq1.RotatedMandible ?? (seq1.IsMaxillaFirst ? lower : lowerMoved);
+
+            // ── 7. Screen 2: SplintPlannerWindow (intermediate wafer) ────────────
+            var interConfig = new OrthoPlanner.Core.Geometry.SplintConfig
             {
-                Type               = OrthoPlanner.Core.Geometry.SplintType.Final,
-                FirstOperated      = OrthoPlanner.Core.Geometry.MobileJaw.Maxilla,
+                Type               = OrthoPlanner.Core.Geometry.SplintType.Intermediate,
+                FirstOperated      = firstOperated,
                 Scope              = OrthoPlanner.Core.Geometry.JawScope.Bimaxillary,
                 FromIntraoralScans = fromScans,
                 LeftCondyleBox     = leftCondyleBox,
                 RightCondyleBox    = rightCondyleBox,
-                // If the surgeon already opened the bite manually, respect that pose and
-                // skip the engine's automatic opening; otherwise keep it as a safety net.
-                EnableAutorotation = !manualOpenApplied,
+                EnableAutorotation = false, // applied manually above
             };
 
-            var win = new SplintPlannerWindow(upper, lowerForSplint, this, config);
-            win.Owner = Application.Current.MainWindow;
-
-            // Use Closed event so result is read after the window fully shuts down
-            win.Closed += (_, _) =>
+            bool intermediateDone = false;
+            SplintPlannerWindow.ArchSnapshot? interArchSnapshot = null;
+            var interWin = new SplintPlannerWindow(interUpper, interLower, this, interConfig);
+            interWin.Owner = Application.Current.MainWindow;
+            interWin.Closed += (_, _) =>
             {
                 try
                 {
-                    if (!win.Accepted || win.SplintVertices == null || win.SplintVertices.Length < 9)
+                    if (!interWin.Accepted || interWin.SplintVertices == null || interWin.SplintVertices.Length < 9)
                         return;
-
-                    var verts = win.SplintVertices;
-                    var labelledConfig = config with { FirstOperated = win.ChosenFirstOperated };
+                    interArchSnapshot = interWin.GetArchSnapshot();
+                    var labelledConfig = interConfig with { FirstOperated = interWin.ChosenFirstOperated };
                     Application.Current.Dispatcher.Invoke(() =>
                     {
-                        var splintMesh = new MeshViewModel
-                        {
-                            Name              = labelledConfig.DisplayName,
-                            Vertices          = verts,
-                            NhpBaked          = true,  // vertices already in NHP space (generated from NHP-baked dental meshes)
-                            ColorR            = 200,
-                            ColorG            = 230,
-                            ColorB            = 255,
-                            IsVisible         = true,
-                            ShowInModelsPanel = true
-                        };
-                        splintMesh.OnVisibilityChanged = RefreshCombinedModel;
-                        splintMesh.BuildModel();
-                        ImportedMeshes.Add(splintMesh);
-                        RefreshCombinedModel();
-                        StatusText = $"Splint generated — {verts.Length / 9:N0} triangles.";
+                        AddSplintMeshToScene(interWin.SplintVertices, labelledConfig);
+                        intermediateDone = true;
                     });
                 }
                 catch (Exception ex)
                 {
                     Application.Current.Dispatcher.Invoke(() =>
-                        MessageBox.Show($"Failed to add splint mesh:\n{ex.Message}",
+                        MessageBox.Show($"Failed to add intermediate splint:\n{ex.Message}",
                             "Splint Error", MessageBoxButton.OK, MessageBoxImage.Error));
                 }
             };
+            interWin.ShowDialog();
 
-            win.Show();
+            if (!intermediateDone) return; // surgeon cancelled
+
+            // ── 8. Screen 3: SplintSequenceWindow (final occlusion autorotation) ──
+            var seq3 = new SplintSequenceWindow(
+                upperBase: upper, lowerBase: lower,
+                upperMoved: upperMoved, lowerMoved: lowerMoved,
+                leftCondyle: lcC, rightCondyle: rcC,
+                isFinalOcclusion: true,
+                maxillaFirstDefault: seq1.IsMaxillaFirst,
+                ramiMeshes: ramiMeshes)
+            {
+                Owner = Application.Current.MainWindow
+            };
+            seq3.ShowDialog();
+
+            if (seq3.UpdatedLeftCondyle.HasValue)  LeftCondyleCenter  = seq3.UpdatedLeftCondyle.Value;
+            if (seq3.UpdatedRightCondyle.HasValue)  RightCondyleCenter = seq3.UpdatedRightCondyle.Value;
+
+            if (!seq3.Accepted) return;
+
+            // ── 9. Build final jaw positions ────────────────────────────────────
+            float[] finalUpper = upperMoved;
+            float[] finalLower = seq3.RotatedMandible ?? lowerMoved;
+
+            // Refresh condyle boxes in case positions were updated during seq3
+            lcC = LeftCondyleCenter!.Value;
+            rcC = RightCondyleCenter!.Value;
+            if (LeftCondyleHalfExtents is { } lhe2)
+                leftCondyleBox  = new OrthoPlanner.Core.Geometry.CondyleBox((float)lcC.X,(float)lcC.Y,(float)lcC.Z,(float)lhe2.X,(float)lhe2.Y,(float)lhe2.Z);
+            if (RightCondyleHalfExtents is { } rhe2)
+                rightCondyleBox = new OrthoPlanner.Core.Geometry.CondyleBox((float)rcC.X,(float)rcC.Y,(float)rcC.Z,(float)rhe2.X,(float)rhe2.Y,(float)rhe2.Z);
+
+            // ── 10. Screen 4: SplintPlannerWindow (final wafer) ─────────────────
+            var finalConfig = new OrthoPlanner.Core.Geometry.SplintConfig
+            {
+                Type               = OrthoPlanner.Core.Geometry.SplintType.Final,
+                FirstOperated      = firstOperated,
+                Scope              = OrthoPlanner.Core.Geometry.JawScope.Bimaxillary,
+                FromIntraoralScans = fromScans,
+                LeftCondyleBox     = leftCondyleBox,
+                RightCondyleBox    = rightCondyleBox,
+                EnableAutorotation = false,
+            };
+            OpenSplintWindow(finalUpper, finalLower, finalConfig, preloadedArch: interArchSnapshot);
         }
         catch (Exception ex)
         {
             MessageBox.Show($"Could not open Splint Planner:\n{ex.Message}\n\n{ex.StackTrace}",
                 "Splint Planner Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>Opens a SplintPlannerWindow and adds the resulting mesh to the scene on accept.</summary>
+    private void OpenSplintWindow(
+        float[] upper, float[] lower,
+        OrthoPlanner.Core.Geometry.SplintConfig config,
+        SplintPlannerWindow.ArchSnapshot? preloadedArch = null)
+    {
+        var win = new SplintPlannerWindow(upper, lower, this, config, preloadedArch);
+        win.Owner = Application.Current.MainWindow;
+        win.Closed += (_, _) =>
+        {
+            try
+            {
+                if (!win.Accepted || win.SplintVertices == null || win.SplintVertices.Length < 9)
+                    return;
+                var labelledConfig = config with { FirstOperated = win.ChosenFirstOperated };
+                Application.Current.Dispatcher.Invoke(() =>
+                    AddSplintMeshToScene(win.SplintVertices, labelledConfig));
+            }
+            catch (Exception ex)
+            {
+                Application.Current.Dispatcher.Invoke(() =>
+                    MessageBox.Show($"Failed to add splint mesh:\n{ex.Message}",
+                        "Splint Error", MessageBoxButton.OK, MessageBoxImage.Error));
+            }
+        };
+        win.Show();
+    }
+
+    private void AddSplintMeshToScene(float[] verts, OrthoPlanner.Core.Geometry.SplintConfig config)
+    {
+        var splintMesh = new MeshViewModel
+        {
+            Name              = config.DisplayName,
+            Vertices          = verts,
+            // B3 (INV9): splint verts are surgical-frame-baked (BakeToCopy at 115/118; interUpper/interLower
+            // at 188/189 bridge a moved jaw's surgical frame vs an unmoved jaw's source frame). LocalTransform
+            // therefore stays default Identity, and RecomputeAllTransforms composes NhpShared on top uniformly —
+            // so the wafer tracks BOTH arches under any NHP, for final/intermediate/bimaxillary/single-jaw alike.
+            // (Plan's `LocalTransform = jaw.LocalTransform` would double-apply surgical onto already-baked verts.)
+            ColorR            = 200,
+            ColorG            = 230,
+            ColorB            = 255,
+            IsVisible         = true,
+            ShowInModelsPanel = true
+        };
+        splintMesh.OnVisibilityChanged = RefreshCombinedModel;
+        splintMesh.BuildModel();
+        ImportedMeshes.Add(splintMesh);
+        RefreshCombinedModel();
+        StatusText = $"{config.DisplayName} generated — {verts.Length / 9:N0} triangles.";
+    }
+
+    /// <summary>
+    /// Applies <paramref name="tx"/> to a copy of <paramref name="baseVerts"/> without
+    /// mutating the scene. Returns the original array when the transform is identity.
+    /// ponytail: copies and transforms vertices — no scene mutation.
+    /// </summary>
+    private static float[] BakeToCopy(
+        float[] baseVerts,
+        System.Windows.Media.Media3D.Transform3D tx)
+    {
+        if (tx == null || tx.Value.IsIdentity) return baseVerts;
+        var result = new float[baseVerts.Length];
+        var m = tx.Value;
+        for (int i = 0; i + 2 < baseVerts.Length; i += 3)
+        {
+            var p = m.Transform(new System.Windows.Media.Media3D.Point3D(baseVerts[i], baseVerts[i + 1], baseVerts[i + 2]));
+            result[i] = (float)p.X; result[i + 1] = (float)p.Y; result[i + 2] = (float)p.Z;
+        }
+        return result;
     }
 }

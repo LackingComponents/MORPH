@@ -76,6 +76,15 @@ public partial class MainViewModel
             return;
         }
 
+        // B2 guard (spec §4): the ICP target is the CT SOURCE-space surface — never an NhpShared-posed copy.
+        // Under the lazy model ctSegment.Vertices are invariant source (RecomputeAllTransforms writes only
+        // piece.Transform, never Vertices); this DEBUG assert documents that contract and trips if a future
+        // change pre-poses verts onto the cast before alignment (which would bake NHP into the registered cast).
+#if DEBUG
+        System.Diagnostics.Debug.Assert(ctSegment != null && ctSegment.Vertices != null && ctSegment.Vertices.Length >= 100,
+            "B2: ctSegment.Vertices (source space) is the ICP target — pre-posing it would bake NHP into the cast.");
+#endif
+
         var scansToAlign = ImportedMeshes
             .Where(m => m.ScanType == DentalScanType.Upper || m.ScanType == DentalScanType.Lower)
             .ToList();
@@ -339,26 +348,6 @@ public partial class MainViewModel
             if (target == null) continue;
 
             SaveStateForUndo();
-
-            // Store a copy of originals in a hidden mesh (name-prefixed) if not already backed up
-            string backupName = $"[Original] {editedName}";
-            if (!ImportedMeshes.Any(m => m.Name == backupName))
-            {
-                // Keep original as invisible backup
-                var backup = new MeshViewModel
-                {
-                    Name      = backupName,
-                    Vertices  = (float[])target.Vertices!.Clone(),
-                    ColorR    = target.ColorR,
-                    ColorG    = target.ColorG,
-                    ColorB    = target.ColorB,
-                    ScanType  = target.ScanType,
-                    IsVisible = false
-                };
-                backup.OnVisibilityChanged = RefreshCombinedModel;
-                backup.BuildModel();
-                ImportedMeshes.Add(backup);
-            }
 
             // Apply edited verts
             target.Vertices = MeshHelper.ToFlatArray(editedVerts);

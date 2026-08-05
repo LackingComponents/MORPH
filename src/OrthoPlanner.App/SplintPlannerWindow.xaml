@@ -57,7 +57,7 @@
                         </hx:Viewport3DX.Camera>
                         <hx:AmbientLight3D Color="#505050"/>
                         <hx:DirectionalLight3D x:Name="UpperHeadlamp" Direction="0,0,1"  Color="#D0D0D0"/>
-                        <hx:DirectionalLight3D x:Name="UpperBacklamp"  Direction="0,0,-1" Color="#808080"/>
+                        <hx:DirectionalLight3D x:Name="UpperBacklamp"  Direction="0,0,-1" Color="#A0A0A0"/>
                         <hx:GroupModel3D x:Name="UpperGroup"/>
                     </hx:Viewport3DX>
                     <TextBlock x:Name="UpperViewportTitle" Text="🦷 Upper Arch (Maxilla) — Occlusal from below"
@@ -112,7 +112,7 @@
                         </hx:Viewport3DX.Camera>
                         <hx:AmbientLight3D Color="#505050"/>
                         <hx:DirectionalLight3D x:Name="LowerHeadlamp" Direction="0,0,-1" Color="#D0D0D0"/>
-                        <hx:DirectionalLight3D x:Name="LowerBacklamp"  Direction="0,0,1"  Color="#808080"/>
+                        <hx:DirectionalLight3D x:Name="LowerBacklamp"  Direction="0,0,1"  Color="#A0A0A0"/>
                         <hx:GroupModel3D x:Name="LowerGroup"/>
                     </hx:Viewport3DX>
                     <TextBlock Text="🦷 Lower Arch (Mandible) — Occlusal from above"
@@ -133,27 +133,22 @@
             <StackPanel>
                 <TextBlock Text="Parameters" FontSize="14" FontWeight="Bold" Foreground="White" Margin="0,0,0,16"/>
 
-                <!-- Surgical sequence -->
-                <TextBlock Text="SEQUENCE" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,0,0,6"/>
-                <RadioButton x:Name="MaxillaFirstRadio" Content="Maxilla-first splint" IsChecked="True" GroupName="SplintSequence"
-                             Foreground="#AABBCC" FontSize="10" Margin="0,0,0,2"/>
-                <RadioButton x:Name="MandibleFirstRadio" Content="Mandible-first splint" GroupName="SplintSequence"
-                             Foreground="#AABBCC" FontSize="10" Margin="0,0,0,12"/>
 
                 <!-- Upper controls -->
+
                 <TextBlock Text="UPPER ARCH" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,0,0,6"/>
                 <TextBlock Text="Upper crown envelope:" FontSize="11" Foreground="#AABBCC" ToolTip="Vertical extent of the wafer above the upper arch curve.&#x0a;+2 mm (default): the splint wraps 2 mm up around the maxillary crowns, creating a deep tooth pocket.&#x0a;0 mm: the top surface is flush with the arch curve at the cusp tips.&#x0a;−2 mm: the top is trimmed 2 mm inside the cusp line — use only for a thin bite- registration rim.&#x0a;In the SDF pipeline this sets the upper Z-clip plane. The tooth pocket is always carved by the actual tooth SDF regardless of this value."/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,20">
-                    <Slider x:Name="UpperPenetrationSlider" Minimum="-5" Maximum="10" Value="2" Width="170" SmallChange="0.5" ValueChanged="UpperPenetrationSlider_ValueChanged"/>
-                    <TextBlock x:Name="UpperPenetrationLabel" Text="2.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                    <Slider x:Name="UpperPenetrationSlider" Minimum="-5" Maximum="10" Value="1" Width="170" SmallChange="0.5" ValueChanged="UpperPenetrationSlider_ValueChanged"/>
+                    <TextBlock x:Name="UpperPenetrationLabel" Text="1.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
 
                 <!-- Lower controls -->
                 <TextBlock Text="LOWER ARCH" FontSize="11" FontWeight="Bold" Foreground="#8CF" Margin="0,0,0,6"/>
                 <TextBlock Text="Lower crown envelope:" FontSize="11" Foreground="#AABBCC" ToolTip="Vertical extent of the wafer below the lower arch curve.&#x0a;+2 mm (default): the splint wraps 2 mm down around the mandibular crowns.&#x0a;0 mm: the bottom surface is flush with the arch curve at the cusp tips.&#x0a;−2 mm: the bottom is trimmed 2 mm inside the cusp line.&#x0a;Same as the upper envelope, but for the lower arch. Sets the lower Z-clip plane."/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,20">
-                    <Slider x:Name="LowerPenetrationSlider" Minimum="-5" Maximum="10" Value="2" Width="170" SmallChange="0.5" ValueChanged="LowerPenetrationSlider_ValueChanged"/>
-                    <TextBlock x:Name="LowerPenetrationLabel" Text="2.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                    <Slider x:Name="LowerPenetrationSlider" Minimum="-5" Maximum="10" Value="1" Width="170" SmallChange="0.5" ValueChanged="LowerPenetrationSlider_ValueChanged"/>
+                    <TextBlock x:Name="LowerPenetrationLabel" Text="1.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
 
                 <!-- General controls -->
@@ -171,7 +166,7 @@
                     <TextBlock x:Name="LingualBuccalBiasLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
 
-                <TextBlock Text="Vestibular trim:" FontSize="11" Foreground="#AABBCC" ToolTip="Controls how far the vestibular (buccal) wall extends beyond the arch outline.&#x0a;0 (default): the wall preserves the full natural tooth anatomy including molar walls.&#x0a;−3: trim 3 mm — actively clips bracket wrapping that protrudes beyond the tooth outline.&#x0a;+2: allow 2 mm wider vestibular walls — use for wider buccal flanges or screw fixation."/>
+                <TextBlock Text="Vestibular trim bias:" FontSize="11" Foreground="#AABBCC" ToolTip="Bias relative to the horseshoe outer edge (the blue ribbon in the viewport).&#x0a;0 (default): trim exactly at the ribbon — splint wall matches the horseshoe outline.&#x0a;−2: trim 2 mm inside the ribbon.&#x0a;+3: 3 mm extra vestibular wall beyond the ribbon (for buccal flanges or screw fixation)."/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,4">
                     <Slider x:Name="VestibularTrimSlider" Minimum="-5" Maximum="10" Value="0" Width="170" SmallChange="0.25" ValueChanged="VestibularTrimSlider_ValueChanged"/>
                     <TextBlock x:Name="VestibularTrimLabel" Text="0.0 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
@@ -188,14 +183,14 @@
 
                 <TextBlock Text="Closing erosion:" FontSize="11" Foreground="#AABBCC" ToolTip="How aggressively the morphological closing step erodes after dilation.&#x0a;100% (symmetric): clean outer walls but thin bridge.&#x0a;45% (default, asymmetric): thicker bridge, slightly rounder outer walls.&#x0a;Lower = more material preserved everywhere, especially the bridge."/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
-                    <Slider x:Name="CloseErodeSlider" Minimum="10" Maximum="100" Value="45" Width="170" SmallChange="5" ValueChanged="CloseErodeSlider_ValueChanged"/>
-                    <TextBlock x:Name="CloseErodeLabel" Text="45%" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                    <Slider x:Name="CloseErodeSlider" Minimum="10" Maximum="100" Value="65" Width="170" SmallChange="5" ValueChanged="CloseErodeSlider_ValueChanged"/>
+                    <TextBlock x:Name="CloseErodeLabel" Text="65%" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
 
                 <TextBlock Text="Bridge SDF depth:" FontSize="11" Foreground="#AABBCC" ToolTip="Base SDF depth for bridge voxels (mm).&#x0a;0.5 (default): minimal interior margin — bridge is thin but may get holes from blur.&#x0a;1.0–2.0: deeper bridge that survives aggressive blur, but the splint thickens slightly in the bridge region."/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,12">
-                    <Slider x:Name="BridgeSdfBaseSlider" Minimum="0" Maximum="5" Value="0.5" Width="170" SmallChange="0.1" ValueChanged="BridgeSdfBaseSlider_ValueChanged"/>
-                    <TextBlock x:Name="BridgeSdfBaseLabel" Text="0.5 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                    <Slider x:Name="BridgeSdfBaseSlider" Minimum="0" Maximum="5" Value="0.6" Width="170" SmallChange="0.1" ValueChanged="BridgeSdfBaseSlider_ValueChanged"/>
+                    <TextBlock x:Name="BridgeSdfBaseLabel" Text="0.6 mm" FontSize="11" Foreground="#8CF" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
 
                 <!-- Clinical fit & printability -->

@@ -103,13 +103,13 @@ public sealed record SplintConfig
     /// <summary>Base SDF depth for bridge voxels (mm). Deeper = bridge survives more blur
     /// but the splint gets thicker. Shallow = blur can punch holes in the bridge.</summary>
     public float BridgeSdfBaseMm     { get; init; } = 0.5f;
-    /// <summary>Extra vestibular clip margin (mm). 0 = clip at natural footprint
-    /// (halfWidth + |bias| + 1mm dilation). Negative = trim more (removes bracket
-    /// wrapping). Positive = allow wider vestibular walls.</summary>
-    public float VestibularTrimMm   { get; init; } = 0f;
+    /// <summary>Vestibular trim bias (mm). 0 = clip exactly at the horseshoe outer
+    /// edge (half + |lingualBuccalBias|) — the splint wall matches the blue ribbon.
+    /// Negative = trim more inward. Positive = extra vestibular wall beyond ribbon.</summary>
+    public float VestibularTrimBiasMm { get; init; } = 0f;
     /// <summary>When true, an additional one-sided XY clip runs after PHASE 2 closing
     /// (before blur) that removes splint material on the buccal side of the more-
-    /// anterior arch only. Uses the same VestibularTrimMm threshold.</summary>
+    /// anterior arch only. Uses the same VestibularTrimBiasMm threshold.</summary>
     public bool  VestibularOneSided { get; init; } = false;
     public int   SampleCount        { get; init; } = 160;
 

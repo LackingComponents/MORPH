@@ -51,21 +51,42 @@ public partial class SplintPlannerWindow : Window
     private bool _reviewCastTogglesReady;
     private bool _isReviewMode;
     private bool _pointEditingHandlersAttached = true;
+    private ArchSnapshot? _preloadedArch;
 
     // ── Drag state ────────────────────────────────────────────────────────
     private bool _draggingUpper, _draggingLower;
     private int  _dragIdxUpper = -1, _dragIdxLower = -1;
+    // Drag plane for camera-relative movement (BSSO/LeFort pattern)
+    private Point3D  _dragPlanePos;
+    private Vector3D _dragPlaneNormal;
 
     // ── Result ────────────────────────────────────────────────────────────
     public bool   Accepted       { get; private set; }
     public float[]? SplintVertices { get; private set; }
-    /// <summary>The surgical sequence chosen by the radio buttons at generation time
-    /// (maxilla-first vs mandible-first), so the caller can label the produced wafer.</summary>
+    /// <summary>The surgical sequence from the config carried from the wizard.
+    /// Always reflects what was decided in SplintSequenceWindow (Screen 1).</summary>
     public MobileJaw ChosenFirstOperated { get; private set; } = MobileJaw.Maxilla;
+
+    // ── Arch snapshot for inter-window transfer ────────────────────────────
+    public record ArchSnapshot(
+        List<(float x, float y, float z)> UpperPoints,
+        List<(float x, float y, float z)> LowerPoints,
+        double UpperEnvelope, double LowerEnvelope,
+        double LabioLingualWidth, double LingualBuccalBias,
+        double VestibularTrimBias, bool VestibularOneSided,
+        double BridgeThickness, double CloseErode,
+        double BridgeSdfBase);
+
+    public ArchSnapshot? GetArchSnapshot() =>
+        new(_upperArch.GetPoints(), _lowerArch.GetPoints(),
+            UpperPenetrationSlider.Value, LowerPenetrationSlider.Value,
+            ThicknessSlider.Value, LingualBuccalBiasSlider.Value,
+            VestibularTrimSlider.Value, VestibularOneSidedCheck.IsChecked == true,
+            BridgeThicknessSlider.Value, CloseErodeSlider.Value, BridgeSdfBaseSlider.Value);
 
     // ─────────────────────────────────────────────────────────────────────
     public SplintPlannerWindow(float[] upperMesh, float[] lowerMesh, MainViewModel _,
-        SplintConfig? config = null)
+        SplintConfig? config = null, ArchSnapshot? preloadedArch = null)
     {
         InitializeComponent();
 
@@ -80,11 +101,25 @@ public partial class SplintPlannerWindow : Window
         _upperMesh = upperMesh;
         _lowerMesh = lowerMesh;
         _config    = config ?? new SplintConfig();
-        MaxillaFirstRadio.IsChecked = _config.FirstOperated == MobileJaw.Maxilla;
-        MandibleFirstRadio.IsChecked = _config.FirstOperated == MobileJaw.Mandible;
+        ChosenFirstOperated = _config.FirstOperated;
 
         // Drive the title from the clinical config (no hard-coded "Final Occlusion").
         Title = $"Splint Planner — {_config.DisplayName}";
+
+        // Apply preloaded arch snapshot (slider values + control points)
+        if (preloadedArch != null)
+        {
+            UpperPenetrationSlider.Value  = preloadedArch.UpperEnvelope;
+            LowerPenetrationSlider.Value  = preloadedArch.LowerEnvelope;
+            ThicknessSlider.Value         = preloadedArch.LabioLingualWidth;
+            LingualBuccalBiasSlider.Value = preloadedArch.LingualBuccalBias;
+            VestibularTrimSlider.Value    = preloadedArch.VestibularTrimBias;
+            VestibularOneSidedCheck.IsChecked = preloadedArch.VestibularOneSided;
+            BridgeThicknessSlider.Value   = preloadedArch.BridgeThickness;
+            CloseErodeSlider.Value        = preloadedArch.CloseErode;
+            BridgeSdfBaseSlider.Value     = preloadedArch.BridgeSdfBase;
+            _preloadedArch = preloadedArch;
+        }
 
         // EffectsManagers — set directly, not via binding
         UpperViewport.EffectsManager = new HelixToolkit.SharpDX.DefaultEffectsManager();
@@ -142,6 +177,23 @@ public partial class SplintPlannerWindow : Window
         float ls = SplintEngine.WatertightScore(_lowerMesh);
         if (us > 0.02f || ls > 0.02f)
             QualityText.Text = $"⚠ Mesh quality: Upper {us:P0} open | Lower {ls:P0} open — tooth imprint may vary";
+
+        // Pre-load arch points from intermediate window (if provided)
+        if (_preloadedArch != null)
+        {
+            foreach (var (x, y, z) in _preloadedArch.UpperPoints)
+            {
+                _upperArch.AddPoint(x, y, z);
+                AddMarker(UpperGroup, _upperMarkers, new System.Numerics.Vector3(x, y, z), isUpper: true);
+            }
+            foreach (var (x, y, z) in _preloadedArch.LowerPoints)
+            {
+                _lowerArch.AddPoint(x, y, z);
+                AddMarker(LowerGroup, _lowerMarkers, new System.Numerics.Vector3(x, y, z), isUpper: false);
+            }
+            if (_upperArch.ControlPointCount >= 2) RefreshUpperCurve();
+            if (_lowerArch.ControlPointCount >= 2) RefreshLowerCurve();
+        }
 
         UpdateUI();
     }
@@ -207,13 +259,23 @@ public partial class SplintPlannerWindow : Window
         var hits = UpperViewport.FindHits(e.GetPosition(UpperViewport));
         if (hits == null || hits.Count == 0) return;
 
-        // Clicked on an existing marker? → start drag
+        // Clicked on an existing marker? → start drag with camera-plane
         foreach (var hit in hits)
         {
             if (hit.ModelHit is MeshGeometryModel3D marker)
             {
                 int idx = _upperMarkers.IndexOf(marker);
-                if (idx >= 0) { _draggingUpper = true; _dragIdxUpper = idx; e.Handled = true; return; }
+                if (idx >= 0)
+                {
+                    _draggingUpper  = true;
+                    _dragIdxUpper   = idx;
+                    _dragPlanePos    = new Point3D(hit.PointHit.X, hit.PointHit.Y, hit.PointHit.Z);
+                    var ld = UpperCamera.LookDirection;
+                    _dragPlaneNormal = new Vector3D(-ld.X, -ld.Y, -ld.Z);
+                    UpperViewport.CaptureMouse();
+                    e.Handled = true;
+                    return;
+                }
             }
         }
 
@@ -238,13 +300,23 @@ public partial class SplintPlannerWindow : Window
             if (hit.ModelHit is MeshGeometryModel3D marker)
             {
                 int idx = _lowerMarkers.IndexOf(marker);
-                if (idx >= 0) { _draggingLower = true; _dragIdxLower = idx; e.Handled = true; return; }
+                if (idx >= 0)
+                {
+                    _draggingLower  = true;
+                    _dragIdxLower   = idx;
+                    _dragPlanePos    = new Point3D(hit.PointHit.X, hit.PointHit.Y, hit.PointHit.Z);
+                    var ld = LowerCamera.LookDirection;
+                    _dragPlaneNormal = new Vector3D(-ld.X, -ld.Y, -ld.Z);
+                    LowerViewport.CaptureMouse();
+                    e.Handled = true;
+                    return;
+                }
             }
         }
 
-        var pt = hits[0].PointHit;
-        _lowerArch.AddPoint((float)pt.X, (float)pt.Y, (float)pt.Z);
-        AddMarker(LowerGroup, _lowerMarkers, pt, isUpper: false);
+        var pt2 = hits[0].PointHit;
+        _lowerArch.AddPoint((float)pt2.X, (float)pt2.Y, (float)pt2.Z);
+        AddMarker(LowerGroup, _lowerMarkers, pt2, isUpper: false);
         RefreshLowerCurve();
         UpdateUI();
         e.Handled = true;
@@ -252,59 +324,78 @@ public partial class SplintPlannerWindow : Window
 
     // ═══════════════════════════════════════════════════════════
     //  MOUSE — DRAG (move existing point)
+    //  Uses UnProject + ray-plane intersection (same as BSSO/LeFort):
+    //  plane passes through the original hit point and faces the camera.
     // ═══════════════════════════════════════════════════════════
     private void UpperViewport_MouseMove(object sender, MouseEventArgs e)
     {
         if (_isReviewMode) { _draggingUpper = false; _dragIdxUpper = -1; return; }
         if (!_draggingUpper || _dragIdxUpper < 0) return;
-        var hits = UpperViewport.FindHits(e.GetPosition(UpperViewport));
-        if (hits == null) return;
-        // Skip hits on markers
-        foreach (var hit in hits)
-        {
-            if (hit.ModelHit is MeshGeometryModel3D marker && _upperMarkers.Contains(marker)) continue;
-            var pt = hit.PointHit;
-            _upperArch.UpdatePoint(_dragIdxUpper, (float)pt.X, (float)pt.Y, (float)pt.Z);
-            _upperMarkers[_dragIdxUpper].Transform = new TranslateTransform3D(pt.X, pt.Y, pt.Z);
-            RefreshUpperCurve();
-            e.Handled = true;
-            break;
-        }
+        var ray = UpperViewport.UnProject(e.GetPosition(UpperViewport));
+        var pt  = RayPlane(new Point3D(ray.Position.X, ray.Position.Y, ray.Position.Z),
+                           new Vector3D(ray.Direction.X, ray.Direction.Y, ray.Direction.Z),
+                           _dragPlanePos, _dragPlaneNormal);
+        if (!pt.HasValue) return;
+        var np = pt.Value;
+        // Do NOT advance _dragPlanePos — keep the plane anchored at the initial click
+        // (advancing it causes Z drift when the camera is tilted, matching BSSO behaviour)
+        _upperArch.UpdatePoint(_dragIdxUpper, (float)np.X, (float)np.Y, (float)np.Z);
+        _upperMarkers[_dragIdxUpper].Transform = new TranslateTransform3D(np.X, np.Y, np.Z);
+        RefreshUpperCurve();
+        e.Handled = true;
     }
 
     private void LowerViewport_MouseMove(object sender, MouseEventArgs e)
     {
         if (_isReviewMode) { _draggingLower = false; _dragIdxLower = -1; return; }
         if (!_draggingLower || _dragIdxLower < 0) return;
-        var hits = LowerViewport.FindHits(e.GetPosition(LowerViewport));
-        if (hits == null) return;
-        foreach (var hit in hits)
-        {
-            if (hit.ModelHit is MeshGeometryModel3D marker && _lowerMarkers.Contains(marker)) continue;
-            var pt = hit.PointHit;
-            _lowerArch.UpdatePoint(_dragIdxLower, (float)pt.X, (float)pt.Y, (float)pt.Z);
-            _lowerMarkers[_dragIdxLower].Transform = new TranslateTransform3D(pt.X, pt.Y, pt.Z);
-            RefreshLowerCurve();
-            e.Handled = true;
-            break;
-        }
+        var ray = LowerViewport.UnProject(e.GetPosition(LowerViewport));
+        var pt  = RayPlane(new Point3D(ray.Position.X, ray.Position.Y, ray.Position.Z),
+                           new Vector3D(ray.Direction.X, ray.Direction.Y, ray.Direction.Z),
+                           _dragPlanePos, _dragPlaneNormal);
+        if (!pt.HasValue) return;
+        var np = pt.Value;
+        // Do NOT advance _dragPlanePos — keep the plane anchored at the initial click
+        _lowerArch.UpdatePoint(_dragIdxLower, (float)np.X, (float)np.Y, (float)np.Z);
+        _lowerMarkers[_dragIdxLower].Transform = new TranslateTransform3D(np.X, np.Y, np.Z);
+        RefreshLowerCurve();
+        e.Handled = true;
     }
 
     private void UpperViewport_MouseLeftUp(object sender, MouseButtonEventArgs e)
-    { _draggingUpper = false; _dragIdxUpper = -1; }
+    { _draggingUpper = false; _dragIdxUpper = -1; UpperViewport.ReleaseMouseCapture(); }
 
     private void LowerViewport_MouseLeftUp(object sender, MouseButtonEventArgs e)
-    { _draggingLower = false; _dragIdxLower = -1; }
+    { _draggingLower = false; _dragIdxLower = -1; LowerViewport.ReleaseMouseCapture(); }
+
+    /// <summary>Ray-plane intersection (BSSO pattern): plane through <paramref name="pp"/> with normal <paramref name="pn"/>.</summary>
+    private static Point3D? RayPlane(Point3D o, Vector3D d, Point3D pp, Vector3D pn)
+    {
+        double nd = Vector3D.DotProduct(d, pn);
+        if (Math.Abs(nd) < 0.0001) return null;
+        double t = Vector3D.DotProduct(pp - o, pn) / nd;
+        return t < 0 ? null : o + d * t;
+    }
 
     // ═══════════════════════════════════════════════════════════
-    //  MOUSE — RIGHT CLICK (remove nearest point)
+    //  MOUSE — RIGHT CLICK (remove the last point if clicking its sphere)
+    //  Right click is only recognised when it hits the last-placed marker
+    //  sphere directly. This allows stack-like undo: delete N, then N-1, etc.
     // ═══════════════════════════════════════════════════════════
     private void UpperViewport_MouseRight(object sender, MouseButtonEventArgs e)
     {
         if (_isReviewMode) return;
-        int idx = FindNearestMarker(_upperArch, e.GetPosition(UpperViewport), UpperViewport);
-        if (idx < 0) return;
-        UpperGroup.Children.Remove(_upperMarkers[idx]);
+        if (_upperMarkers.Count == 0) return;
+
+        // Only respond when the click actually hits the last marker
+        var hits = UpperViewport.FindHits(e.GetPosition(UpperViewport));
+        if (hits == null || hits.Count == 0) return;
+        var lastMarker = _upperMarkers[^1];
+        bool hitLast = hits.Any(h => h.ModelHit == lastMarker);
+        if (!hitLast) return;
+
+        int idx = _upperMarkers.Count - 1;
+        UpperGroup.Children.Remove(lastMarker);
         _upperMarkers.RemoveAt(idx);
         _upperArch.RemoveAt(idx);
         RefreshUpperCurve();
@@ -315,9 +406,16 @@ public partial class SplintPlannerWindow : Window
     private void LowerViewport_MouseRight(object sender, MouseButtonEventArgs e)
     {
         if (_isReviewMode) return;
-        int idx = FindNearestMarker(_lowerArch, e.GetPosition(LowerViewport), LowerViewport);
-        if (idx < 0) return;
-        LowerGroup.Children.Remove(_lowerMarkers[idx]);
+        if (_lowerMarkers.Count == 0) return;
+
+        var hits = LowerViewport.FindHits(e.GetPosition(LowerViewport));
+        if (hits == null || hits.Count == 0) return;
+        var lastMarker = _lowerMarkers[^1];
+        bool hitLast = hits.Any(h => h.ModelHit == lastMarker);
+        if (!hitLast) return;
+
+        int idx = _lowerMarkers.Count - 1;
+        LowerGroup.Children.Remove(lastMarker);
         _lowerMarkers.RemoveAt(idx);
         _lowerArch.RemoveAt(idx);
         RefreshLowerCurve();
@@ -537,17 +635,13 @@ public partial class SplintPlannerWindow : Window
             UpperPenetrationMm  = (float)UpperPenetrationSlider.Value,
             LowerPenetrationMm  = (float)LowerPenetrationSlider.Value,
             LingualBuccalBiasMm = (float)LingualBuccalBiasSlider.Value,
-            VestibularTrimMm    = (float)VestibularTrimSlider.Value,
+            VestibularTrimBiasMm = (float)VestibularTrimSlider.Value,
             VestibularOneSided  = VestibularOneSidedCheck.IsChecked == true,
             BridgeThicknessMm   = (float)BridgeThicknessSlider.Value,
             CloseErodeFraction  = (float)CloseErodeSlider.Value / 100f,
             BridgeSdfBaseMm     = (float)BridgeSdfBaseSlider.Value,
             SampleCount         = 160,
-            FirstOperated       = MaxillaFirstRadio.IsChecked == true
-                ? MobileJaw.Maxilla
-                : MobileJaw.Mandible,
-
-            // (sequence is also surfaced to the caller via ChosenFirstOperated)
+            FirstOperated       = _config.FirstOperated, // always from wizard SplintSequenceWindow
 
             // Clinical-fit controls (steps 4–6).
             BlockoutUndercuts   = BlockoutCheck.IsChecked == true,
@@ -558,7 +652,7 @@ public partial class SplintPlannerWindow : Window
             BuccalFlangeDepthMm = (float)FlangeDepthSlider.Value,
             FlangeOnUpper       = FlangeUpperRadio.IsChecked == true,
         };
-        ChosenFirstOperated = genConfig.FirstOperated;
+        // ChosenFirstOperated already set in constructor from _config.FirstOperated
 
         var autorotation = SplintEngine.ApplyMandibularAutorotation(upperSampled, lowerSampled, lMesh, genConfig);
         lowerSampled = autorotation.LowerCurve;

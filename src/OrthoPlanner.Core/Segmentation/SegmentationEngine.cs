@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections;
 using OrthoPlanner.Core.Imaging;
 
@@ -197,7 +198,7 @@ public static class SegmentationEngine
         // Ensure the seed itself is actually within the growth bounds!
         if (seedValue < minHU || seedValue > maxHU) return 0;
 
-        var visited = new bool[volume.Width * volume.Height * volume.Depth];
+        var visited = new BitArray(volume.Width * volume.Height * volume.Depth);
         var queue = new Queue<(int x, int y, int z)>();
         queue.Enqueue((seedX, seedY, seedZ));
 
@@ -257,7 +258,7 @@ public static class SegmentationEngine
         Action<double>? progress = null)
     {
         int w = volume.Width, h = volume.Height, d = volume.Depth;
-        var visited = new bool[w * h * d];
+        var visited = new BitArray(w * h * d);
         var queue = new Queue<(int x, int y, int z, byte label)>();
 
         // Enqueue all competing seeds simultaneously to start the parallel race
@@ -329,7 +330,7 @@ public static class SegmentationEngine
         if (segVol.GetLabel(seedX, seedY, seedZ) != sourceLabel) return 0;
 
         int w = segVol.Width, h = segVol.Height, d = segVol.Depth;
-        var visited = new bool[w * h * d];
+        var visited = new BitArray(w * h * d);
         var queue = new Queue<(int x, int y, int z)>();
         
         queue.Enqueue((seedX, seedY, seedZ));
@@ -382,7 +383,7 @@ public static class SegmentationEngine
         SegmentationVolume segVol, byte sourceLabel, byte startingLabel)
     {
         int w = segVol.Width, h = segVol.Height, d = segVol.Depth;
-        var visited = new bool[w * h * d];
+        var visited = new BitArray(w * h * d);
         var components = new List<(byte, int)>();
         byte currentLabel = startingLabel;
 
@@ -437,7 +438,7 @@ public static class SegmentationEngine
     public static void RemoveSmallComponents(SegmentationVolume segVol, byte targetLabel, int minVoxelCount, Action<double>? progress = null)
     {
         int w = segVol.Width, h = segVol.Height, d = segVol.Depth;
-        var visited = new bool[w * h * d];
+        var visited = new BitArray(w * h * d);
 
         int[][] neighbors = [ [1,0,0], [-1,0,0], [0,1,0], [0,-1,0], [0,0,1], [0,0,-1] ];
         
@@ -506,7 +507,7 @@ public static class SegmentationEngine
     {
         int w = segVol.Width, h = segVol.Height, d = segVol.Depth;
         int total = w * h * d;
-        var visited = new bool[total];
+        var visited = new BitArray(total);
 
         int maxSize = 0;
         var largestComponentSeeds = new List<(int, int, int)>();
@@ -586,7 +587,7 @@ public static class SegmentationEngine
 
         int w = segVol.Width, h = segVol.Height, d = segVol.Depth;
         int total = w * h * d;
-        var visited = new bool[total];
+        var visited = new BitArray(total);
 
         var components = new List<List<(int, int, int)>>();
 
@@ -726,7 +727,7 @@ public static class SegmentationEngine
     {
         int w = segVol.Width, h = segVol.Height, d = segVol.Depth;
         int totalVoxels = w * h * d;
-        var visited = new bool[totalVoxels];
+        var visited = new BitArray(totalVoxels);
         
         var components = new List<List<int>>();
 
@@ -845,12 +846,17 @@ public static class SegmentationEngine
 
         if (stepSize == 1)
         {
-            // 1. Convert mask to probability field
-            float[] field = new float[w * h * d];
-            for (int i = 0; i < field.Length; i++)
-                field[i] = segVol.Labels[i] == label ? 100f : 0f;
+            int n = w * h * d;
 
-            smooth = new float[w * h * d];
+            // ponytail: pool the two ~400 MB float buffers instead of LOH-allocating them
+            // (where they'd sit until Gen2). Rented buffers may be longer than n, so every
+            // loop indexes via n — never field.Length / smooth.Length.
+            var field = ArrayPool<float>.Shared.Rent(n);
+            System.Threading.Tasks.Parallel.For(0, n, i =>
+                field[i] = segVol.Labels[i] == label ? 100f : 0f);
+
+            smooth = ArrayPool<float>.Shared.Rent(n);
+            smooth.AsSpan(0, n).Clear(); // boundary voxels are never written by the separable blurs
 
             if (smoothingPasses > 0)
             {
@@ -861,31 +867,41 @@ public static class SegmentationEngine
                 for (int pass = 0; pass < smoothingPasses; pass++)
                 {
                     // X-blur
-                    for (int z = 0; z < d; z++)
-                    for (int y = 0; y < h; y++)
-                    for (int x = 1; x < w - 1; x++)
-                        smooth[x+y*w+z*w*h] = field[x+y*w+z*w*h] * wCenter + (field[x-1+y*w+z*w*h] + field[x+1+y*w+z*w*h]) * wNeighbors;
+                    System.Threading.Tasks.Parallel.For(0, d, z =>
+                    {
+                        for (int y = 0; y < h; y++)
+                        for (int x = 1; x < w - 1; x++)
+                            smooth[x+y*w+z*w*h] = field[x+y*w+z*w*h] * wCenter + (field[x-1+y*w+z*w*h] + field[x+1+y*w+z*w*h]) * wNeighbors;
+                    });
 
                     // Y-blur
-                    for (int z = 0; z < d; z++)
-                    for (int y = 1; y < h - 1; y++)
-                    for (int x = 0; x < w; x++)
-                        field[x+y*w+z*w*h] = smooth[x+y*w+z*w*h] * wCenter + (smooth[x+(y-1)*w+z*w*h] + smooth[x+(y+1)*w+z*w*h]) * wNeighbors;
+                    System.Threading.Tasks.Parallel.For(0, d, z =>
+                    {
+                        for (int y = 1; y < h - 1; y++)
+                        for (int x = 0; x < w; x++)
+                            field[x+y*w+z*w*h] = smooth[x+y*w+z*w*h] * wCenter + (smooth[x+(y-1)*w+z*w*h] + smooth[x+(y+1)*w+z*w*h]) * wNeighbors;
+                    });
 
                     // Z-blur
-                    for (int z = 1; z < d - 1; z++)
-                    for (int y = 0; y < h; y++)
-                    for (int x = 0; x < w; x++)
-                        smooth[x+y*w+z*w*h] = field[x+y*w+z*w*h] * wCenter + (field[x+y*w+(z-1)*w*h] + field[x+y*w+(z+1)*w*h]) * wNeighbors;
+                    System.Threading.Tasks.Parallel.For(1, d - 1, z =>
+                    {
+                        for (int y = 0; y < h; y++)
+                        for (int x = 0; x < w; x++)
+                            smooth[x+y*w+z*w*h] = field[x+y*w+z*w*h] * wCenter + (field[x+y*w+(z-1)*w*h] + field[x+y*w+(z+1)*w*h]) * wNeighbors;
+                    });
 
                     // Copy smoothed output back to input for the next iter
-                    if (pass < smoothingPasses - 1) Array.Copy(smooth, field, smooth.Length);
+                    if (pass < smoothingPasses - 1) Array.Copy(smooth, field, n);
                 }
             }
             else
             {
-                Array.Copy(field, smooth, field.Length);
+                Array.Copy(field, smooth, n);
             }
+
+            // field only feeds the separable blur; smooth now holds the final field, so release
+            // the pooled field buffer back to ArrayPool before the (allocation-light) mesh pass.
+            ArrayPool<float>.Shared.Return(field);
 
             // Lowered isoLevel captures thinner bones that get diluted down in probability, preventing holes
             isoLevel = 35.0;
@@ -984,6 +1000,8 @@ public static class SegmentationEngine
             }
             progress?.Invoke((double)(z + 1) / d);
         }
+        // Release the pooled smooth buffer now that the marching-cubes pass is done.
+        if (smooth != null) ArrayPool<float>.Shared.Return(smooth);
         return vertices.ToArray();
     }
 
@@ -1228,7 +1246,7 @@ public static class SegmentationEngine
     {
         int w = maskVol.Width, h = maskVol.Height, d = maskVol.Depth;
         int total = w * h * d;
-        var visited = new bool[total];
+        var visited = new BitArray(total);
         var queue = new Queue<int>();
 
         // Initial frontier: every accepted seed voxel that lands on the mask.

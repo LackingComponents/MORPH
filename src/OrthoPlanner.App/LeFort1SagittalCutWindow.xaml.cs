@@ -27,13 +27,6 @@ public partial class LeFort1SagittalCutWindow : Window
     private readonly List<Point3D>             _ctrl    = new();
     private readonly List<MeshGeometryModel3D> _ctrlVis = new();
 
-    // Plane bounds (world units)
-    // X = mediolateral split position
-    // Y = anterior(front) -> posterior(back) dimension
-    // Z = inferior(bot)  -> superior(top) dimension
-    private double _xMid, _yFront, _yBack, _zTop, _zBot;
-    // Two AP-direction section dividers (vertical lines on the plane)
-    private double _yDiv1, _yDiv2;
 
     // 8 handles:
     //  [0] FrontTop  [1] FrontBot   - anterior edge corners  (cyan)
@@ -103,22 +96,9 @@ public partial class LeFort1SagittalCutWindow : Window
 
         if (_dragH >= 0)
         {
-            var pt = RayOnPlaneX(pos, _xMid);
+            var pt = CamPlane(pos, _hp[_dragH]);
             if (!pt.HasValue) return;
-            double ny = pt.Value.Y, nz = pt.Value.Z;
-            switch (_dragH)
-            {
-                // Anterior edge corners: control yFront + zTop/zBot
-                case 0: _yFront = ny; _zTop = nz; break;
-                case 1: _yFront = ny; _zBot = nz; break;
-                // Posterior edge corners: control yBack + zTop/zBot
-                case 2: _yBack = ny; _zTop = nz; break;
-                case 3: _yBack = ny; _zBot = nz; break;
-                // Divider 1 (drag Y only)
-                case 4: case 5: _yDiv1 = ny; break;
-                // Divider 2 (drag Y only)
-                case 6: case 7: _yDiv2 = ny; break;
-            }
+            _hp[_dragH] = pt.Value;
             ClampBounds();
             RebuildPlane();
         }
@@ -153,68 +133,60 @@ public partial class LeFort1SagittalCutWindow : Window
     private void InitPlaneFromCtrl()
     {
         var p0 = _ctrl[0]; var p1 = _ctrl[1];
-        _xMid   = (p0.X + p1.X) / 2.0;
-        _yFront = Math.Min(p0.Y, p1.Y) - 15.0;
-        _yBack  = Math.Max(p0.Y, p1.Y) + 50.0;
-        _zTop   = Math.Max(p0.Z, p1.Z) + 20.0;
-        _zBot   = Math.Min(p0.Z, p1.Z) - 20.0;
-        double span = _yBack - _yFront;
-        _yDiv1  = _yFront + span / 3.0;
-        _yDiv2  = _yFront + 2.0 * span / 3.0;
+        double xMid   = (p0.X + p1.X) / 2.0;
+        double yFront = Math.Min(p0.Y, p1.Y) - 15.0;
+        double yBack  = Math.Max(p0.Y, p1.Y) + 50.0;
+        double zTop   = Math.Max(p0.Z, p1.Z) + 20.0;
+        double zBot   = Math.Min(p0.Z, p1.Z) - 20.0;
+        double span = yBack - yFront;
+        double yDiv1  = yFront + span / 3.0;
+        double yDiv2  = yFront + 2.0 * span / 3.0;
+
+        _hp[0] = new(xMid, yFront, zTop);  _hp[1] = new(xMid, yFront, zBot);
+        _hp[2] = new(xMid, yBack,  zTop);  _hp[3] = new(xMid, yBack,  zBot);
+        _hp[4] = new(xMid, yDiv1,  zTop);  _hp[5] = new(xMid, yDiv1,  zBot);
+        _hp[6] = new(xMid, yDiv2,  zTop);  _hp[7] = new(xMid, yDiv2,  zBot);
+
         _planeVisible = true;
         RebuildPlane();
     }
 
     private void ClampBounds()
     {
-        if (_yFront > _yBack - 10) _yFront = _yBack - 10;
-        if (_zBot > _zTop - 5)     _zBot   = _zTop - 5;
-        _yDiv1 = Math.Clamp(_yDiv1, _yFront + 1, _yBack - 1);
-        _yDiv2 = Math.Clamp(_yDiv2, _yDiv1  + 1, _yBack - 1);
+        // No longer clamping bounds; handles are freely dragged in 3D.
     }
 
     // -- Plane rendering ---------------------------------------------------------------
 
     private void RebuildPlane()
     {
-        float x   = (float)_xMid;
-        float yf  = (float)_yFront, yd1 = (float)_yDiv1, yd2 = (float)_yDiv2, yb = (float)_yBack;
-        float zt  = (float)_zTop, zb = (float)_zBot;
-
-        // Flat plane: 3 sections side-by-side in the AP (Y) direction.
-        // Dividers are VERTICAL lines running top-to-bottom.
         var mb = new HelixToolkit.Geometry.MeshBuilder();
-        Action<float, float> addSection = (ya, yc) => {
-            var TF = Nv3f(x, ya, zt); var TB = Nv3f(x, yc, zt);
-            var BF = Nv3f(x, ya, zb); var BB = Nv3f(x, yc, zb);
+        var lb = new HelixToolkit.SharpDX.LineBuilder();
+        Action<Point3D, Point3D, Point3D, Point3D> addQuad = (t1, t2, b2, b1) => {
+            var TF = Nv3f((float)t1.X, (float)t1.Y, (float)t1.Z);
+            var TB = Nv3f((float)t2.X, (float)t2.Y, (float)t2.Z);
+            var BB = Nv3f((float)b2.X, (float)b2.Y, (float)b2.Z);
+            var BF = Nv3f((float)b1.X, (float)b1.Y, (float)b1.Z);
             mb.AddTriangle(TF, TB, BB); mb.AddTriangle(TF, BB, BF);  // front winding
             mb.AddTriangle(TF, BB, TB); mb.AddTriangle(TF, BF, BB);  // back winding
+            lb.AddLine(TF, TB); lb.AddLine(TB, BB); lb.AddLine(BB, BF); lb.AddLine(BF, TF);
         };
-        addSection(yf,  yd1);  // anterior section
-        addSection(yd1, yd2);  // middle section
-        addSection(yd2, yb);   // posterior section
+        
+        // Anterior section: Front(0,1) to Div1(4,5)
+        addQuad(_hp[0], _hp[4], _hp[5], _hp[1]);
+        // Middle section: Div1(4,5) to Div2(6,7)
+        addQuad(_hp[4], _hp[6], _hp[7], _hp[5]);
+        // Posterior section: Div2(6,7) to Back(2,3)
+        addQuad(_hp[6], _hp[2], _hp[3], _hp[7]);
 
         _planeMesh.Geometry = HelixToolkit.SharpDX.Converter.ToMeshGeometry3D(mb.ToMesh());
         _planeMesh.Material = new PhongMaterial {
             DiffuseColor  = new HelixToolkit.Maths.Color4(0f, 0.9f, 1f, 0.18f),
             EmissiveColor = new HelixToolkit.Maths.Color4(0f, 0.8f, 1f, 0.12f) };
 
-        // Outline + 2 vertical divider lines
-        var lb = new HelixToolkit.SharpDX.LineBuilder();
-        lb.AddLine(Nv3f(x, yf,  zt), Nv3f(x, yb,  zt));  // top edge    (anterior->posterior)
-        lb.AddLine(Nv3f(x, yb,  zt), Nv3f(x, yb,  zb));  // back edge   (top->bottom)
-        lb.AddLine(Nv3f(x, yb,  zb), Nv3f(x, yf,  zb));  // bottom edge (posterior->anterior)
-        lb.AddLine(Nv3f(x, yf,  zb), Nv3f(x, yf,  zt));  // front edge  (bottom->top)
-        lb.AddLine(Nv3f(x, yd1, zt), Nv3f(x, yd1, zb));  // divider 1   (vertical)
-        lb.AddLine(Nv3f(x, yd2, zt), Nv3f(x, yd2, zb));  // divider 2   (vertical)
         _linesGroup.Children.Clear();
         _linesGroup.Children.Add(new LineGeometryModel3D { Geometry = lb.ToLineGeometry3D(), Color = Colors.Cyan, Thickness = 2 });
 
-        // Place handles
-        _hp[0] = new(_xMid, _yFront, _zTop);  _hp[1] = new(_xMid, _yFront, _zBot);
-        _hp[2] = new(_xMid, _yBack,  _zTop);  _hp[3] = new(_xMid, _yBack,  _zBot);
-        _hp[4] = new(_xMid, _yDiv1,  _zTop);  _hp[5] = new(_xMid, _yDiv1,  _zBot);
-        _hp[6] = new(_xMid, _yDiv2,  _zTop);  _hp[7] = new(_xMid, _yDiv2,  _zBot);
         _handlesGroup.Children.Clear();
         for (int i = 0; i < NH; i++)
         {
@@ -242,18 +214,16 @@ public partial class LeFort1SagittalCutWindow : Window
         CutBtn.IsEnabled = false;
 
         var maxillaVerts = _maxillaVerts;
-        double xMid = _xMid, yFront = _yFront, yBack = _yBack, zTop = _zTop, zBot = _zBot;
+        float[] F(Point3D p) => new float[] { (float)p.X, (float)p.Y, (float)p.Z };
 
-        // Build a finite Polyplane at x=xMid from the visual plane bounds.
-        // Vertex classification uses the plane equation (IsSinglePlane path)
-        // so quad size doesn't matter for classification — only for EdgeCross.
-        float[] FT = { (float)xMid, (float)yFront, (float)zTop };
-        float[] BT = { (float)xMid, (float)yBack,  (float)zTop };
-        float[] BB = { (float)xMid, (float)yBack,  (float)zBot };
-        float[] FB = { (float)xMid, (float)yFront, (float)zBot };
         var polyplane = new Polyplane(0.0);
         polyplane.SetMeshFromQuads(new List<(float[], float[], float[], float[])>{
-            (FT, BT, BB, FB)
+            // Anterior section
+            (F(_hp[0]), F(_hp[4]), F(_hp[5]), F(_hp[1])),
+            // Middle section
+            (F(_hp[4]), F(_hp[6]), F(_hp[7]), F(_hp[5])),
+            // Posterior section
+            (F(_hp[6]), F(_hp[2]), F(_hp[3]), F(_hp[7]))
         });
 
         List<float[]> L, R;
@@ -337,13 +307,15 @@ public partial class LeFort1SagittalCutWindow : Window
         return h == null ? null : new(h.PointHit.X, h.PointHit.Y, h.PointHit.Z);
     }
 
-    private Point3D? RayOnPlaneX(Point screenPos, double xPlane)
+    private Point3D? CamPlane(Point pos, Point3D anchor)
     {
-        var ray = MainViewport.UnProject(screenPos);
-        double dx = ray.Direction.X;
-        if (Math.Abs(dx) < 0.0001) return null;
-        double t = (xPlane - ray.Position.X) / dx;
-        return t < 0 ? null : new(xPlane, ray.Position.Y + t * ray.Direction.Y, ray.Position.Z + t * ray.Direction.Z);
+        var look = SubCamera.LookDirection; look.Normalize();
+        var pn = new Vector3D(-look.X, -look.Y, -look.Z);
+        var ray = MainViewport.UnProject(pos);
+        double nd = pn.X * ray.Direction.X + pn.Y * ray.Direction.Y + pn.Z * ray.Direction.Z;
+        if (Math.Abs(nd) < 0.0001) return null;
+        double t = (pn.X * (anchor.X - ray.Position.X) + pn.Y * (anchor.Y - ray.Position.Y) + pn.Z * (anchor.Z - ray.Position.Z)) / nd;
+        return t < 0 ? null : new(ray.Position.X + t * ray.Direction.X, ray.Position.Y + t * ray.Direction.Y, ray.Position.Z + t * ray.Direction.Z);
     }
 
     private void FitCamera(List<float[]> v)
