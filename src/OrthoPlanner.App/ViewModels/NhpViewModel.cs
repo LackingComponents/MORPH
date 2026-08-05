@@ -562,10 +562,7 @@ public partial class MainViewModel
             NhpProfiles.Add(p);
 
         if (NhpProfiles.Count == 0)
-        {
             EnsureDefaultNhpProfile();
-            return;
-        }
 
         var active = NhpProfiles.FirstOrDefault(p => p.IsSelected) ?? NhpProfiles[0];
         SetActiveNhpProfile(active);
@@ -598,7 +595,9 @@ public partial class MainViewModel
     /// </summary>
     internal void MigrateBaselineToNhpProfileIfNeeded(double lat, double ant, double vert, double roll, double pitch, double yaw)
     {
-        if (NhpProfiles.Count > 0) return;
+        // The constructor creates a default profile before project loading. Replace it
+        // so legacy baseline values are not silently discarded.
+        NhpProfiles.Clear();
 
         var profile = NewNhpProfileModel("NHP 1");
         profile.Lateral = lat; profile.Anteroposterior = ant; profile.Vertical = vert;

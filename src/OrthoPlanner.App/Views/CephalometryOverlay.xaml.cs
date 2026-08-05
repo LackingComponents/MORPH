@@ -96,6 +96,7 @@ public partial class CephalometryOverlay : UserControl
     private System.Windows.Point _cephGridDragStart;
     private System.Windows.Point _cephGridDragInitialCenter;
     private MainViewModel? _subscribedVm;
+    private System.Windows.Threading.DispatcherTimer? _nhpDrrDebounceTimer;
     private bool _syncingGridCheckbox;
 
     /// <summary>View-model for the Steiner / Tweed / Ricketts analysis result tables.</summary>
@@ -798,7 +799,37 @@ public partial class CephalometryOverlay : UserControl
         if (e.PropertyName == nameof(MainViewModel.ShowGrid) && IsVisible)
             Dispatcher.InvokeAsync(() => SetMainViewportGridLayerVisible(false));
         else if (e.PropertyName == nameof(MainViewModel.NhpSharedTransform))
-            Dispatcher.InvokeAsync(ApplyNhpToCephalometryVisuals);
+        {
+            Dispatcher.InvokeAsync(() =>
+            {
+                ApplyNhpToCephalometryVisuals();
+                ScheduleNhpDrrRefresh();
+            });
+        }
+    }
+
+    private void ScheduleNhpDrrRefresh()
+    {
+        if (!_initialized || _volume == null || !IsVisible) return;
+
+        _nhpDrrDebounceTimer ??= new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(150)
+        };
+        _nhpDrrDebounceTimer.Stop();
+        _nhpDrrDebounceTimer.Tick -= RefreshDrrAfterNhpChange;
+        _nhpDrrDebounceTimer.Tick += RefreshDrrAfterNhpChange;
+        _nhpDrrDebounceTimer.Start();
+    }
+
+    private void RefreshDrrAfterNhpChange(object? sender, EventArgs e)
+    {
+        _nhpDrrDebounceTimer?.Stop();
+        InvalidateDrrCache();
+        _ = GenerateDrrAsync(
+            CmbProjection.SelectedIndex == 0,
+            resetView: false,
+            reprojectGeometry: true);
     }
 
     private void ChkShowGrid_Changed(object sender, RoutedEventArgs e)
@@ -1137,11 +1168,16 @@ public partial class CephalometryOverlay : UserControl
     // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
 
     /// <summary>
-    /// Projects a baked 3D physical-space point (mm) onto the 2D DRR image pixel coordinates.
+    /// Projects a source-space 3D physical point onto the posed DRR image.
     /// </summary>
     private (double X, double Y)? Project3DTo2D(double physX, double physY, double physZ)
     {
         if (_volume == null || _activeDrr == null) return null;
+
+        var posed = CurrentNhpSharedTransform().Transform(new Point3D(physX, physY, physZ));
+        physX = posed.X;
+        physY = posed.Y;
+        physZ = posed.Z;
 
         bool isLateral = CmbProjection.SelectedIndex == 0;
 
@@ -1167,8 +1203,8 @@ public partial class CephalometryOverlay : UserControl
     }
 
     /// <summary>
-    /// Projects a DRR pixel coordinate to a baked 3D physical-space point (mm).
-    /// Uses the midplane of the projection along the ray axis.
+    /// Projects a DRR pixel coordinate to a source-space 3D physical point.
+    /// Uses the posed midplane along the ray axis, then removes the shared NHP pose.
     /// </summary>
     private Vector3? Project2DTo3D(double drrCol, double drrRow)
     {
@@ -1183,13 +1219,15 @@ public partial class CephalometryOverlay : UserControl
             double y = _activeDrr.SpaceMaxY - col * _activeDrr.SpacingX;
             double z = _activeDrr.SpaceMaxZ - row * _activeDrr.SpacingY;
             double x = (_activeDrr.SpaceMinX + _activeDrr.SpaceMaxX) / 2.0;
-            return new Vector3((float)x, (float)y, (float)z);
+            var source = ToSourceSpace(x, y, z);
+            return new Vector3((float)source.X, (float)source.Y, (float)source.Z);
         }
 
         double xPa = _activeDrr.SpaceMinX + col * _activeDrr.SpacingX;
         double zPa = _activeDrr.SpaceMaxZ - row * _activeDrr.SpacingY;
         double yPa = (_activeDrr.SpaceMinY + _activeDrr.SpaceMaxY) / 2.0;
-        return new Vector3((float)xPa, (float)yPa, (float)zPa);
+        var sourcePa = ToSourceSpace(xPa, yPa, zPa);
+        return new Vector3((float)sourcePa.X, (float)sourcePa.Y, (float)sourcePa.Z);
     }
 
     private void EnsureGeometry3DFrom2D()
@@ -1269,7 +1307,6 @@ public partial class CephalometryOverlay : UserControl
 
     private void Refresh3DLandmarks()
     {
-        EnsureNhpReposeListener();   // arm once: later NHP changes re-pose existing spheres (INV4 re-invoke)
         // Remove old spheres
         foreach (var sphere in _landmarkSpheres3D)
             SharedViewport3D?.Items.Remove(sphere);
@@ -1301,7 +1338,7 @@ public partial class CephalometryOverlay : UserControl
                     SpecularColor = new HelixToolkit.Maths.Color4(0.3f, 0.3f, 0.3f, 1f),
                     SpecularShininess = 10f,
                 },
-                IsHitTestVisible = false,
+                IsHitTestVisible = true,
                 // INV4 render-pose: sphere is built at the source center; pose it into the NHP world.
                 // NhpShared is rotation+translation only (no scale), so the 1.5mm radius is preserved.
                 Transform = CurrentNhpSharedTransform(),
@@ -1351,34 +1388,7 @@ public partial class CephalometryOverlay : UserControl
         return inverse.Transform(new Point3D(world.X, world.Y, world.Z));
     }
 
-    /// <summary>Re-poses existing landmark spheres when NHP changes — a Transform-only update,
-    /// no rebuild, so each sphere keeps its current IsRendering/toggle state (INV4 re-invoke).</summary>
-    private void Repose3DLandmarks()
-    {
-        if (_landmarkSpheres3D.Count == 0) return;
-        var t = CurrentNhpSharedTransform();
-        foreach (var sphere in _landmarkSpheres3D) sphere.Transform = t;
-    }
-
     // ── NHP transform access (INV4 pick-in-NHP / persist-in-source / render-posed) ─────────────
-    private bool _nhpReposeListenerAttached;
-
-    /// <summary>One-shot: subscribe to the VM's NhpSharedTransform change so landmark spheres
-    /// re-pose whenever NHP/commit changes the shared matrix. Set when the VM is first available;
-    /// never cleared (overlay lives for the app lifetime). PropertyChanged fires on the UI thread.</summary>
-    private void EnsureNhpReposeListener()
-    {
-        if (_nhpReposeListenerAttached) return;
-        var vm = NhpVm;
-        if (vm == null) return;
-        _nhpReposeListenerAttached = true;
-        ((INotifyPropertyChanged)vm).PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(MainViewModel.NhpSharedTransform))
-                Repose3DLandmarks();
-        };
-    }
-
     private MainViewModel? NhpVm =>
         (Application.Current.MainWindow as MainWindow)?.DataContext as MainViewModel;
 

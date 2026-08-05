@@ -297,8 +297,12 @@ public partial class MainViewModel
                     static string ReadNhpStr(System.Text.Json.JsonElement node, string key, string def)
                         => node.TryGetProperty(key, out var el) && el.ValueKind == System.Text.Json.JsonValueKind.String
                             ? (el.GetString() ?? def) : def;
+                    static double ReadNhpCompat(System.Text.Json.JsonElement node, string key, string legacyKey)
+                        => ReadNhpD(node, key, ReadNhpD(node, legacyKey));
 
-                    bool hasNewProfiles = root.TryGetProperty("NhpProfiles", out var profilesNode);
+                    bool hasNewProfiles =
+                        root.TryGetProperty("NhpProfiles", out var profilesNode) &&
+                        profilesNode.ValueKind == System.Text.Json.JsonValueKind.Array;
 
                     if (hasNewProfiles)
                     {
@@ -310,9 +314,9 @@ public partial class MainViewModel
                         foreach (var p in profilesNode.EnumerateArray())
                         {
                             var prof = new NhpProfileViewModel { Name = ReadNhpStr(p, "Name", "NHP 1") };
-                            prof.Lateral         = ReadNhpD(p, "Lateral");
-                            prof.Anteroposterior = ReadNhpD(p, "Anteroposterior");
-                            prof.Vertical        = ReadNhpD(p, "Vertical");
+                            prof.Lateral         = ReadNhpCompat(p, "Lateral", "Lat");
+                            prof.Anteroposterior = ReadNhpCompat(p, "Anteroposterior", "Ant");
+                            prof.Vertical        = ReadNhpCompat(p, "Vertical", "Vert");
                             prof.Roll            = ReadNhpD(p, "Roll");
                             prof.Pitch           = ReadNhpD(p, "Pitch");
                             prof.Yaw             = ReadNhpD(p, "Yaw");
