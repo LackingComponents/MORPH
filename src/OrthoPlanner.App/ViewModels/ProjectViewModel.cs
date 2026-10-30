@@ -34,10 +34,13 @@ public partial class MainViewModel
                         m.M31, m.M32, m.M33, m.M34,
                         m.OffsetX, m.OffsetY, m.OffsetZ, m.M44 };
 
+            // Photogrammetry photos: plan entries first so project.json can reference them
+            var photoPlan = Photogrammetry.PhotoProjectStore.BuildSavePlan(PhotogrammetrySpace);
+
             // 1. project.json — metadata
             var meta = new
             {
-                Version = "2.2",
+                Version = "2.3",
                 PatientName,
                 StudyDate,
                 Segmentation = new
@@ -84,7 +87,10 @@ public partial class MainViewModel
                     Midline = DentalMidlinePoint == null ? null : (object)new { DentalMidlinePoint.Value.X, DentalMidlinePoint.Value.Y, DentalMidlinePoint.Value.Z }
                 },
                 // Surgery plan persistence (Lore): save active movements so they survive project round-trip
-                CurrentSurgeryPlan = SnapshotCurrentPlan("Current")
+                CurrentSurgeryPlan = SnapshotCurrentPlan("Current"),
+                // Photogrammetry (v2.3): original photo bytes live in photos/{i}_{name}
+                Photos = photoPlan.PhotosMeta,
+                ActivePhotoIndex = photoPlan.ActivePhotoIndex
             };
             var jsonEntry = zip.CreateEntry("project.json");
             using (var sw = new StreamWriter(jsonEntry.Open()))
@@ -142,7 +148,16 @@ public partial class MainViewModel
                     { bw3.Write(occ.Vertices[vi]); bw3.Write(occ.Vertices[vi + 1]); bw3.Write(occ.Vertices[vi + 2]); }
             }
 
+            // 6. photos/* — original photo files, byte-for-byte (EXIF + full resolution preserved)
+            Photogrammetry.PhotoProjectStore.WriteEntries(zip, photoPlan);
+
             StatusText = $"Project saved: {Path.GetFileName(dialog.FileName)}";
+            if (photoPlan.Problems.Count > 0)
+            {
+                string msg = $"{photoPlan.Problems.Count} photo(s) NOT saved: {string.Join("; ", photoPlan.Problems)}";
+                System.Diagnostics.Debug.WriteLine($"SaveProject: {msg}");
+                StatusText += $" — {msg}";
+            }
         }
         catch (Exception ex)
         {
@@ -176,6 +191,7 @@ public partial class MainViewModel
         {
             // Open is committed — tell the view to drop session-bound visuals (measurements).
             ProjectReset?.Invoke();
+            PhotogrammetrySpace.ClearPhotos(); // never carry photos over from the previous project
             IsLoading = true;
             StatusText = "Loading project...";
 
@@ -675,7 +691,16 @@ public partial class MainViewModel
                 ApplyPlan(plan);
             }
 
+            // 8. Photogrammetry photos (absent in projects older than v2.3 → list stays empty)
+            var photoProblems = Photogrammetry.PhotoProjectStore.Restore(zip, root, PhotogrammetrySpace);
+
             StatusText = $"Project loaded: {Path.GetFileName(dialog.FileName)}";
+            if (photoProblems.Count > 0)
+            {
+                string msg = $"{photoProblems.Count} photo problem(s): {string.Join("; ", photoProblems)}";
+                System.Diagnostics.Debug.WriteLine($"OpenProject: {msg}");
+                StatusText += $" — {msg}";
+            }
         }
         catch (Exception ex)
 

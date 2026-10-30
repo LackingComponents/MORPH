@@ -97,10 +97,47 @@ public partial class PhotoViewModel : ObservableObject
     public ObservableCollection<LineAnnotationViewModel> LineAnnotations  { get; } = new();
     public ObservableCollection<AngleAnnotationViewModel> AngleAnnotations { get; } = new();
 
+    /// <summary>Maximum decoded width; larger (DSLR) files are downscaled to stay memory-safe.</summary>
+    public const int MaxDecodeWidth = 4096;
+
+    /// <summary>
+    /// Exact bytes of the source file, read once at load. Saved verbatim into the project
+    /// (never re-encoded) so EXIF metadata and full resolution are preserved.
+    /// </summary>
+    public byte[] OriginalBytes { get; } = Array.Empty<byte>();
+
+    // Native resolution from the decoder (before the 4096 px cap). 0 if decoding failed.
+    public int OriginalPixelWidth  { get; private set; }
+    public int OriginalPixelHeight { get; private set; }
+
+    /// <summary>Displayed pixel width / original pixel width. Annotations stay in displayed pixels.</summary>
+    public double DecodeScale { get; private set; } = 1.0;
+
+    /// <summary>Last load/decode error, or null. Lets callers surface failures instead of dropping them.</summary>
+    public string? LoadError { get; private set; }
+
     public PhotoViewModel(string filePath)
     {
         FilePath = filePath;
         FileName = System.IO.Path.GetFileName(filePath);
+        try
+        {
+            OriginalBytes = System.IO.File.ReadAllBytes(filePath);
+        }
+        catch (Exception ex)
+        {
+            LoadError = $"cannot read file: {ex.Message}";
+            System.Diagnostics.Debug.WriteLine($"PhotoViewModel: {FileName}: {LoadError}");
+            return;
+        }
+        LoadImage();
+    }
+
+    /// <summary>Rebuilds a photo from bytes stored in a project file.</summary>
+    public PhotoViewModel(string fileName, byte[] originalBytes)
+    {
+        FileName = fileName;
+        OriginalBytes = originalBytes ?? throw new ArgumentNullException(nameof(originalBytes));
         LoadImage();
     }
 
@@ -108,20 +145,31 @@ public partial class PhotoViewModel : ObservableObject
     {
         try
         {
+            using (var probe = new System.IO.MemoryStream(OriginalBytes, writable: false))
+            {
+                var frame = BitmapDecoder.Create(probe, BitmapCreateOptions.IgnoreColorProfile,
+                                                 BitmapCacheOption.None).Frames[0];
+                OriginalPixelWidth  = frame.PixelWidth;
+                OriginalPixelHeight = frame.PixelHeight;
+            }
+
             var bitmap = new BitmapImage();
             bitmap.BeginInit();
-            bitmap.UriSource     = new Uri(FilePath);
+            bitmap.StreamSource  = new System.IO.MemoryStream(OriginalBytes, writable: false);
             bitmap.CacheOption   = BitmapCacheOption.OnLoad;
             bitmap.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
-            // Cap to 4096px wide to keep DSLR files memory-safe
-            bitmap.DecodePixelWidth = 4096;
+            // Cap to 4096px wide to keep DSLR files memory-safe (never upscale smaller photos)
+            if (OriginalPixelWidth > MaxDecodeWidth)
+                bitmap.DecodePixelWidth = MaxDecodeWidth;
             bitmap.EndInit();
             bitmap.Freeze();
             ImageSource = bitmap;
+            DecodeScale = OriginalPixelWidth > 0 ? (double)bitmap.PixelWidth / OriginalPixelWidth : 1.0;
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"PhotoViewModel.LoadImage: {ex.Message}");
+            LoadError = $"cannot decode image: {ex.Message}";
+            System.Diagnostics.Debug.WriteLine($"PhotoViewModel.LoadImage: {FileName}: {ex.Message}");
             ImageSource = null;
         }
     }

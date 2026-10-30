@@ -50,6 +50,26 @@ public partial class PhotogrammetryViewModel : ObservableObject
             ActivePhoto = Photos[0];
     }
 
+    /// <summary>Removes every photo (used when another project is opened).</summary>
+    public void ClearPhotos()
+    {
+        ActivePhoto = null;
+        Photos.Clear();
+    }
+
+    /// <summary>Replaces the photo list with restored photos and selects the saved active one.</summary>
+    public void RestorePhotos(IEnumerable<PhotoViewModel> photos, int activeIndex)
+    {
+        ClearPhotos();
+        foreach (var p in photos)
+        {
+            p.IsSelected = false;
+            Photos.Add(p);
+        }
+        if (Photos.Count == 0) return;
+        SetActivePhoto(Photos[activeIndex >= 0 && activeIndex < Photos.Count ? activeIndex : 0]);
+    }
+
     [RelayCommand]
     private void SetActivePhoto(PhotoViewModel photo)
     {
