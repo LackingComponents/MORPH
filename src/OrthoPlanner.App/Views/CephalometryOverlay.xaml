@@ -257,6 +257,16 @@
                               IsEnabled="{Binding IsChecked, ElementName=Btn3DToggle}"
                               Checked="ChkOrtho_Changed" Unchecked="ChkOrtho_Changed"/>
                     <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Source:" Foreground="#FF6E7F90" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11"/>
+                        <ComboBox x:Name="CmbSource" Width="70"
+                                  Style="{StaticResource DarkComboBox}"
+                                  ItemContainerStyle="{StaticResource DarkComboBoxItem}"
+                                  ToolTip="Image source: DRR computed from the CT, or a real lateral X-ray"
+                                  SelectionChanged="CmbSource_SelectionChanged"/>
+                        <Button x:Name="BtnLoadXray" Content="Load X-ray..." Padding="8,3" Margin="4,0,0,0"
+                                IsEnabled="False" Click="LoadXray_Click"
+                                ToolTip="Load a lateral cephalogram (JPG, PNG, TIF, BMP or DICOM)"/>
+                        <Rectangle Width="1" Fill="#FF232E3A" Margin="10,6"/>
                         <TextBlock Text="Projection:" Foreground="#FF6E7F90" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11"/>
                         <ComboBox x:Name="CmbProjection" Width="100" SelectedIndex="0"
                                   Style="{StaticResource DarkComboBox}"
@@ -287,7 +297,7 @@
                         <Button Content="Edit NHP" Padding="8,3" Margin="2,0"
                                 Click="EditNhp_Click"
                                 ToolTip="Adjust Natural Head Position while keeping cephalometric geometry attached"/>
-                        <Button Content="Reset Ceph" Padding="8,3" Margin="2,0" Click="ResetView_Click"/>
+                        <Button x:Name="BtnResetCeph" Content="Reset Ceph" Padding="8,3" Margin="2,0" Click="ResetView_Click"/>
                     </StackPanel>
                 </DockPanel>
             </Border>
@@ -332,6 +342,9 @@
                         <Image x:Name="DrrImageControl"
                                RenderOptions.BitmapScalingMode="HighQuality"
                                Stretch="None"/>
+                        <Image x:Name="XrayImageControl"
+                               RenderOptions.BitmapScalingMode="HighQuality"
+                               Stretch="None" Visibility="Collapsed"/>
                         <Canvas x:Name="MeasurementsCanvas"/>
                         <Canvas x:Name="LandmarkCanvas"/>
                     </Canvas>

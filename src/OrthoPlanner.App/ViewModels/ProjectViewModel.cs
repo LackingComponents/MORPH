@@ -90,7 +90,10 @@ public partial class MainViewModel
                 CurrentSurgeryPlan = SnapshotCurrentPlan("Current"),
                 // Photogrammetry (v2.3): original photo bytes live in photos/{i}_{name}
                 Photos = photoPlan.PhotosMeta,
-                ActivePhotoIndex = photoPlan.ActivePhotoIndex
+                ActivePhotoIndex = photoPlan.ActivePhotoIndex,
+                // Cephalometry image source: real lateral X-ray bytes live in ceph/xray_lateral.<ext>
+                CephXray = Cephalometry.CephXrayProjectStore.BuildMeta(CephXray),
+                CephSource = Cephalometry.CephXrayProjectStore.SourceToJson(CephSource)
             };
             var jsonEntry = zip.CreateEntry("project.json");
             using (var sw = new StreamWriter(jsonEntry.Open()))
@@ -151,6 +154,9 @@ public partial class MainViewModel
             // 6. photos/* — original photo files, byte-for-byte (EXIF + full resolution preserved)
             Photogrammetry.PhotoProjectStore.WriteEntries(zip, photoPlan);
 
+            // 7. ceph/xray_lateral.<ext> — original X-ray file, byte-for-byte
+            Cephalometry.CephXrayProjectStore.WriteEntry(zip, CephXray);
+
             StatusText = $"Project saved: {Path.GetFileName(dialog.FileName)}";
             if (photoPlan.Problems.Count > 0)
             {
@@ -192,6 +198,8 @@ public partial class MainViewModel
             // Open is committed — tell the view to drop session-bound visuals (measurements).
             ProjectReset?.Invoke();
             PhotogrammetrySpace.ClearPhotos(); // never carry photos over from the previous project
+            CephSource = Cephalometry.CephImageSource.Drr; // nor the previous project's ceph X-ray
+            CephXray = null;
             IsLoading = true;
             StatusText = "Loading project...";
 
@@ -694,10 +702,16 @@ public partial class MainViewModel
             // 8. Photogrammetry photos (absent in projects older than v2.3 → list stays empty)
             var photoProblems = Photogrammetry.PhotoProjectStore.Restore(zip, root, PhotogrammetrySpace);
 
+            // 9. Cephalometry X-ray + selected source (absent in older projects → DRR, no X-ray)
+            var (cephXray, cephSource, cephProblem) = Cephalometry.CephXrayProjectStore.Restore(zip, root);
+            CephXray = cephXray;
+            CephSource = cephSource;
+            if (cephProblem != null) photoProblems.Add(cephProblem);
+
             StatusText = $"Project loaded: {Path.GetFileName(dialog.FileName)}";
             if (photoProblems.Count > 0)
             {
-                string msg = $"{photoProblems.Count} photo problem(s): {string.Join("; ", photoProblems)}";
+                string msg = $"{photoProblems.Count} image problem(s): {string.Join("; ", photoProblems)}";
                 System.Diagnostics.Debug.WriteLine($"OpenProject: {msg}");
                 StatusText += $" — {msg}";
             }

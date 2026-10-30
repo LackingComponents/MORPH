@@ -114,6 +114,7 @@ public partial class CephalometryOverlay : UserControl
         CmbProjection.Items.Add("Lateral");
         CmbProjection.Items.Add("PA");
         CmbProjection.SelectedIndex = 0;
+        InitSourceCombo();
 
         ViewportBorder.SizeChanged += (_, _) => UpdateImageTransform();
 
@@ -122,7 +123,7 @@ public partial class CephalometryOverlay : UserControl
         // Keyboard shortcuts
         PreviewKeyDown += (_, e) =>
         {
-            if (e.Key == Key.D && Keyboard.Modifiers == ModifierKeys.Control)
+            if (e.Key == Key.D && Keyboard.Modifiers == ModifierKeys.Control && Btn3DToggle.IsEnabled)
             {
                 Btn3DToggle.IsChecked = !(Btn3DToggle.IsChecked == true);
                 e.Handled = true;
@@ -137,7 +138,7 @@ public partial class CephalometryOverlay : UserControl
                 UpdateToolStatus();
                 e.Handled = true;
             }
-            else if (e.Key == Key.Delete && _toolState.SelectedMeasurement != null)
+            else if (e.Key == Key.Delete && _toolState.SelectedMeasurement != null && !_isXrayMode)
             {
                 var sel = _toolState.SelectedMeasurement;
                 // also remove from 3D list if present
@@ -311,6 +312,13 @@ public partial class CephalometryOverlay : UserControl
             }
 
             _activeDrr = drr;
+            if (_isXrayMode)
+            {
+                // X-ray is on screen: keep the new DRR and render it when the user switches back.
+                DeferDrrRender(resetView);
+            }
+            else
+            {
             if (resetView)
             {
                 _windowWidth = 1.0;
@@ -323,11 +331,13 @@ public partial class CephalometryOverlay : UserControl
             RenderDrr();
             if (resetView)
                 FitToViewport();
+            }
 
             if (reprojectGeometry)
                 ReprojectLandmarksAndMeasurements2D();
 
-            StatusLeft.Text = "Ready — Left-click place landmark, right-drag W/L (Shift+right-click on dot to delete)";
+            if (!_isXrayMode)
+                StatusLeft.Text = "Ready — Left-click place landmark, right-drag W/L (Shift+right-click on dot to delete)";
             UpdateStatusInfo();
             RefreshAnalysis();
         }
@@ -349,6 +359,7 @@ public partial class CephalometryOverlay : UserControl
 
     private void RenderDrr()
     {
+        if (_isXrayMode) { RenderXray(); return; }
         if (_activeDrr == null) return;
 
         int w = _activeDrr.Width;
@@ -383,6 +394,7 @@ public partial class CephalometryOverlay : UserControl
 
     private void FitToViewport()
     {
+        if (_isXrayMode) { FitXrayToViewport(); return; }
         if (_activeDrr == null) return;
         double vpW = ViewportBorder.ActualWidth;
         double vpH = ViewportBorder.ActualHeight;
@@ -399,6 +411,7 @@ public partial class CephalometryOverlay : UserControl
 
     private void UpdateImageTransform()
     {
+        if (_isXrayMode) { UpdateXrayTransform(); return; }
         if (_activeDrr == null) return;
         double vpW = ViewportBorder.ActualWidth;
         double vpH = ViewportBorder.ActualHeight;
@@ -434,6 +447,7 @@ public partial class CephalometryOverlay : UserControl
 
     private void ImageCanvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        if (_isXrayMode) { StatusLeft.Text = XrayToolsDisabledMessage; return; }
         var pos = e.GetPosition(ImageCanvas);
 
         if (_toolState.ActiveTool == CephTool.Select)
@@ -778,6 +792,7 @@ public partial class CephalometryOverlay : UserControl
         UnsubscribeMainVm();
         _subscribedVm = vm;
         _subscribedVm.PropertyChanged += OnMainVmPropertyChanged;
+        SyncXrayFromVm();
         _syncingGridCheckbox = true;
         ChkShowGrid.IsChecked = _showCephGrid;
         _syncingGridCheckbox = false;
@@ -798,6 +813,8 @@ public partial class CephalometryOverlay : UserControl
         // renders underneath and creates a double-grid layer.
         if (e.PropertyName == nameof(MainViewModel.ShowGrid) && IsVisible)
             Dispatcher.InvokeAsync(() => SetMainViewportGridLayerVisible(false));
+        else if (e.PropertyName is nameof(MainViewModel.CephXray) or nameof(MainViewModel.CephSource))
+            Dispatcher.InvokeAsync(SyncXrayFromVm);
         else if (e.PropertyName == nameof(MainViewModel.NhpSharedTransform))
         {
             Dispatcher.InvokeAsync(() =>
@@ -2205,6 +2222,7 @@ public partial class CephalometryOverlay : UserControl
 
     private void ChkInvert_Changed(object sender, RoutedEventArgs e)
     {
+        if (_syncingInvert) return;
         _inverted = ChkInvert.IsChecked == true;
         RenderDrr();
     }
@@ -2314,6 +2332,7 @@ public partial class CephalometryOverlay : UserControl
 
     private void UpdateStatusInfo()
     {
+        if (_isXrayMode) { UpdateXrayStatusInfo(); return; }
         if (_activeDrr == null) return;
         StatusCenter.Text = $"{_activeDrr.Width}x{_activeDrr.Height}  |  " +
                             $"{_activeDrr.SpacingX:F2}x{_activeDrr.SpacingY:F2} mm/px  |  " +
