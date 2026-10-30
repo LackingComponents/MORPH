@@ -67,6 +67,29 @@ public partial class PhotogrammetryView : UserControl
         MasterCanvas.Children.Add(_imgElement);
         Panel.SetZIndex(_imgElement, 0);
         DataContextChanged += OnDataContextChanged;
+        PreviewKeyDown += View_PreviewKeyDown;
+    }
+
+    // ── Keyboard shortcuts ────────────────────────────────────────────────────────
+    // Keys only reach this view when focus is inside it: ViewportHost takes focus on click/hover
+    // (see FocusViewport). Text boxes keep their own keys — the shortcut never fires while typing.
+    private void View_PreviewKeyDown(object s, KeyEventArgs e)
+    {
+        if (e.Key != Key.F || Keyboard.Modifiers != ModifierKeys.Control) return;
+        if (e.OriginalSource is System.Windows.Controls.Primitives.TextBoxBase) return;
+        if (!IsVisible || Active?.ImageSource == null) return;
+
+        FitToViewport();
+        FullRedraw();
+        e.Handled = true;
+    }
+
+    /// <summary>Gives the photo area keyboard focus, unless the user is typing in a text box.</summary>
+    private void FocusViewport()
+    {
+        if (ViewportHost.IsKeyboardFocused || CalibrationPopup.IsOpen) return;
+        if (Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase) return;
+        ViewportHost.Focus();
     }
 
     // ── DataContext / ViewModel wiring ────────────────────────────────────────────
@@ -300,6 +323,7 @@ public partial class PhotogrammetryView : UserControl
 
     private void Viewport_MouseDown(object s, MouseButtonEventArgs e)
     {
+        FocusViewport();
         if (Active?.ImageSource == null) return;
         Point sp = e.GetPosition(MasterCanvas);
 
@@ -361,6 +385,7 @@ public partial class PhotogrammetryView : UserControl
 
     private void Viewport_MouseMove(object s, MouseEventArgs e)
     {
+        FocusViewport();
         if (Active?.ImageSource == null) return;
         Point sp = e.GetPosition(MasterCanvas);
 

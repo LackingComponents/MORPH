@@ -208,6 +208,7 @@
                                         Style="{StaticResource SideBtn}"/>
                                 <Button Grid.Column="2" Content="⊡ Fit Screen"
                                         Command="{Binding ResetViewCommand}"
+                                        ToolTip="Fit photo to screen (Ctrl+F)"
                                         Style="{StaticResource SideBtn}"/>
                             </Grid>
 
@@ -411,6 +412,7 @@
             <!-- Viewport canvas -->
             <Grid Grid.Row="1" x:Name="ViewportHost" Background="#FF080B10"
                   ClipToBounds="True"
+                  Focusable="True" FocusVisualStyle="{x:Null}"
                   MouseWheel="Viewport_MouseWheel"
                   MouseLeftButtonDown="Viewport_MouseDown"
                   MouseLeftButtonUp="Viewport_MouseUp"
