@@ -68,6 +68,8 @@ public partial class PhotogrammetryView : UserControl
         Panel.SetZIndex(_imgElement, 0);
         DataContextChanged += OnDataContextChanged;
         PreviewKeyDown += View_PreviewKeyDown;
+        ViewportHost.MouseDown += Viewport_MiddleDown;
+        ViewportHost.MouseUp   += Viewport_MiddleUp;
     }
 
     // ── Keyboard shortcuts ────────────────────────────────────────────────────────
@@ -327,6 +329,14 @@ public partial class PhotogrammetryView : UserControl
         if (Active?.ImageSource == null) return;
         Point sp = e.GetPosition(MasterCanvas);
 
+        // ── Priority 0: Shift+left-drag pans with any tool (tool clicks in progress are kept)
+        if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
+        {
+            StartPan(sp);
+            e.Handled = true;
+            return;
+        }
+
         // ── Priority 1: angle phase-2, waiting for P3 ─────────────────────────────
         if (_angleWaiting)
         {
@@ -346,17 +356,22 @@ public partial class PhotogrammetryView : UserControl
         // ── Priority 3: start pan or start first click of tool ────────────────────
         if (Vm!.ActiveTool == PhotogrammetryToolMode.Pan)
         {
-            _isPanning = true;
-            _panStart  = sp;
-            ViewportHost.CaptureMouse();
+            StartPan(sp);
         }
         else
         {
             // 1st click: place P1 and show live preview
             _lineWaiting = true;
             _lineP1      = S2I(sp);
+            ShowLinePreview(I2S(_lineP1));
+        }
+        e.Handled = true;
+    }
 
-            var colour = Vm.ActiveTool switch
+    /// <summary>Dashed preview from P1 to <paramref name="to"/> plus the P1 dot (re-created after a redraw).</summary>
+    private void ShowLinePreview(Point to)
+    {
+            var colour = Vm!.ActiveTool switch
             {
                 PhotogrammetryToolMode.Measure  => Color.FromRgb(0x4C, 0xAF, 0x50),
                 PhotogrammetryToolMode.Angle    => Color.FromRgb(0x00, 0xBC, 0xD4),
@@ -366,7 +381,7 @@ public partial class PhotogrammetryView : UserControl
             var p1s = I2S(_lineP1);
             _linePreview = new Line
             {
-                X1=p1s.X, Y1=p1s.Y, X2=p1s.X, Y2=p1s.Y,
+                X1=p1s.X, Y1=p1s.Y, X2=to.X, Y2=to.Y,
                 Stroke = new SolidColorBrush(colour),
                 StrokeThickness = 1.5,
                 StrokeDashArray = new DoubleCollection { 5, 3 }
@@ -379,7 +394,36 @@ public partial class PhotogrammetryView : UserControl
             Canvas.SetLeft(dot, p1s.X - 3); Canvas.SetTop(dot, p1s.Y - 3);
             Panel.SetZIndex(dot, 21);
             MasterCanvas.Children.Add(dot);
-        }
+    }
+
+    private void StartPan(Point sp)
+    {
+        _isPanning = true;
+        _panStart  = sp;
+        ViewportHost.Cursor = Cursors.SizeAll;
+        ViewportHost.CaptureMouse();
+    }
+
+    private void StopPan()
+    {
+        if (!_isPanning) return;
+        _isPanning = false;
+        ViewportHost.Cursor = null;
+        ViewportHost.ReleaseMouseCapture();
+    }
+
+    private void Viewport_MiddleDown(object s, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Middle || Active?.ImageSource == null) return;
+        FocusViewport();
+        StartPan(e.GetPosition(MasterCanvas));
+        e.Handled = true;
+    }
+
+    private void Viewport_MiddleUp(object s, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Middle) return;
+        StopPan();
         e.Handled = true;
     }
 
@@ -390,12 +434,13 @@ public partial class PhotogrammetryView : UserControl
         Point sp = e.GetPosition(MasterCanvas);
 
         // Pan drag
-        if (_isPanning && e.LeftButton == MouseButtonState.Pressed)
+        if (_isPanning && (e.LeftButton == MouseButtonState.Pressed || e.MiddleButton == MouseButtonState.Pressed))
         {
             _offX += sp.X - _panStart.X;
             _offY += sp.Y - _panStart.Y;
             _panStart = sp;
             FullRedraw();
+            if (_lineWaiting) ShowLinePreview(sp); // FullRedraw cleared the in-progress preview
             return;
         }
 
@@ -429,14 +474,7 @@ public partial class PhotogrammetryView : UserControl
         }
     }
 
-    private void Viewport_MouseUp(object s, MouseButtonEventArgs e)
-    {
-        if (_isPanning)
-        {
-            _isPanning = false;
-            ViewportHost.ReleaseMouseCapture();
-        }
-    }
+    private void Viewport_MouseUp(object s, MouseButtonEventArgs e) => StopPan();
 
     // ─────────────────────────────────────────────────────────────────────────────
     //  TOOL FINALISATION

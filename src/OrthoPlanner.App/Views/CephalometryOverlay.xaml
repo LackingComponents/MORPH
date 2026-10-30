@@ -304,6 +304,7 @@
             <!-- Row 2: Measurement tools -->
             <Border Background="#FF131920" Height="30"
                     BorderThickness="0,0,0,1" BorderBrush="#FF232E3A">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <StackPanel x:Name="ToolButtonPanel" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0">
                     <Button x:Name="BtnToolSelect"   Content="Select"    Padding="6,2" Margin="1,0" FontSize="10" Click="ToolBtn_Click" Tag="Select"/>
                     <Button x:Name="BtnToolPoint"    Content="Point"     Padding="6,2" Margin="1,0" FontSize="10" Click="ToolBtn_Click" Tag="CustomPoint"/>
@@ -316,6 +317,69 @@
                     <Rectangle Width="1" Fill="#FF232E3A" Margin="4,4"/>
                     <Button x:Name="BtnToolDistPts"  Content="&#x2194; mm"     Padding="6,2" Margin="1,0" FontSize="10" Click="ToolBtn_Click" Tag="DistancePoints"/>
                     <Button x:Name="BtnToolDistPln"  Content="&#x22A5; dist"   Padding="6,2" Margin="1,0" FontSize="10" Click="ToolBtn_Click" Tag="DistancePointPlane"/>
+                </StackPanel>
+                <!-- X-ray mode only: ruler calibration + 2D measurements on the radiograph -->
+                <StackPanel x:Name="XrayToolPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
+                    <Rectangle Width="1" Fill="#FF232E3A" Margin="4,4"/>
+                    <TextBlock Text="X-ray:" Foreground="#FF6E7F90" FontSize="10" VerticalAlignment="Center" Margin="4,0,4,0"/>
+                    <Grid>
+                        <Button x:Name="BtnXrayCalibrate" Content="&#x1F4CF; Calibrate ruler" Padding="6,2" Margin="1,0" FontSize="10"
+                                Click="XrayTool_Click" Tag="Calibrate"
+                                ToolTip="Click two points on the radiograph ruler, then enter their distance or detect the tick spacing automatically"/>
+                        <Popup x:Name="XrayCalibrationPopup" StaysOpen="True" AllowsTransparency="True"
+                               PlacementTarget="{Binding ElementName=BtnXrayCalibrate}"
+                               Placement="Bottom" VerticalOffset="6">
+                            <Border Background="#FF141920" BorderBrush="#FF1B98E0" BorderThickness="1"
+                                    CornerRadius="6" Padding="14,12">
+                                <StackPanel Width="270">
+                                    <TextBlock Text="&#x1F4CF; Calibrate ruler" Foreground="White"
+                                               FontWeight="SemiBold" FontSize="12" Margin="0,0,0,10"/>
+                                    <RadioButton x:Name="RbXrayCalManual" GroupName="XrayCal" IsChecked="True"
+                                                 Content="Manual: distance between the two points"
+                                                 Foreground="#FFD0D8E0" FontSize="11" Margin="0,0,0,6"
+                                                 Checked="XrayCalMode_Changed"/>
+                                    <DockPanel Margin="18,0,0,10">
+                                        <TextBlock DockPanel.Dock="Right" Text=" mm" Foreground="#FF607080"
+                                                   FontSize="12" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                                        <TextBox x:Name="XrayCalMmInput" FontSize="13" Padding="8,4"
+                                                 Background="#FF0E1520" Foreground="White" CaretBrush="White"
+                                                 BorderBrush="#FF2D4060" BorderThickness="1"
+                                                 KeyDown="XrayCalInput_KeyDown" TextChanged="XrayCalInput_TextChanged"/>
+                                    </DockPanel>
+                                    <RadioButton x:Name="RbXrayCalAuto" GroupName="XrayCal"
+                                                 Content="Auto from ticks (line drawn along the tick marks)"
+                                                 Foreground="#FFD0D8E0" FontSize="11" Margin="0,0,0,6"
+                                                 Checked="XrayCalMode_Changed"/>
+                                    <DockPanel Margin="18,0,0,10">
+                                        <TextBlock DockPanel.Dock="Left" Text="mm per tick:" Foreground="#FF607080"
+                                                   FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                        <TextBox x:Name="XrayCalTickInput" Text="1" FontSize="13" Padding="8,4"
+                                                 Background="#FF0E1520" Foreground="White" CaretBrush="White"
+                                                 BorderBrush="#FF2D4060" BorderThickness="1"
+                                                 KeyDown="XrayCalInput_KeyDown" TextChanged="XrayCalInput_TextChanged"/>
+                                    </DockPanel>
+                                    <TextBlock x:Name="XrayCalResult" Foreground="#FFAAB4C0" FontSize="11"
+                                               TextWrapping="Wrap" Margin="0,0,0,12"/>
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <Button x:Name="XrayCalApply" Content="Apply" Width="72" Padding="0,6"
+                                                Background="#FF1B98E0" Foreground="White" BorderThickness="0"
+                                                Click="XrayCalApply_Click"/>
+                                        <Button Content="Cancel" Width="64" Padding="0,6" Margin="8,0,0,0"
+                                                Background="#FF1E2530" Foreground="#FF8A9BB0"
+                                                BorderThickness="1" BorderBrush="#FF2D3340"
+                                                Click="XrayCalCancel_Click"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                    <Button x:Name="BtnXrayDistance" Content="&#x2194; mm" Padding="6,2" Margin="1,0" FontSize="10"
+                            Click="XrayTool_Click" Tag="Distance"/>
+                    <Button x:Name="BtnXrayAngle" Content="&#x2220; 3pts" Padding="6,2" Margin="1,0" FontSize="10"
+                            Click="XrayTool_Click" Tag="Angle"/>
+                    <Button x:Name="BtnXrayClear" Content="Clear" Padding="6,2" Margin="1,0" FontSize="10"
+                            Click="XrayClear_Click" ToolTip="Remove all X-ray distance and angle annotations"/>
+                </StackPanel>
                 </StackPanel>
             </Border>
         </StackPanel>
@@ -347,7 +411,25 @@
                                Stretch="None" Visibility="Collapsed"/>
                         <Canvas x:Name="MeasurementsCanvas"/>
                         <Canvas x:Name="LandmarkCanvas"/>
+                        <!-- X-ray annotations, drawn in screen space (redrawn on zoom/pan) -->
+                        <Canvas x:Name="XrayAnnotationCanvas" IsHitTestVisible="False" Visibility="Collapsed"/>
                     </Canvas>
+
+                    <!-- X-ray scale HUD (X-ray mode only) -->
+                    <Border x:Name="XrayScaleHud"
+                            HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                            Background="#BB000C18" CornerRadius="6"
+                            Padding="10,6" Margin="8,0,0,8" MaxWidth="360"
+                            IsHitTestVisible="False" Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock x:Name="XrayScaleText" Text="Scale: not calibrated"
+                                       Foreground="#FFFFB300" FontFamily="Consolas"
+                                       FontSize="13" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="XrayScaleNote" Foreground="#FF8A9BB0" FontSize="10"
+                                       TextWrapping="Wrap" Margin="0,3,0,0"
+                                       Text="Scale valid for the midsagittal plane (ruler on the nasion relator). Bilateral structures have a different radiographic magnification."/>
+                        </StackPanel>
+                    </Border>
 
                     <!-- W/L Live HUD - always visible, updates during right-drag -->
                     <Border x:Name="WlHud"

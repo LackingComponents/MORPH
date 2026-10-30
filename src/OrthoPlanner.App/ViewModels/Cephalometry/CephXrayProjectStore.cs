@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Text.Json;
+using System.Windows;
 
 namespace OrthoPlanner.App.ViewModels.Cephalometry;
 
@@ -31,7 +33,28 @@ public static class CephXrayProjectStore
         xray.IsDicom,
         xray.OriginalPixelWidth,
         xray.OriginalPixelHeight,
+        // Scale: effective mm/px (ruler wins over DICOM) and its source; ruler points in image pixels
+        XrayMmPerPixel = xray.Scale?.MmPerPixelX,
+        XrayScaleSource = xray.Scale?.Source,
+        RulerStart = Pt(xray.Measurements.RulerStart),
+        RulerEnd = Pt(xray.Measurements.RulerEnd),
+        // X-ray-only annotations (image pixels). Values are informative; they are recomputed on load.
+        XrayDistances = xray.Measurements.Distances.Select(d => new
+        {
+            Start = Pt(d.Start), End = Pt(d.End),
+            DistanceMm = xray.Scale?.DistanceMm(d.Start, d.End)
+        }).ToArray(),
+        XrayAngles = xray.Measurements.Angles.Select(a => new
+        {
+            A = Pt(a.A), Vertex = Pt(a.Vertex), B = Pt(a.B),
+            AngleDeg = Finite(xray.Scale?.AngleDeg(a.A, a.Vertex, a.B))
+        }).ToArray(),
     };
+
+    private static object? Pt(Point? p) => p is Point v ? new { v.X, v.Y } : null;
+
+    // System.Text.Json refuses NaN: a degenerate value is written as null.
+    private static double? Finite(double? v) => v is double d && double.IsFinite(d) ? d : null;
 
     public static void WriteEntry(ZipArchive zip, CephXrayImage? xray)
     {
@@ -71,11 +94,52 @@ public static class CephXrayProjectStore
                 es.CopyTo(ms);
                 bytes = ms.ToArray();
             }
-            return (CephXrayImage.FromBytes(fileName, bytes), source, null);
+            var xray = CephXrayImage.FromBytes(fileName, bytes);
+            string? problem = RestoreMeasurements(meta, xray);
+            return (xray, source, problem);
         }
         catch (Exception ex)
         {
             return (null, CephImageSource.Drr, $"Ceph X-ray {fileName}: {ex.Message}");
         }
+    }
+
+    /// <summary>Restores ruler scale and annotations. Older projects have none of these fields.</summary>
+    private static string? RestoreMeasurements(JsonElement meta, CephXrayImage xray)
+    {
+        string? problem = null;
+        string? scaleSource = meta.TryGetProperty("XrayScaleSource", out var ss) && ss.ValueKind == JsonValueKind.String
+            ? ss.GetString() : null;
+        if (scaleSource == XrayScale.SourceRuler)
+        {
+            double mmPerPx = ReadDouble(meta, "XrayMmPerPixel");
+            Point? start = ReadPoint(meta, "RulerStart"), end = ReadPoint(meta, "RulerEnd");
+            if (double.IsFinite(mmPerPx) && mmPerPx > 0 && start is Point s0 && end is Point e0)
+                xray.Measurements.SetRuler(mmPerPx, s0, e0);
+            else
+                problem = $"Ceph X-ray {xray.FileName}: invalid ruler calibration, scale not restored";
+        }
+
+        foreach (var d in ReadArray(meta, "XrayDistances"))
+            if (ReadPoint(d, "Start") is Point a && ReadPoint(d, "End") is Point b)
+                xray.Measurements.Distances.Add(new XrayDistanceAnnotation(a, b));
+        foreach (var g in ReadArray(meta, "XrayAngles"))
+            if (ReadPoint(g, "A") is Point a && ReadPoint(g, "Vertex") is Point v && ReadPoint(g, "B") is Point b)
+                xray.Measurements.Angles.Add(new XrayAngleAnnotation(a, v, b));
+        return problem;
+    }
+
+    private static IEnumerable<JsonElement> ReadArray(JsonElement node, string key)
+        => node.TryGetProperty(key, out var el) && el.ValueKind == JsonValueKind.Array
+            ? el.EnumerateArray() : Enumerable.Empty<JsonElement>();
+
+    private static double ReadDouble(JsonElement node, string key)
+        => node.TryGetProperty(key, out var el) && el.ValueKind == JsonValueKind.Number ? el.GetDouble() : double.NaN;
+
+    private static Point? ReadPoint(JsonElement node, string key)
+    {
+        if (!node.TryGetProperty(key, out var el) || el.ValueKind != JsonValueKind.Object) return null;
+        double x = ReadDouble(el, "X"), y = ReadDouble(el, "Y");
+        return double.IsFinite(x) && double.IsFinite(y) ? new Point(x, y) : null;
     }
 }

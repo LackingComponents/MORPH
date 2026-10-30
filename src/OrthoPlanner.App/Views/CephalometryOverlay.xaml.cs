@@ -43,6 +43,7 @@ public partial class CephalometryOverlay : UserControl
     private double _zoom = 1.0;
     private double _panX, _panY;
     private bool _isPanning;
+    private bool _isLeftButtonPanning;   // Shift+left-drag pan (released on left button up)
     private System.Windows.Point _panDragOrigin;
     private double _panDragStartX, _panDragStartY;
     private bool _isWlDragging;
@@ -136,6 +137,10 @@ public partial class CephalometryOverlay : UserControl
                 ClearPending3DSpheres();
                 RefreshMeasurementOverlay();
                 UpdateToolStatus();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Escape && _isXrayMode && CancelXrayPending())
+            {
                 e.Handled = true;
             }
             else if (e.Key == Key.Delete && _toolState.SelectedMeasurement != null && !_isXrayMode)
@@ -447,7 +452,15 @@ public partial class CephalometryOverlay : UserControl
 
     private void ImageCanvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (_isXrayMode) { StatusLeft.Text = XrayToolsDisabledMessage; return; }
+        // Shift+left-drag pans (DRR and X-ray), same as middle-drag; no tool click is made.
+        if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
+        {
+            StartImagePan(e.GetPosition(ImageCanvas));
+            _isLeftButtonPanning = true;
+            e.Handled = true;
+            return;
+        }
+        if (_isXrayMode) { HandleXrayLeftClick(e.GetPosition(ImageCanvas)); return; }
         var pos = e.GetPosition(ImageCanvas);
 
         if (_toolState.ActiveTool == CephTool.Select)
@@ -509,6 +522,15 @@ public partial class CephalometryOverlay : UserControl
 
     private void ImageCanvas_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        if (_isLeftButtonPanning)
+        {
+            _isLeftButtonPanning = false;
+            _isPanning = false;
+            ImageCanvas.Cursor = null;
+            ImageCanvas.ReleaseMouseCapture();
+            e.Handled = true;
+            return;
+        }
         if (_isDraggingLandmark && _draggingLandmark != null)
         {
             _isDraggingLandmark = false;
@@ -529,13 +551,19 @@ public partial class CephalometryOverlay : UserControl
     {
         if (e.ChangedButton == MouseButton.Middle)
         {
-            _isPanning = true;
-            _panDragOrigin = e.GetPosition(ImageCanvas);
-            _panDragStartX = _panX;
-            _panDragStartY = _panY;
-            ImageCanvas.CaptureMouse();
+            StartImagePan(e.GetPosition(ImageCanvas));
             e.Handled = true;
         }
+    }
+
+    private void StartImagePan(System.Windows.Point origin)
+    {
+        _isPanning = true;
+        _panDragOrigin = origin;
+        _panDragStartX = _panX;
+        _panDragStartY = _panY;
+        ImageCanvas.Cursor = Cursors.SizeAll;
+        ImageCanvas.CaptureMouse();
     }
 
     private void ImageCanvas_MouseUp(object sender, MouseButtonEventArgs e)
@@ -543,6 +571,8 @@ public partial class CephalometryOverlay : UserControl
         if (e.ChangedButton == MouseButton.Middle && _isPanning)
         {
             _isPanning = false;
+            _isLeftButtonPanning = false;
+            ImageCanvas.Cursor = null;
             ImageCanvas.ReleaseMouseCapture();
             e.Handled = true;
         }
@@ -628,6 +658,9 @@ public partial class CephalometryOverlay : UserControl
             _rubberBandEnd = new CephPoint(imgPos.X, imgPos.Y);
             RefreshMeasurementOverlay();
         }
+
+        if (_isXrayMode)
+            UpdateXrayRubberBand(e.GetPosition(ImageCanvas));
 
         // Live magnifier loupe
         UpdateLoupe(e.GetPosition(ImageCanvas));

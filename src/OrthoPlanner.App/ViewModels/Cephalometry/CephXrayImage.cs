@@ -37,6 +37,22 @@ public sealed class CephXrayImage
     public int OriginalPixelHeight { get; }
     public float[] Luminance { get; }
 
+    /// <summary>Ruler calibration and 2D annotations made on this X-ray (image pixels).</summary>
+    public CephXrayMeasurements Measurements { get; } = new();
+
+    /// <summary>Current pixel scale: the ruler calibration wins over DICOM spacing; null when neither exists.</summary>
+    public XrayScale? Scale
+    {
+        get
+        {
+            if (Measurements.RulerMmPerPixel is double r)
+                return new XrayScale(r, r, XrayScale.SourceRuler);
+            if (PixelSpacingMm is double sx)
+                return new XrayScale(sx, PixelSpacingRowMm ?? sx, XrayScale.SourceDicom);
+            return null;
+        }
+    }
+
     private CephXrayImage(string fileName, byte[] bytes, bool isDicom, double? spacingCol, double? spacingRow,
                           int width, int height, float[] luminance)
     {

@@ -91,6 +91,7 @@ public partial class CephalometryOverlay
         }
         else
         {
+            ResetXrayTool();
             _xrayView = CaptureView();
             _isXrayMode = false;
             ApplyView(_drrView);
@@ -131,6 +132,7 @@ public partial class CephalometryOverlay
 
     private void ShowXrayImage(CephXrayImage? image)
     {
+        ResetXrayTool();
         _shownXray = image;
         _xrayNeedsFit = true;
         if (!_isXrayMode)
@@ -229,6 +231,8 @@ public partial class CephalometryOverlay
         SetXrayLocked(LandmarkListPanel, x);
         SetXrayLocked(MeasurementListPanel, x);
         SetXrayLocked(AnalysisTabControl, x);
+        UpdateXrayToolUi();
+        RedrawXrayAnnotations();
     }
 
     private void SetXrayLocked(FrameworkElement element, bool locked)
@@ -336,6 +340,7 @@ public partial class CephalometryOverlay
         Canvas.SetLeft(XrayImageControl, left);
         Canvas.SetTop(XrayImageControl, top);
         UpdateXrayStatusInfo();
+        RedrawXrayAnnotations();
     }
 
     private void UpdateXrayStatusInfo()
@@ -347,8 +352,8 @@ public partial class CephalometryOverlay
         }
         else
         {
-            string spacing = img.PixelSpacingMm is double sx
-                ? $"{sx:F3}x{img.PixelSpacingRowMm ?? sx:F3} mm/px"
+            string spacing = img.Scale is XrayScale sc
+                ? $"{sc.MmPerPixelX:F4}x{sc.MmPerPixelY:F4} mm/px ({sc.Source})"
                 : "not calibrated";
             StatusCenter.Text = $"X-ray {img.OriginalPixelWidth}x{img.OriginalPixelHeight}  |  {spacing}  |  {_zoom * 100:F0}%";
         }
