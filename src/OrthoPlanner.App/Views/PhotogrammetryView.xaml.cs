@@ -107,12 +107,13 @@ public partial class PhotogrammetryView : UserControl
     {
         if (e.PropertyName == nameof(PhotogrammetryViewModel.ActivePhoto))
         {
-            CloseCalibration(); CancelLineTool(); CancelAngleTool();
+            CloseCalibration(); CancelLineTool(); CancelAngleTool(); EndGridDrag();
             SubscribePhoto(); FitToViewport(); FullRedraw();
             OnCephActivePhotoChanged();
         }
         else if (e.PropertyName == nameof(PhotogrammetryViewModel.ShowGridOverlay))
         {
+            if (Vm?.ShowGridOverlay != true) BtnGridMove.IsChecked = false;   // move mode only with the grid on
             DrawGrid();
         }
     }
@@ -135,6 +136,9 @@ public partial class PhotogrammetryView : UserControl
                 FullRedraw(); UpdateCephPanel(); break;
             case nameof(PhotoViewModel.CephOverlay):
                 SubscribeCephState(); FullRedraw(); UpdateCephPanel(); break;
+            case nameof(PhotoViewModel.PixelsPerMm):
+            case nameof(PhotoViewModel.IsNormalized):
+                DrawGrid(); break;   // the grid switches between screen and mm
             case nameof(PhotoViewModel.ZoomScale) when Active?.ZoomScale == 0:
                 FitToViewport(); FullRedraw(); break;
         }
@@ -253,55 +257,194 @@ public partial class PhotogrammetryView : UserControl
     }
 
     // ── Grid ──────────────────────────────────────────────────────────────────────
+    // Same behaviour as the 3D viewport grid (MainWindow.DrawGrid), adapted to photos:
+    //   calibrated photo   → mm grid anchored to the image (centre stored in IMAGE pixels)
+    //   uncalibrated photo → screen-space grid, 20 px cells (centre stored in SCREEN pixels)
+    // Centre / "new center" are kept per photo, in memory only. All grid elements use z-index 5.
+    private const int GridZ = 5;
+    private const double ScreenGridCellPx = 20.0;
+    private const double MinGridSpacingPx = 5.0;
+
+    /// <summary>Per-photo grid centre. Null = default (image centre in mm mode, viewport centre otherwise).</summary>
+    private sealed class PhotoGridState
+    {
+        public (Point P, bool InImage)? Center;
+        public (Point P, bool InImage)? NewCenter;   // "Set as new center" → used by "Recentre"
+    }
+
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<PhotoViewModel, PhotoGridState> _gridStates = new();
+    private bool  _gridDragging;
+    private Point _gridDragStart;
+    private Point _gridDragCenterStart;
+
+    private static readonly Brush GridScreenThin  = Fr(30, 255, 255, 255);
+    private static readonly Brush GridScreenMid   = Fr(55, 255, 255, 255);
+    private static readonly Brush GridScreenThick = Fr(80, 255, 255, 255);
+    private static readonly Brush GridMmThin      = Fr(35, 255, 255, 255);   // brighter: photos are light
+    private static readonly Brush GridMmMid       = Fr(75, 255, 255, 255);
+    private static readonly Brush GridMmThick     = Fr(140, 255, 255, 255);
+    private static readonly Brush GridCross       = Fr(100, 100, 200, 255);
+
+    private PhotoGridState GridState(PhotoViewModel photo) => _gridStates.GetOrCreateValue(photo);
+
+    private static bool GridInMm(PhotoViewModel photo) => photo.IsNormalized && photo.PixelsPerMm > 0;
+
+    private Point ViewportCentre => new(ViewportHost.ActualWidth / 2.0, ViewportHost.ActualHeight / 2.0);
+
+    /// <summary>Grid centre in screen pixels for the current view.</summary>
+    private Point GridCentreScreen(PhotoViewModel photo)
+    {
+        if (GridState(photo).Center is { } c) return c.InImage ? I2S(c.P) : c.P;
+        if (GridInMm(photo) && photo.ImageSource != null)
+            return I2S(new Point(photo.ImageSource.PixelWidth / 2.0, photo.ImageSource.PixelHeight / 2.0));
+        return ViewportCentre;
+    }
+
+    /// <summary>Stores a centre given in screen pixels, in the space the current grid mode is anchored to.</summary>
+    private (Point P, bool InImage) GridPointFromScreen(PhotoViewModel photo, Point screen) =>
+        GridInMm(photo) ? (S2I(screen), true) : (screen, false);
+
     private void DrawGrid()
     {
         for (int i = MasterCanvas.Children.Count - 1; i >= 0; i--)
-            if (Panel.GetZIndex(MasterCanvas.Children[i]) == 5)
+            if (Panel.GetZIndex(MasterCanvas.Children[i]) == GridZ)
                 MasterCanvas.Children.RemoveAt(i);
 
         var photo = Active;
-        if (photo == null || !Vm!.ShowGridOverlay || !photo.IsNormalized) return;
+        double vw = ViewportHost.ActualWidth, vh = ViewportHost.ActualHeight;
+        if (photo?.ImageSource == null || Vm?.ShowGridOverlay != true || vw < 10 || vh < 10) return;
 
-        double s1 = photo.PixelsPerMm * _zoom;
-        double s5  = s1 * 5;
-        double s10 = s1 * 10;
-        double vw  = ViewportHost.ActualWidth;
-        double vh  = ViewportHost.ActualHeight;
-
-        double loopStep;
-        if      (s1  >= 5) loopStep = s1;
-        else if (s5  >= 5) loopStep = s5;
-        else if (s10 >= 5) loopStep = s10;
-        else return;
-
-        var b1  = Fr(255,255,255,35); var b5 = Fr(255,255,255,75); var b10 = Fr(255,255,255,140);
-
-        double ox = _offX % loopStep; if (ox < 0) ox += loopStep;
-        for (double x = ox; x < vw; x += loopStep)
+        var c = GridCentreScreen(photo);
+        string label;
+        if (GridInMm(photo))
         {
-            (Brush br, double th) = GBrush(x - _offX, s1, s5, s10, b1, b5, b10);
-            if (br == null!) continue;
-            var ln = new Line { X1=x,Y1=0,X2=x,Y2=vh, Stroke=br, StrokeThickness=th };
-            Panel.SetZIndex(ln, 5); MasterCanvas.Children.Add(ln);
+            double pxPerMm = photo.PixelsPerMm * _zoom;
+            int stepMm = pxPerMm >= MinGridSpacingPx ? 1 : pxPerMm * 5 >= MinGridSpacingPx ? 5 : 10;
+            bool any = pxPerMm * stepMm >= MinGridSpacingPx;
+            if (any) DrawGridLines(c, pxPerMm * stepMm, stepMm, vw, vh, GridMmThin, GridMmMid, GridMmThick);
+            else DrawGridCrosshair(c, vw, vh);
+            label = !any ? "Grid: zoom in to see the mm lines"
+                  : stepMm == 1 ? "Grid: 1 / 5 / 10 mm" : stepMm == 5 ? "Grid: 5 / 10 mm" : "Grid: 10 mm";
         }
-        double oy = _offY % loopStep; if (oy < 0) oy += loopStep;
-        for (double y = oy; y < vh; y += loopStep)
+        else
         {
-            (Brush br, double th) = GBrush(y - _offY, s1, s5, s10, b1, b5, b10);
-            if (br == null!) continue;
-            var ln = new Line { X1=0,Y1=y,X2=vw,Y2=y, Stroke=br, StrokeThickness=th };
-            Panel.SetZIndex(ln, 5); MasterCanvas.Children.Add(ln);
+            DrawGridLines(c, ScreenGridCellPx, 1, vw, vh, GridScreenThin, GridScreenMid, GridScreenThick);
+            label = "Grid not in mm: set the scale first (Scale or Reference overlay)";
+        }
+        AddGridLabel(label, vh);
+    }
+
+    /// <summary>
+    /// Lines every <paramref name="stepPx"/> screen px, i.e. every <paramref name="stepUnits"/> units (mm or cells),
+    /// counted from the centre: every 10 units thick, every 5 medium, others thin, the centre lines blue.
+    /// </summary>
+    private void DrawGridLines(Point c, double stepPx, int stepUnits, double vw, double vh,
+                               Brush thin, Brush mid, Brush thick)
+    {
+        for (int pass = 0; pass < 2; pass++)
+        {
+            bool vertical = pass == 0;
+            double centre = vertical ? c.X : c.Y, extent = vertical ? vw : vh;
+            int kMin = (int)Math.Ceiling(-centre / stepPx), kMax = (int)Math.Floor((extent - centre) / stepPx);
+            for (int k = kMin; k <= kMax; k++)
+            {
+                long units = (long)k * stepUnits;
+                (Brush br, double th) = units == 0 ? (GridCross, 1.5)
+                                      : units % 10 == 0 ? (thick, 1.5)
+                                      : units % 5 == 0 ? (mid, 1.0) : (thin, 0.5);
+                double v = centre + k * stepPx;
+                AddGridLine(vertical ? new Point(v, 0) : new Point(0, v),
+                            vertical ? new Point(v, vh) : new Point(vw, v), br, th);
+            }
         }
     }
 
-    private static SolidColorBrush Fr(byte a,byte r,byte g,byte b) { var br=new SolidColorBrush(Color.FromArgb(a,r,g,b)); br.Freeze(); return br; }
-    private static (Brush,double) GBrush(double d,double s1,double s5,double s10,Brush b1,Brush b5,Brush b10)
+    private void DrawGridCrosshair(Point c, double vw, double vh)
     {
-        double abs=Math.Abs(d); const double T=0.6;
-        if(s10>0&&abs%s10<T) return(b10,1.2);
-        if(s5>0&&abs%s5<T&&s5>=5) return(b5,0.8);
-        if(s1>0&&abs%s1<T&&s1>=5) return(b1,0.5);
-        return(null!,0);
+        AddGridLine(new Point(c.X, 0), new Point(c.X, vh), GridCross, 1.5);
+        AddGridLine(new Point(0, c.Y), new Point(vw, c.Y), GridCross, 1.5);
+    }
+
+    private void AddGridLine(Point a, Point b, Brush br, double th)
+    {
+        var ln = new Line { X1 = a.X, Y1 = a.Y, X2 = b.X, Y2 = b.Y, Stroke = br, StrokeThickness = th, IsHitTestVisible = false };
+        Panel.SetZIndex(ln, GridZ);
+        MasterCanvas.Children.Add(ln);
+    }
+
+    private void AddGridLabel(string text, double vh)
+    {
+        var tb = new TextBlock
+        {
+            Text = text, FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(0xCD, 0xD3, 0xDC)),
+            Background = new SolidColorBrush(Color.FromArgb(170, 8, 12, 18)), Padding = new Thickness(5, 2, 5, 2),
+            IsHitTestVisible = false,
+        };
+        Canvas.SetLeft(tb, 8);
+        Canvas.SetTop(tb, vh - 26);
+        Panel.SetZIndex(tb, GridZ);
+        MasterCanvas.Children.Add(tb);
+    }
+
+    private static SolidColorBrush Fr(byte a,byte r,byte g,byte b) { var br=new SolidColorBrush(Color.FromArgb(a,r,g,b)); br.Freeze(); return br; }
+
+    // ── Grid move mode and context menu (same semantics as MainWindow) ────────────
+    private bool GridMoveMode => BtnGridMove.IsChecked == true;
+
+    private void GridMove_Changed(object s, RoutedEventArgs e)
+    {
+        if (GridMoveMode) { CancelLineTool(); CancelAngleTool(); }   // tools resume when move mode is turned off
+        else EndGridDrag();
+        ViewportHost.Cursor = GridMoveMode ? Cursors.SizeAll : null;
+    }
+
+    private void StartGridDrag(Point sp)
+    {
+        _gridDragging = true;
+        _gridDragStart = sp;
+        _gridDragCenterStart = GridCentreScreen(Active!);
+        ViewportHost.CaptureMouse();
+    }
+
+    private void DragGrid(Point sp)
+    {
+        var photo = Active;
+        if (photo == null) return;
+        var screen = new Point(_gridDragCenterStart.X + sp.X - _gridDragStart.X, _gridDragCenterStart.Y + sp.Y - _gridDragStart.Y);
+        GridState(photo).Center = GridPointFromScreen(photo, screen);
+        DrawGrid();
+    }
+
+    private void EndGridDrag()
+    {
+        if (!_gridDragging) return;
+        _gridDragging = false;
+        ViewportHost.ReleaseMouseCapture();
+    }
+
+    private void GridSetAsNewCenter_Click(object s, RoutedEventArgs e)
+    {
+        if (Active is not { } photo) return;
+        var st = GridState(photo);
+        st.NewCenter = st.Center;   // MainWindow: _newCenter = _gridCenter (null when still at the default)
+    }
+
+    private void GridRecentre_Click(object s, RoutedEventArgs e)
+    {
+        if (Active is not { } photo) return;
+        var st = GridState(photo);
+        // MainWindow: back to the saved new center, otherwise to the centre of the viewport
+        st.Center = st.NewCenter is { } nc ? nc : GridPointFromScreen(photo, ViewportCentre);
+        DrawGrid();
+    }
+
+    private void GridReset_Click(object s, RoutedEventArgs e)
+    {
+        if (Active is not { } photo) return;
+        var st = GridState(photo);
+        st.Center = null;
+        st.NewCenter = null;
+        DrawGrid();
     }
 
     // ── Coordinate helpers ────────────────────────────────────────────────────────
@@ -333,6 +476,14 @@ public partial class PhotogrammetryView : UserControl
         FocusViewport();
         if (Active?.ImageSource == null) return;
         Point sp = e.GetPosition(MasterCanvas);
+
+        // ── Grid move mode: left-drag moves the grid centre, pan and tools are suspended
+        if (GridMoveMode)
+        {
+            StartGridDrag(sp);
+            e.Handled = true;
+            return;
+        }
 
         // ── Priority 0: Shift+left-drag pans with any tool (tool clicks in progress are kept)
         if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
@@ -413,7 +564,7 @@ public partial class PhotogrammetryView : UserControl
     {
         if (!_isPanning) return;
         _isPanning = false;
-        ViewportHost.Cursor = null;
+        ViewportHost.Cursor = GridMoveMode ? Cursors.SizeAll : null;
         ViewportHost.ReleaseMouseCapture();
     }
 
@@ -437,6 +588,12 @@ public partial class PhotogrammetryView : UserControl
         FocusViewport();
         if (Active?.ImageSource == null) return;
         Point sp = e.GetPosition(MasterCanvas);
+
+        if (_gridDragging && e.LeftButton == MouseButtonState.Pressed)
+        {
+            DragGrid(sp);
+            return;
+        }
 
         // Pan drag
         if (_isPanning && (e.LeftButton == MouseButtonState.Pressed || e.MiddleButton == MouseButtonState.Pressed))
@@ -479,7 +636,7 @@ public partial class PhotogrammetryView : UserControl
         }
     }
 
-    private void Viewport_MouseUp(object s, MouseButtonEventArgs e) => StopPan();
+    private void Viewport_MouseUp(object s, MouseButtonEventArgs e) { EndGridDrag(); StopPan(); }
 
     // ─────────────────────────────────────────────────────────────────────────────
     //  TOOL FINALISATION

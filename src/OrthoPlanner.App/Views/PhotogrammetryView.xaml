@@ -556,7 +556,26 @@
                         <CheckBox Content="Grid"
                                   IsChecked="{Binding ShowGridOverlay}"
                                   Foreground="#FFCDD3DC" VerticalAlignment="Center" Margin="4,0"
-                                  ToolTip="Show calibration grid overlay (requires Scale)."/>
+                                  ContextMenuService.Placement="Bottom"
+                                  ToolTip="Working grid: in mm on calibrated photos, in screen cells otherwise. Right-click for centre options.">
+                            <CheckBox.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Set as new center" Click="GridSetAsNewCenter_Click"/>
+                                    <MenuItem Header="Recentre" Click="GridRecentre_Click"/>
+                                    <MenuItem Header="Reset" Click="GridReset_Click"/>
+                                </ContextMenu>
+                            </CheckBox.ContextMenu>
+                        </CheckBox>
+
+                        <ToggleButton x:Name="BtnGridMove" Style="{StaticResource ToolToggle}" Margin="4,0,0,0"
+                                      IsEnabled="{Binding ShowGridOverlay}"
+                                      Checked="GridMove_Changed" Unchecked="GridMove_Changed"
+                                      ToolTip="Move grid: left-drag moves the grid centre (pan and tools paused until you turn it off).">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="✥" FontFamily="Segoe UI Symbol" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="Move grid" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </ToggleButton>
                     </StackPanel>
                 </DockPanel>
             </Border>
