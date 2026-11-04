@@ -153,7 +153,7 @@ public static partial class ProfileRegistration
             warnings.Add($"the two directions disagree (scale difference {F(diffAB, "+0.00;-0.00")}%)");
         if (Math.Abs(s.RotationDeg) > WarnRotationDeg)
             warnings.Add($"unusual head rotation between photo and radiograph ({F(s.RotationDeg, "F1")} deg)");
-        if (!string.Equals(scaleSource, "Ruler", StringComparison.Ordinal))
+        if (scaleSource is not ("Ruler" or "SkinMesh"))   // both are calibrated mm sources
             warnings.Add("X-ray scale is not from the ruler calibration: DICOM spacing is often measured at the detector " +
                          "and can overestimate mm by ~10% (qualitative, device dependent)");
     }

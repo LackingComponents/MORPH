@@ -27,6 +27,9 @@ public partial class PhotogrammetryViewModel : ObservableObject
     /// <summary>Gives the Photo section access to the radiograph loaded in Cephalometry (set by MainViewModel).</summary>
     public Func<Cephalometry.CephXrayImage?>? CephXrayProvider { get; set; }
 
+    /// <summary>Gives the Photo section access to the CT soft-tissue model (skin reference; set by MainViewModel).</summary>
+    public Func<SegmentViewModel?>? SoftTissueProvider { get; set; }
+
     [RelayCommand]
     private void LoadPhotos()
     {

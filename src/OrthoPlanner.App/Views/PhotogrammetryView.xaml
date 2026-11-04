@@ -445,10 +445,10 @@
                                      Command="{Binding SelectToolCommand}" CommandParameter="DrawLine"
                                      ToolTip="Draw a persistent annotation line."/>
 
-                        <ToggleButton x:Name="BtnCephOverlay" Content="🩻  Ceph overlay"
+                        <ToggleButton x:Name="BtnCephOverlay" Content="🩻  Reference overlay"
                                       Style="{StaticResource ToolToggle}" IsEnabled="False"
                                       Checked="CephOverlayToggle_Changed" Unchecked="CephOverlayToggle_Changed"
-                                      ToolTip="Overlay the lateral radiograph on this profile photo (automatic, no points to click)."/>
+                                      ToolTip="Overlay the CT skin silhouette or the lateral radiograph on this profile photo (automatic, no points to click)."/>
 
                         <Separator Width="1" Background="#FF2D3340" Margin="8,4"/>
 
@@ -487,9 +487,15 @@
                 </Border.Effect>
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="14,12">
-                        <TextBlock Text="🩻 Ceph overlay" Foreground="White" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,8"/>
-                        <TextBlock Style="{StaticResource CephText}" Foreground="#FF8A9BB0"
-                                   Text="Overlays the lateral radiograph on this profile photo by matching the soft-tissue profiles automatically (nasion to menton). No points to click."/>
+                        <TextBlock Text="🩻 Reference overlay" Foreground="White" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,8"/>
+                        <TextBlock Text="REFERENCE" Style="{StaticResource SectionLabel}"/>
+                        <ComboBox x:Name="CephReferenceCombo" Style="{StaticResource DarkCombo}" SelectedIndex="0"
+                                  SelectionChanged="CephReference_Changed">
+                            <ComboBoxItem Content="Skin mesh" ToolTip="Lateral silhouette of the CT soft-tissue model: true mm, no ruler, no X-ray magnification."/>
+                            <ComboBoxItem Content="X-ray" ToolTip="Lateral radiograph with its ruler calibration (fallback)."/>
+                        </ComboBox>
+                        <TextBlock Style="{StaticResource CephText}" Foreground="#FF8A9BB0" Margin="0,4,0,3"
+                                   Text="Matches the soft-tissue profile of this photo with the reference automatically (nasion to menton). No points to click."/>
 
                         <TextBlock Text="PHOTO FACING" Style="{StaticResource SectionLabel}"/>
                         <ComboBox x:Name="CephFacingCombo" Style="{StaticResource DarkCombo}" SelectedIndex="0">
@@ -505,6 +511,7 @@
                         <!-- Result -->
                         <TextBlock x:Name="CephErrorText" Style="{StaticResource CephText}" Foreground="#FFFF5A5A" Visibility="Collapsed"/>
                         <StackPanel x:Name="CephResultBlock" Visibility="Collapsed">
+                            <TextBlock x:Name="CephReferenceText" Style="{StaticResource CephText}" Foreground="White"/>
                             <TextBlock x:Name="CephScaleText" Style="{StaticResource CephText}" FontWeight="SemiBold" Foreground="White"/>
                             <TextBlock x:Name="CephFitText" Style="{StaticResource CephText}"/>
                             <TextBlock x:Name="CephAgreeText" Style="{StaticResource CephText}"/>
@@ -531,7 +538,7 @@
                                 <Slider x:Name="CephOpacitySlider" Minimum="0" Maximum="100" Value="50"
                                         ValueChanged="CephOpacity_Changed" VerticalAlignment="Center"/>
                             </DockPanel>
-                            <CheckBox x:Name="CephShowXray" Content="Show radiograph" IsChecked="True" Foreground="#FFCDD3DC"
+                            <CheckBox x:Name="CephShowXray" Content="Show reference" IsChecked="True" Foreground="#FFCDD3DC"
                                       Margin="0,0,0,4" Checked="CephDisplay_Changed" Unchecked="CephDisplay_Changed"/>
                             <CheckBox x:Name="CephShowProfiles" Content="Show profiles" IsChecked="True" Foreground="#FFCDD3DC"
                                       Margin="0,0,0,10" Checked="CephDisplay_Changed" Unchecked="CephDisplay_Changed"/>

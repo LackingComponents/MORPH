@@ -16,8 +16,9 @@ using OrthoPlanner.Core.Photogrammetry.ProfileMatching;
 namespace OrthoPlanner.App.Views;
 
 /// <summary>
-/// "Ceph overlay" tool: aligns the lateral radiograph on the active profile photo (CephOverlayService) and draws it
-/// under the annotations. Panel only, not a mouse tool. Overlay elements are rebuilt by FullRedraw (z 2-3).
+/// "Reference overlay" tool: aligns the CT skin silhouette (default) or the lateral radiograph on the active profile
+/// photo (CephOverlayService) and draws it under the annotations. Panel only, not a mouse tool. Overlay elements are
+/// rebuilt by FullRedraw (z 2-3).
 /// </summary>
 public partial class PhotogrammetryView
 {
@@ -27,10 +28,12 @@ public partial class PhotogrammetryView
 
     private bool _cephBusy;
     private bool _cephPanelUpdating;
+    private bool _cephReferenceUserChosen;          // once the user picks a reference, the default stops applying
     private string? _cephTransientError;            // refusal of the last click (overlay left unchanged)
     private (PhotoViewModel Photo, string Text)? _cephStatus;
     private CephOverlayState? _cephStateSub;
     private (CephXrayImage Xray, BitmapSource Bitmap)? _cephBitmapCache;
+    private (SkinSilhouetteResult Skin, BitmapSource Bitmap)? _cephSkinBitmapCache;
 
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
@@ -39,6 +42,28 @@ public partial class PhotogrammetryView
     {
         _cephTransientError = null;
         SubscribeCephState();
+        ApplyDefaultReference();
+        UpdateCephPanel();
+    }
+
+    /// <summary>Skin mesh when a soft-tissue model exists, otherwise X-ray (until the user picks one).</summary>
+    private void ApplyDefaultReference()
+    {
+        if (_cephReferenceUserChosen) return;
+        bool hasSkin = CephOverlayService.HasSkinMesh(Vm?.SoftTissueProvider?.Invoke());
+        _cephPanelUpdating = true;
+        CephReferenceCombo.SelectedIndex = hasSkin ? 0 : 1;
+        _cephPanelUpdating = false;
+    }
+
+    private OverlayReference SelectedReference =>
+        CephReferenceCombo.SelectedIndex == 1 ? OverlayReference.Xray : OverlayReference.SkinMesh;
+
+    private void CephReference_Changed(object s, SelectionChangedEventArgs e)
+    {
+        if (_cephPanelUpdating || CephErrorText == null) return;   // also skips the XAML initialisation event
+        _cephReferenceUserChosen = true;
+        _cephTransientError = null;
         UpdateCephPanel();
     }
 
@@ -61,16 +86,18 @@ public partial class PhotogrammetryView
         if (state.IsVisible && result.HasMatrix)
         {
             var m = result.Registration!.XrayToPhotoMatrix;
-            var xray = result.Xray!;
+            var (source, width, height) = result.Reference == OverlayReference.SkinMesh
+                ? (SkinBitmap(result.Skin!), result.Skin!.Width, result.Skin.Height)
+                : (XrayBitmap(result.Xray!), result.Xray!.OriginalPixelWidth, result.Xray.OriginalPixelHeight);
             var img = new Image
             {
-                Source = XrayBitmap(xray),
-                Width = xray.OriginalPixelWidth,
-                Height = xray.OriginalPixelHeight,
+                Source = source,
+                Width = width,
+                Height = height,
                 Stretch = Stretch.Fill,
                 Opacity = Math.Clamp(state.Opacity, 0, 1),
                 IsHitTestVisible = false,
-                // X-ray px -> photo px (matrix, mirror included) -> screen (zoom + offset)
+                // reference px -> photo px (matrix, mirror included) -> screen (zoom + offset)
                 RenderTransform = new MatrixTransform(new Matrix(
                     m[0] * _zoom, m[3] * _zoom, m[1] * _zoom, m[4] * _zoom,
                     m[2] * _zoom + _offX, m[5] * _zoom + _offY)),
@@ -123,10 +150,33 @@ public partial class PhotogrammetryView
         return bmp;
     }
 
+    /// <summary>Cyan skin silhouette (opaque inside, transparent outside), built once per silhouette.</summary>
+    private BitmapSource SkinBitmap(SkinSilhouetteResult skin)
+    {
+        if (_cephSkinBitmapCache is { } c && ReferenceEquals(c.Skin, skin)) return c.Bitmap;
+        int w = skin.Width, h = skin.Height;
+        var buf = new byte[w * h * 4];
+        var sil = skin.Silhouette!;
+        for (int i = 0; i < w * h; i++)
+        {
+            if (sil[i] <= 0f) continue;
+            buf[4 * i] = 255;       // B
+            buf[4 * i + 1] = 255;   // G
+            buf[4 * i + 2] = 77;    // R (same 0.3 tint as the radiograph)
+            buf[4 * i + 3] = 255;
+        }
+        var bmp = BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgra32, null, buf, w * 4);
+        bmp.Freeze();
+        _cephSkinBitmapCache = (skin, bmp);
+        return bmp;
+    }
+
     // ── Panel ─────────────────────────────────────────────────────────────────────
     private void CephOverlayToggle_Changed(object s, RoutedEventArgs e)
     {
-        CephOverlayPanel.Visibility = BtnCephOverlay.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        bool open = BtnCephOverlay.IsChecked == true;
+        CephOverlayPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        if (open) ApplyDefaultReference();   // the soft-tissue model may have been segmented meanwhile
         UpdateCephPanel();
     }
 
@@ -182,9 +232,13 @@ public partial class PhotogrammetryView
         CephAgreeText.Text = $"Directions agree within {F(Math.Abs(reg.ScaleDifferenceAvsBPercent), "F2")}%";
         var z = s.ZoneMedianMm;
         CephZonesText.Text = $"Nose / lips / chin: {F(z[0], "F2")} / {F(z[1], "F2")} / {F(z[2], "F2")} mm";
+        bool skin = result?.Reference == OverlayReference.SkinMesh;
         string source = result?.Xray?.Scale?.Source ?? "?";
-        CephSourceText.Text = $"X-ray scale source: {source}";
-        CephSourceText.ToolTip = string.Join("\n", new[] { result?.RulerDiagnostic, $"Computed in {result?.ElapsedMs} ms" }
+        CephReferenceText.Text = skin ? "Reference: Skin mesh (CT, true mm)"
+                               : source == XrayScale.SourceRuler ? "Reference: X-ray (ruler)"
+                               : $"Reference: X-ray ({source})";
+        CephSourceText.Text = skin ? "Scale source: CT voxel spacing" : $"X-ray scale source: {source}";
+        CephSourceText.ToolTip = string.Join("\n", new[] { result?.ReferenceDiagnostic, $"Computed in {result?.ElapsedMs} ms" }
             .Concat(reg.Diagnostics).Where(t => !string.IsNullOrEmpty(t)));
         CephRotationText.Text = $"Rotation {F(reg.RotationDeg, "F1")}°, mirrored: {(reg.PhotoMirrored ? "yes" : "no")}";
     }
@@ -203,7 +257,8 @@ public partial class PhotogrammetryView
         var photo = Active;
         if (_cephBusy || photo == null) return;
         _cephTransientError = null;
-        var refusal = CephOverlayService.Validate(photo, Vm?.CephXrayProvider?.Invoke(), SelectedFacing, out var input);
+        var refusal = CephOverlayService.Validate(photo, SelectedReference, Vm?.CephXrayProvider?.Invoke(),
+                                                  Vm?.SoftTissueProvider?.Invoke(), SelectedFacing, out var input);
         if (refusal != null)
         {
             _cephTransientError = refusal.Message;
@@ -271,7 +326,8 @@ public partial class PhotogrammetryView
         }
 
         photo.NormalizeScale(newPx, 1.0);
-        _cephStatus = (photo, $"Scale set from radiograph overlay: {F(newPx, "F3")} px/mm");
+        string from = result.Reference == OverlayReference.SkinMesh ? "skin mesh" : "radiograph";
+        _cephStatus = (photo, $"Scale set from {from}: {F(newPx, "F3")} px/mm");
         FullRedraw();
         UpdateCephPanel();
     }
@@ -288,7 +344,7 @@ public partial class PhotogrammetryView
     {
         var dlg = new Window
         {
-            Title = "Apply scale from radiograph overlay",
+            Title = "Apply scale from reference overlay",
             Owner = Window.GetWindow(this),
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             SizeToContent = SizeToContent.WidthAndHeight,

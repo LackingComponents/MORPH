@@ -28,6 +28,7 @@ public partial class MainViewModel : ObservableObject
         InitNhpProfiles();
         InitializeThreeDModelsPanel();
         PhotogrammetrySpace.CephXrayProvider = () => CephXray;
+        PhotogrammetrySpace.SoftTissueProvider = () => SoftTissueModel;
     }
 
     // ÔöÇÔöÇÔöÇ Photogrammetry ÔöÇÔöÇÔöÇ
