@@ -101,6 +101,7 @@ public partial class MainViewModel
     [RelayCommand]
     private void Undo()
     {
+        if (IsPhotogrammetryOpen) { StatusText = PhotogrammetrySpace.Undo(); return; }
         if (_undoStack.Count == 0) return;
         _redoStack.Push(CreateStateSnapshot());
         RestoreStateSnapshot(_undoStack.Pop());
@@ -109,6 +110,7 @@ public partial class MainViewModel
     [RelayCommand]
     private void Redo()
     {
+        if (IsPhotogrammetryOpen) { StatusText = PhotogrammetrySpace.Redo(); return; }
         if (_redoStack.Count == 0) return;
         _undoStack.Push(CreateStateSnapshot());
         RestoreStateSnapshot(_redoStack.Pop());

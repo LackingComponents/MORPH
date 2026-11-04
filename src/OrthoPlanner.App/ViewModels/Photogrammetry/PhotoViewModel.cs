@@ -95,6 +95,9 @@ public partial class PhotoViewModel : ObservableObject
     // Radiograph overlay for this photo (memory only, not saved in the project yet)
     [ObservableProperty] private CephOverlayState? _cephOverlay;
 
+    /// <summary>Called with an action name before a user command changes this photo (undo hook, set by the section).</summary>
+    public Action<string>? BeforeUserChange { get; set; }
+
     // Annotation collections (rendered by code-behind on demand)
     public ObservableCollection<MeasurementViewModel>    Measurements     { get; } = new();
     public ObservableCollection<LineAnnotationViewModel> LineAnnotations  { get; } = new();
@@ -192,7 +195,11 @@ public partial class PhotoViewModel : ObservableObject
     }
 
     [RelayCommand]
-    public void Rotate90() => RotationAngle = (RotationAngle + 90.0) % 360.0;
+    public void Rotate90()
+    {
+        BeforeUserChange?.Invoke("Rotate 90°");
+        RotationAngle = (RotationAngle + 90.0) % 360.0;
+    }
 
     [RelayCommand]
     public void ResetView()
@@ -205,6 +212,8 @@ public partial class PhotoViewModel : ObservableObject
     [RelayCommand]
     public void ClearAnnotations()
     {
+        if (Measurements.Count + LineAnnotations.Count + AngleAnnotations.Count > 0)
+            BeforeUserChange?.Invoke("Clear annotations");
         Measurements.Clear();
         LineAnnotations.Clear();
         AngleAnnotations.Clear();

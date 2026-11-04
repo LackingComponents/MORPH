@@ -97,8 +97,8 @@ public partial class PhotogrammetryView : UserControl
     // ── DataContext / ViewModel wiring ────────────────────────────────────────────
     private void OnDataContextChanged(object s, DependencyPropertyChangedEventArgs e)
     {
-        if (e.OldValue is PhotogrammetryViewModel old) old.PropertyChanged -= OnVmChanged;
-        if (e.NewValue is PhotogrammetryViewModel nv)  nv.PropertyChanged  += OnVmChanged;
+        if (e.OldValue is PhotogrammetryViewModel old) { old.PropertyChanged -= OnVmChanged; old.HistoryRestored -= OnHistoryRestored; }
+        if (e.NewValue is PhotogrammetryViewModel nv)  { nv.PropertyChanged  += OnVmChanged; nv.HistoryRestored  += OnHistoryRestored; }
         FullRedraw();
         OnCephActivePhotoChanged();
     }
@@ -116,6 +116,14 @@ public partial class PhotogrammetryView : UserControl
             if (Vm?.ShowGridOverlay != true) BtnGridMove.IsChecked = false;   // move mode only with the grid on
             DrawGrid();
         }
+    }
+
+    /// <summary>Undo/redo restored a snapshot: drop half-finished tool clicks and redraw (view zoom/pan kept).</summary>
+    private void OnHistoryRestored(object? s, EventArgs e)
+    {
+        CloseCalibration(); CancelLineTool(); CancelAngleTool(); EndGridDrag();
+        SubscribePhoto(); FullRedraw();
+        OnCephActivePhotoChanged();
     }
 
     private PhotoViewModel? _sub;
@@ -671,6 +679,7 @@ public partial class PhotogrammetryView : UserControl
                 break;
 
             case PhotogrammetryToolMode.Horizon:
+                Vm.SaveUndo("Horizon correction");
                 ApplyHorizon(photo, imgP1, imgP2);
                 FullRedraw();
                 break;
@@ -682,6 +691,7 @@ public partial class PhotogrammetryView : UserControl
                         "Not calibrated", MessageBoxButton.OK, MessageBoxImage.Information);
                     break;
                 }
+                Vm.SaveUndo("Measurement");
                 photo.Measurements.Add(new MeasurementViewModel
                 {
                     Name       = $"M{photo.Measurements.Count+1}",
@@ -692,6 +702,7 @@ public partial class PhotogrammetryView : UserControl
                 break;
 
             case PhotogrammetryToolMode.DrawLine:
+                Vm.SaveUndo("Line");
                 photo.LineAnnotations.Add(new LineAnnotationViewModel
                 {
                     StartPoint = imgP1, EndPoint = imgP2, Color = "#FFFFCC00"
@@ -736,6 +747,7 @@ public partial class PhotogrammetryView : UserControl
         double cosA = Math.Clamp(dot / (mag1*mag2), -1.0, 1.0);
         double ang  = Math.Acos(cosA) * (180.0/Math.PI);
 
+        Vm?.SaveUndo("Angle");
         photo.AngleAnnotations.Add(new AngleAnnotationViewModel
         {
             Name    = $"A{photo.AngleAnnotations.Count+1}",
@@ -778,7 +790,11 @@ public partial class PhotogrammetryView : UserControl
         if (double.TryParse(CalibrationInput.Text.Replace(',', '.'),
                 NumberStyles.Any, CultureInfo.InvariantCulture, out double mm) && mm > 0)
         {
-            Active?.NormalizeScale(_pendingScalePixelDist, mm);
+            if (Active != null)
+            {
+                Vm?.SaveUndo("Scale");
+                Active.NormalizeScale(_pendingScalePixelDist, mm);
+            }
             CloseCalibration();
             FullRedraw();
         }

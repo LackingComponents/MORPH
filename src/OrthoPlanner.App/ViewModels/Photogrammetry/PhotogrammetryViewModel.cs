@@ -30,6 +30,46 @@ public partial class PhotogrammetryViewModel : ObservableObject
     /// <summary>Gives the Photo section access to the CT soft-tissue model (skin reference; set by MainViewModel).</summary>
     public Func<SegmentViewModel?>? SoftTissueProvider { get; set; }
 
+    // ── Undo / redo (Photogrammetry only; the 3D history is separate) ──
+    private readonly PhotoUndoHistory _history = new();
+
+    /// <summary>Raised after an undo/redo restored a snapshot, so the view redraws.</summary>
+    public event EventHandler? HistoryRestored;
+
+    public bool CanUndo => _history.CanUndo;
+    public bool CanRedo => _history.CanRedo;
+
+    public PhotogrammetryViewModel()
+    {
+        // Photo commands (Rotate 90°, Clear annotations) record undo through this hook.
+        Photos.CollectionChanged += (_, e) =>
+        {
+            if (e.NewItems == null) return;
+            foreach (PhotoViewModel p in e.NewItems) p.BeforeUserChange = SaveUndo;
+        };
+    }
+
+    /// <summary>Call BEFORE a user change in the photo section; <paramref name="action"/> is shown on undo.</summary>
+    public void SaveUndo(string action) => _history.SaveUndo(this, action);
+
+    /// <summary>Undoes the last photo change. Returns the status-bar text.</summary>
+    public string Undo()
+    {
+        bool restores = _history.CanUndo;
+        string text = _history.Undo(this);
+        if (restores) HistoryRestored?.Invoke(this, EventArgs.Empty);
+        return text;
+    }
+
+    /// <summary>Redoes the last undone photo change. Returns the status-bar text.</summary>
+    public string Redo()
+    {
+        bool restores = _history.CanRedo;
+        string text = _history.Redo(this);
+        if (restores) HistoryRestored?.Invoke(this, EventArgs.Empty);
+        return text;
+    }
+
     [RelayCommand]
     private void LoadPhotos()
     {
@@ -42,14 +82,13 @@ public partial class PhotogrammetryViewModel : ObservableObject
 
         if (dialog.ShowDialog() != true) return;
 
-        foreach (var file in dialog.FileNames)
-        {
-            // Avoid duplicates
-            if (Photos.Any(p => p.FilePath == file)) continue;
+        // Avoid duplicates
+        var newFiles = dialog.FileNames.Where(f => !Photos.Any(p => p.FilePath == f)).ToList();
+        if (newFiles.Count == 0) return;
+        SaveUndo(newFiles.Count == 1 ? "Load photo" : $"Load {newFiles.Count} photos");
 
-            var photoVm = new PhotoViewModel(file);
-            Photos.Add(photoVm);
-        }
+        foreach (var file in newFiles)
+            Photos.Add(new PhotoViewModel(file));
 
         // Select first photo if none selected
         if (ActivePhoto == null && Photos.Count > 0)
@@ -61,6 +100,7 @@ public partial class PhotogrammetryViewModel : ObservableObject
     {
         ActivePhoto = null;
         Photos.Clear();
+        _history.Clear();   // another project: its photos must not come back with Undo
     }
 
     /// <summary>Replaces the photo list with restored photos and selects the saved active one.</summary>
@@ -88,6 +128,7 @@ public partial class PhotogrammetryViewModel : ObservableObject
     private void RemovePhoto(PhotoViewModel photo)
     {
         if (photo == null) return;
+        SaveUndo($"Remove photo {photo.FileName}");
         int idx = Photos.IndexOf(photo);
         Photos.Remove(photo);
         if (ActivePhoto == photo)

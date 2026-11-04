@@ -271,6 +271,7 @@ public partial class PhotogrammetryView
         try
         {
             var result = await Task.Run(() => CephOverlayService.Run(input!));
+            Vm?.SaveUndo("Auto-align");   // also a failed run: it replaces the previous overlay
             photo.CephOverlay = new CephOverlayState(result);
         }
         catch (Exception ex)
@@ -325,6 +326,7 @@ public partial class PhotogrammetryView
             if (!ConfirmApply(string.Join("\n", lines))) return;
         }
 
+        Vm?.SaveUndo("Apply scale from overlay");
         photo.NormalizeScale(newPx, 1.0);
         string from = result.Reference == OverlayReference.SkinMesh ? "skin mesh" : "radiograph";
         _cephStatus = (photo, $"Scale set from {from}: {F(newPx, "F3")} px/mm");
@@ -336,6 +338,7 @@ public partial class PhotogrammetryView
     {
         if (Active == null) return;
         _cephTransientError = null;
+        if (Active.CephOverlay != null) Vm?.SaveUndo("Remove overlay");
         Active.CephOverlay = null;   // an applied scale is NOT undone; the property change redraws and refreshes the panel
     }
 
