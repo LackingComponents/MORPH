@@ -22,27 +22,93 @@
             <Setter Property="Margin"      Value="0,8,0,4"/>
         </Style>
 
-        <!-- Dark ComboBox items that stay readable in WPF default theming -->
+        <!-- Dark ComboBox: own template, because the default Windows template paints the closed box light grey
+             (ignoring Background) and the light text becomes unreadable when the combo is not focused. -->
         <Style x:Key="DarkCombo" TargetType="ComboBox">
-            <Setter Property="Background"            Value="#FF1A1F28"/>
+            <Setter Property="Background"            Value="#FF1E242C"/>
             <Setter Property="Foreground"            Value="#FFCDD3DC"/>
             <Setter Property="BorderBrush"           Value="#FF2D3340"/>
             <Setter Property="BorderThickness"       Value="1"/>
             <Setter Property="Padding"               Value="6,4"/>
             <Setter Property="Margin"                Value="0,0,0,6"/>
+            <Setter Property="Cursor"                Value="Hand"/>
+            <Setter Property="SnapsToDevicePixels"   Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton Focusable="False" ClickMode="Press"
+                                          Background="{TemplateBinding Background}"
+                                          BorderBrush="{TemplateBinding BorderBrush}"
+                                          BorderThickness="{TemplateBinding BorderThickness}"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="3">
+                                            <Path x:Name="arrow" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,0"
+                                                  Data="M 0 0 L 4 4 L 8 0 Z" Fill="#FF8A9BB0"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="bd" Property="BorderBrush" Value="#FF1B98E0"/>
+                                                <Setter TargetName="arrow" Property="Fill" Value="#FFCDD3DC"/>
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="bd" Property="BorderBrush" Value="#FF1B98E0"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ContentPresenter Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                              ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                              Margin="{TemplateBinding Padding}" IsHitTestVisible="False"
+                                              HorizontalAlignment="Left" VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                            <Popup x:Name="PART_Popup" Placement="Bottom" AllowsTransparency="True" Focusable="False"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}" PopupAnimation="Slide">
+                                <Border MinWidth="{TemplateBinding ActualWidth}" MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                                        Background="#FF1E242C" BorderBrush="#FF2D3340" BorderThickness="1" CornerRadius="0,0,3,3">
+                                    <ScrollViewer SnapsToDevicePixels="True">
+                                        <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
             <Setter Property="ItemContainerStyle">
                 <Setter.Value>
                     <Style TargetType="ComboBoxItem">
                         <Setter Property="Foreground"  Value="#FFCDD3DC"/>
-                        <Setter Property="Background"  Value="#FF1A1F28"/>
+                        <Setter Property="Background"  Value="#FF1E242C"/>
                         <Setter Property="Padding"     Value="8,5"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ComboBoxItem">
+                                    <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                                        <ContentPresenter/>
+                                    </Border>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
                         <Style.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="#FF1E3A52"/>
-                                <Setter Property="Foreground" Value="White"/>
-                            </Trigger>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter Property="Background" Value="#FF1B6EA0"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter Property="Background" Value="#FF1E3A52"/>
                                 <Setter Property="Foreground" Value="White"/>
                             </Trigger>
                         </Style.Triggers>
@@ -131,6 +197,42 @@
             <Setter Property="FontSize"     Value="11"/>
             <Setter Property="TextWrapping" Value="Wrap"/>
             <Setter Property="Margin"       Value="0,0,0,3"/>
+        </Style>
+
+        <!-- Primary blue action button (Load Photos, overlay panel, calibration popup) -->
+        <Style x:Key="PrimaryBtn" TargetType="Button">
+            <Setter Property="Background"      Value="#FF1B98E0"/>
+            <Setter Property="Foreground"      Value="White"/>
+            <Setter Property="FontWeight"      Value="SemiBold"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding"         Value="0,8"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <!-- background in its own border so "disabled" fades it but keeps the text white -->
+                            <Border x:Name="bg" Background="{TemplateBinding Background}" CornerRadius="3"/>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}" RecognizesAccessKey="True"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bg" Property="Background" Value="#FF3AA9EC"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="bg" Property="Background" Value="#FF1580C0"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="bg" Property="Background" Value="#FF1B98E0"/>
+                                <Setter TargetName="bg" Property="Opacity" Value="0.45"/>
+                                <Setter Property="Foreground" Value="White"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <!-- Compact action button for sidebar -->
@@ -233,8 +335,7 @@
 
                 <!-- Load Button -->
                 <Button Grid.Row="2" Content="＋  Load Photos…" Command="{Binding LoadPhotosCommand}"
-                        Background="#FF1B98E0" Foreground="White" FontWeight="Bold"
-                        Margin="8,8,8,4" Padding="0,8" BorderThickness="0" Cursor="Hand"/>
+                        Style="{StaticResource PrimaryBtn}" Margin="8,8,8,4"/>
 
                 <!-- ─── Active Photo Properties (visible when a photo is selected) ─── -->
                 <Border Grid.Row="3" BorderBrush="#FF2D3340" BorderThickness="0,1,0,0"
@@ -409,15 +510,10 @@
                                         </DockPanel>
                                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                             <Button x:Name="CalibrationApply" Content="Apply"
-                                                    Width="72" Padding="0,6"
-                                                    Background="#FF1B98E0" Foreground="White"
-                                                    BorderThickness="0" Cursor="Hand"
+                                                    Style="{StaticResource PrimaryBtn}" Width="72" Padding="0,6"
                                                     Click="CalibrationApply_Click"/>
                                             <Button x:Name="CalibrationCancel" Content="Cancel"
-                                                    Width="64" Padding="0,6" Margin="8,0,0,0"
-                                                    Background="#FF1E2530" Foreground="#FF8A9BB0"
-                                                    BorderThickness="1" BorderBrush="#FF2D3340"
-                                                    Cursor="Hand"
+                                                    Style="{StaticResource PrimaryBtn}" Width="64" Padding="0,6" Margin="8,0,0,0"
                                                     Click="CalibrationCancel_Click"/>
                                         </StackPanel>
                                     </StackPanel>
@@ -445,10 +541,15 @@
                                      Command="{Binding SelectToolCommand}" CommandParameter="DrawLine"
                                      ToolTip="Draw a persistent annotation line."/>
 
-                        <ToggleButton x:Name="BtnCephOverlay" Content="🩻  Reference overlay"
+                        <ToggleButton x:Name="BtnCephOverlay"
                                       Style="{StaticResource ToolToggle}" IsEnabled="False"
                                       Checked="CephOverlayToggle_Changed" Unchecked="CephOverlayToggle_Changed"
-                                      ToolTip="Overlay the CT skin silhouette or the lateral radiograph on this profile photo (automatic, no points to click)."/>
+                                      ToolTip="Overlay the CT skin silhouette or the lateral radiograph on this profile photo (automatic, no points to click).">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="⧉" FontFamily="Segoe UI Symbol" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="Reference overlay" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </ToggleButton>
 
                         <Separator Width="1" Background="#FF2D3340" Margin="8,4"/>
 
@@ -487,7 +588,9 @@
                 </Border.Effect>
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="14,12">
-                        <TextBlock Text="🩻 Reference overlay" Foreground="White" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,8"/>
+                        <TextBlock Foreground="White" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,8">
+                            <Run Text="⧉" FontFamily="Segoe UI Symbol"/><Run Text=" Reference overlay"/>
+                        </TextBlock>
                         <TextBlock Text="REFERENCE" Style="{StaticResource SectionLabel}"/>
                         <ComboBox x:Name="CephReferenceCombo" Style="{StaticResource DarkCombo}" SelectedIndex="0"
                                   SelectionChanged="CephReference_Changed">
@@ -505,8 +608,7 @@
                         </ComboBox>
 
                         <Button x:Name="CephAlignButton" Content="Auto-align" Click="CephAlign_Click"
-                                Background="#FF1B98E0" Foreground="White" FontWeight="SemiBold"
-                                BorderThickness="0" Padding="0,7" Margin="0,2,0,8" Cursor="Hand"/>
+                                Style="{StaticResource PrimaryBtn}" Margin="0,2,0,8"/>
 
                         <!-- Result -->
                         <TextBlock x:Name="CephErrorText" Style="{StaticResource CephText}" Foreground="#FFFF5A5A" Visibility="Collapsed"/>
@@ -545,9 +647,9 @@
                         </StackPanel>
 
                         <Button x:Name="CephApplyButton" Content="Apply scale to photo" Click="CephApply_Click"
-                                Style="{StaticResource SideBtn}" IsEnabled="False"/>
+                                Style="{StaticResource PrimaryBtn}" Margin="0,0,0,6" IsEnabled="False"/>
                         <Button x:Name="CephRemoveButton" Content="Remove overlay" Click="CephRemove_Click"
-                                Style="{StaticResource SideBtn}" IsEnabled="False"/>
+                                Style="{StaticResource PrimaryBtn}" Margin="0,0,0,6" IsEnabled="False"/>
                         <TextBlock x:Name="CephStatusText" Style="{StaticResource CephText}" Foreground="#FF4CAF50" Visibility="Collapsed"/>
                     </StackPanel>
                 </ScrollViewer>
