@@ -27,6 +27,7 @@ public partial class MainViewModel : ObservableObject
         InitNhpLedger();
         InitNhpProfiles();
         InitializeThreeDModelsPanel();
+        PhotogrammetrySpace.CephXrayProvider = () => CephXray;
     }
 
     // ÔöÇÔöÇÔöÇ Photogrammetry ÔöÇÔöÇÔöÇ

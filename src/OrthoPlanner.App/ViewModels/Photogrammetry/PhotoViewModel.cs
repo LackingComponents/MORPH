@@ -92,6 +92,9 @@ public partial class PhotoViewModel : ObservableObject
     [ObservableProperty] private double _pixelsPerMm = 0;
     [ObservableProperty] private bool   _isNormalized = false;
 
+    // Radiograph overlay for this photo (memory only, not saved in the project yet)
+    [ObservableProperty] private CephOverlayState? _cephOverlay;
+
     // Annotation collections (rendered by code-behind on demand)
     public ObservableCollection<MeasurementViewModel>    Measurements     { get; } = new();
     public ObservableCollection<LineAnnotationViewModel> LineAnnotations  { get; } = new();

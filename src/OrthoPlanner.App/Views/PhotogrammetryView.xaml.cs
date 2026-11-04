@@ -100,6 +100,7 @@ public partial class PhotogrammetryView : UserControl
         if (e.OldValue is PhotogrammetryViewModel old) old.PropertyChanged -= OnVmChanged;
         if (e.NewValue is PhotogrammetryViewModel nv)  nv.PropertyChanged  += OnVmChanged;
         FullRedraw();
+        OnCephActivePhotoChanged();
     }
 
     private void OnVmChanged(object? s, PropertyChangedEventArgs e)
@@ -108,6 +109,7 @@ public partial class PhotogrammetryView : UserControl
         {
             CloseCalibration(); CancelLineTool(); CancelAngleTool();
             SubscribePhoto(); FitToViewport(); FullRedraw();
+            OnCephActivePhotoChanged();
         }
         else if (e.PropertyName == nameof(PhotogrammetryViewModel.ShowGridOverlay))
         {
@@ -130,7 +132,9 @@ public partial class PhotogrammetryView : UserControl
             case nameof(PhotoViewModel.ImageSource):
                 FitToViewport(); FullRedraw(); break;
             case nameof(PhotoViewModel.RotationAngle):
-                FullRedraw(); break;
+                FullRedraw(); UpdateCephPanel(); break;
+            case nameof(PhotoViewModel.CephOverlay):
+                SubscribeCephState(); FullRedraw(); UpdateCephPanel(); break;
             case nameof(PhotoViewModel.ZoomScale) when Active?.ZoomScale == 0:
                 FitToViewport(); FullRedraw(); break;
         }
@@ -189,6 +193,7 @@ public partial class PhotogrammetryView : UserControl
         ClearOverlays();
         DrawGrid();
         RedrawAnnotations(photo);
+        DrawCephOverlay(photo);
 
         // Restore in-progress angle phase-1 line (if visible before redraw)
         if (_angleWaiting && _anglePersistLine1 == null)

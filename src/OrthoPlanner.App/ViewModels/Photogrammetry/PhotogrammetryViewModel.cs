@@ -24,6 +24,9 @@ public partial class PhotogrammetryViewModel : ObservableObject
     [ObservableProperty] private PhotogrammetryToolMode _activeTool = PhotogrammetryToolMode.Pan;
     [ObservableProperty] private bool _showGridOverlay = false;
 
+    /// <summary>Gives the Photo section access to the radiograph loaded in Cephalometry (set by MainViewModel).</summary>
+    public Func<Cephalometry.CephXrayImage?>? CephXrayProvider { get; set; }
+
     [RelayCommand]
     private void LoadPhotos()
     {

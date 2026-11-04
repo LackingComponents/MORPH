@@ -87,6 +87,52 @@
             </Setter>
         </Style>
 
+        <!-- Toolbar toggle (opens a panel, not a mouse tool): same look as ToolBtn -->
+        <Style x:Key="ToolToggle" TargetType="ToggleButton">
+            <Setter Property="Background"      Value="Transparent"/>
+            <Setter Property="Foreground"      Value="#FFCDD3DC"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush"     Value="Transparent"/>
+            <Setter Property="Padding"         Value="8,4"/>
+            <Setter Property="Margin"          Value="0,0,4,0"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="3">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#FF282C38"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#FF1E6EA0"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="#FF1B98E0"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#FF4A5260"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Small text styles for the ceph overlay panel -->
+        <Style x:Key="CephText" TargetType="TextBlock">
+            <Setter Property="Foreground"   Value="#FFCDD3DC"/>
+            <Setter Property="FontSize"     Value="11"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin"       Value="0,0,0,3"/>
+        </Style>
+
         <!-- Compact action button for sidebar -->
         <Style x:Key="SideBtn" TargetType="Button">
             <Setter Property="Background"      Value="#FF1E2530"/>
@@ -399,6 +445,11 @@
                                      Command="{Binding SelectToolCommand}" CommandParameter="DrawLine"
                                      ToolTip="Draw a persistent annotation line."/>
 
+                        <ToggleButton x:Name="BtnCephOverlay" Content="🩻  Ceph overlay"
+                                      Style="{StaticResource ToolToggle}" IsEnabled="False"
+                                      Checked="CephOverlayToggle_Changed" Unchecked="CephOverlayToggle_Changed"
+                                      ToolTip="Overlay the lateral radiograph on this profile photo (automatic, no points to click)."/>
+
                         <Separator Width="1" Background="#FF2D3340" Margin="8,4"/>
 
                         <CheckBox Content="Grid"
@@ -426,6 +477,74 @@
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            Visibility="{Binding ActivePhoto, Converter={StaticResource NullToVis}}"/>
             </Grid>
+
+            <!-- Ceph overlay panel: sibling of the viewport (its clicks never reach pan/tools) -->
+            <Border Grid.Row="1" x:Name="CephOverlayPanel" Visibility="Collapsed"
+                    HorizontalAlignment="Right" VerticalAlignment="Stretch" Width="300" Margin="0,8,8,8"
+                    Background="#F0141920" BorderBrush="#FF1B98E0" BorderThickness="1" CornerRadius="6">
+                <Border.Effect>
+                    <DropShadowEffect Color="#FF000000" BlurRadius="16" ShadowDepth="4" Opacity="0.6"/>
+                </Border.Effect>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="14,12">
+                        <TextBlock Text="🩻 Ceph overlay" Foreground="White" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,8"/>
+                        <TextBlock Style="{StaticResource CephText}" Foreground="#FF8A9BB0"
+                                   Text="Overlays the lateral radiograph on this profile photo by matching the soft-tissue profiles automatically (nasion to menton). No points to click."/>
+
+                        <TextBlock Text="PHOTO FACING" Style="{StaticResource SectionLabel}"/>
+                        <ComboBox x:Name="CephFacingCombo" Style="{StaticResource DarkCombo}" SelectedIndex="0">
+                            <ComboBoxItem Content="Auto"/>
+                            <ComboBoxItem Content="Left"/>
+                            <ComboBoxItem Content="Right"/>
+                        </ComboBox>
+
+                        <Button x:Name="CephAlignButton" Content="Auto-align" Click="CephAlign_Click"
+                                Background="#FF1B98E0" Foreground="White" FontWeight="SemiBold"
+                                BorderThickness="0" Padding="0,7" Margin="0,2,0,8" Cursor="Hand"/>
+
+                        <!-- Result -->
+                        <TextBlock x:Name="CephErrorText" Style="{StaticResource CephText}" Foreground="#FFFF5A5A" Visibility="Collapsed"/>
+                        <StackPanel x:Name="CephResultBlock" Visibility="Collapsed">
+                            <TextBlock x:Name="CephScaleText" Style="{StaticResource CephText}" FontWeight="SemiBold" Foreground="White"/>
+                            <TextBlock x:Name="CephFitText" Style="{StaticResource CephText}"/>
+                            <TextBlock x:Name="CephAgreeText" Style="{StaticResource CephText}"/>
+                            <TextBlock x:Name="CephZonesText" Style="{StaticResource CephText}"/>
+                            <TextBlock x:Name="CephSourceText" Style="{StaticResource CephText}"/>
+                            <TextBlock x:Name="CephRotationText" Style="{StaticResource CephText}"/>
+                        </StackPanel>
+                        <ItemsControl x:Name="CephWarningsList" Margin="0,4,0,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Foreground="#FFFF9F43" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4">
+                                        <Run Text="⚠ "/><Run Text="{Binding Mode=OneWay}"/>
+                                    </TextBlock>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <!-- Display -->
+                        <StackPanel x:Name="CephDisplayBlock" IsEnabled="False">
+                            <TextBlock Text="OPACITY" Style="{StaticResource SectionLabel}"/>
+                            <DockPanel Margin="0,0,0,6">
+                                <TextBlock x:Name="CephOpacityText" DockPanel.Dock="Right" Width="36" TextAlignment="Right"
+                                           Foreground="#FFAAB4C0" FontSize="11" VerticalAlignment="Center" Text="50%"/>
+                                <Slider x:Name="CephOpacitySlider" Minimum="0" Maximum="100" Value="50"
+                                        ValueChanged="CephOpacity_Changed" VerticalAlignment="Center"/>
+                            </DockPanel>
+                            <CheckBox x:Name="CephShowXray" Content="Show radiograph" IsChecked="True" Foreground="#FFCDD3DC"
+                                      Margin="0,0,0,4" Checked="CephDisplay_Changed" Unchecked="CephDisplay_Changed"/>
+                            <CheckBox x:Name="CephShowProfiles" Content="Show profiles" IsChecked="True" Foreground="#FFCDD3DC"
+                                      Margin="0,0,0,10" Checked="CephDisplay_Changed" Unchecked="CephDisplay_Changed"/>
+                        </StackPanel>
+
+                        <Button x:Name="CephApplyButton" Content="Apply scale to photo" Click="CephApply_Click"
+                                Style="{StaticResource SideBtn}" IsEnabled="False"/>
+                        <Button x:Name="CephRemoveButton" Content="Remove overlay" Click="CephRemove_Click"
+                                Style="{StaticResource SideBtn}" IsEnabled="False"/>
+                        <TextBlock x:Name="CephStatusText" Style="{StaticResource CephText}" Foreground="#FF4CAF50" Visibility="Collapsed"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
         </Grid>
     </Grid>
 </UserControl>
