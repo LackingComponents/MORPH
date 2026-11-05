@@ -72,6 +72,7 @@ public partial class PhotogrammetryView : UserControl
         PreviewKeyDown += View_PreviewKeyDown;
         ViewportHost.MouseDown += Viewport_MiddleDown;
         ViewportHost.MouseUp   += Viewport_MiddleUp;
+        InitProfilePanel();
     }
 
     // ── Keyboard shortcuts ────────────────────────────────────────────────────────
@@ -109,6 +110,7 @@ public partial class PhotogrammetryView : UserControl
         if (e.NewValue is PhotogrammetryViewModel nv)  { nv.PropertyChanged  += OnVmChanged; nv.HistoryRestored  += OnHistoryRestored; }
         FullRedraw();
         OnCephActivePhotoChanged();
+        UpdateProfilePanel();
     }
 
     private void OnVmChanged(object? s, PropertyChangedEventArgs e)
@@ -118,6 +120,7 @@ public partial class PhotogrammetryView : UserControl
             CloseCalibration(); CancelLineTool(); CancelAngleTool(); EndGridDrag();
             SubscribePhoto(); FitToViewport(); FullRedraw();
             OnCephActivePhotoChanged();
+            _profileError = null; EndLandmarkDrag(); UpdateProfilePanel();
         }
         else if (e.PropertyName == nameof(PhotogrammetryViewModel.ShowGridOverlay))
         {
@@ -132,6 +135,7 @@ public partial class PhotogrammetryView : UserControl
         CloseCalibration(); CancelLineTool(); CancelAngleTool(); EndGridDrag();
         SubscribePhoto(); FullRedraw();
         OnCephActivePhotoChanged();
+        EndLandmarkDrag(); UpdateProfilePanel();
     }
 
     private PhotoViewModel? _sub;
@@ -149,12 +153,16 @@ public partial class PhotogrammetryView : UserControl
             case nameof(PhotoViewModel.ImageSource):
                 FitToViewport(); FullRedraw(); break;
             case nameof(PhotoViewModel.RotationAngle):
-                FullRedraw(); UpdateCephPanel(); break;
+                FullRedraw(); UpdateCephPanel(); UpdateProfilePanel(); break;
             case nameof(PhotoViewModel.CephOverlay):
                 SubscribeCephState(); FullRedraw(); UpdateCephPanel(); break;
             case nameof(PhotoViewModel.PixelsPerMm):
             case nameof(PhotoViewModel.IsNormalized):
-                DrawGrid(); break;   // the grid switches between screen and mm
+                DrawGrid(); UpdateProfilePanel(); break;   // the grid switches between screen and mm
+            case nameof(PhotoViewModel.IsNhpOriented):
+                UpdateProfilePanel(); break;
+            case nameof(PhotoViewModel.ProfileLandmarks):
+                FullRedraw(); UpdateProfilePanel(); break;
             case nameof(PhotoViewModel.ZoomScale) when Active?.ZoomScale == 0:
                 FitToViewport(); FullRedraw(); break;
         }
@@ -214,6 +222,7 @@ public partial class PhotogrammetryView : UserControl
         DrawGrid();
         RedrawAnnotations(photo);
         DrawCephOverlay(photo);
+        DrawProfileLayer(photo);
 
         // Restore in-progress angle phase-1 line (if visible before redraw)
         if (_angleWaiting && _anglePersistLine1 == null)
@@ -542,7 +551,14 @@ public partial class PhotogrammetryView : UserControl
             return;
         }
 
-        // ── Priority 3: start pan or start first click of tool ────────────────────
+        // ── Priority 3: drag a profile landmark (snaps to the contour, Alt = free) ──
+        if (TryStartLandmarkDrag(sp))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        // ── Priority 4: start pan or start first click of tool ────────────────────
         if (Vm!.ActiveTool == PhotogrammetryToolMode.Pan)
         {
             StartPan(sp);
@@ -628,6 +644,10 @@ public partial class PhotogrammetryView : UserControl
             return;
         }
 
+        if (_lmDragId != null && e.LeftButton == MouseButtonState.Pressed && DragLandmark(sp)) return;
+        if (!_isPanning && !GridMoveMode && !_lineWaiting && !_angleWaiting)
+            ViewportHost.Cursor = LandmarkAt(sp) != null ? Cursors.Hand : null;   // hint: landmarks can be dragged
+
         // Pan drag
         if (_isPanning && (e.LeftButton == MouseButtonState.Pressed || e.MiddleButton == MouseButtonState.Pressed))
         {
@@ -669,7 +689,7 @@ public partial class PhotogrammetryView : UserControl
         }
     }
 
-    private void Viewport_MouseUp(object s, MouseButtonEventArgs e) { EndGridDrag(); StopPan(); }
+    private void Viewport_MouseUp(object s, MouseButtonEventArgs e) { EndLandmarkDrag(); EndGridDrag(); StopPan(); }
 
     // ─────────────────────────────────────────────────────────────────────────────
     //  TOOL FINALISATION

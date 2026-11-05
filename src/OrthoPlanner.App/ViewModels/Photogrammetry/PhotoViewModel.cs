@@ -128,6 +128,9 @@ public partial class PhotoViewModel : ObservableObject
         IsNhpOriented = true;
     }
 
+    // Soft-tissue profile landmarks (immutable snapshots; memory only, not saved in the project yet)
+    [ObservableProperty] private ProfileLandmarksViewModel? _profileLandmarks;
+
     // Radiograph overlay for this photo (memory only, not saved in the project yet)
     [ObservableProperty] private CephOverlayState? _cephOverlay;
 

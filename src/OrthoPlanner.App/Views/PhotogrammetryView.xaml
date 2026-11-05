@@ -618,6 +618,11 @@
                                    VerticalAlignment="Center" Margin="6,0,4,0"
                                    Visibility="{Binding ActivePhoto.NhpBadgeText, Converter={StaticResource NotNullToVis}}"/>
 
+                        <!-- Profile analysis (landmarks + facial thirds) -->
+                        <Button x:Name="BtnProfile" Content="Profile" Style="{StaticResource PrimaryBtn}" Padding="12,4"
+                                Margin="6,0,0,0" IsEnabled="False" Click="ProfileToggle_Click"
+                                ToolTip="Profile analysis: soft-tissue landmarks and facial thirds in mm (needs scale and NHP)."/>
+
                         <!-- Quick opacity popup (same control as the 3D models menu) -->
                         <Popup x:Name="OverlayQuickPopup" PlacementTarget="{Binding ElementName=BtnCephOverlay}"
                                Placement="Bottom" VerticalOffset="4" StaysOpen="False" AllowsTransparency="True">
@@ -766,6 +771,7 @@
                   MouseLeftButtonDown="Viewport_MouseDown"
                   MouseLeftButtonUp="Viewport_MouseUp"
                   MouseMove="Viewport_MouseMove"
+                  MouseRightButtonUp="Viewport_RightUp"
                   SizeChanged="Viewport_SizeChanged">
 
                 <Canvas x:Name="MasterCanvas" IsHitTestVisible="False"/>
@@ -775,6 +781,70 @@
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            Visibility="{Binding ActivePhoto, Converter={StaticResource NullToVis}}"/>
             </Grid>
+
+            <!-- Profile analysis panel (same style as the overlay panel) -->
+            <Border Grid.Row="1" x:Name="ProfilePanel" Visibility="Collapsed"
+                    HorizontalAlignment="Right" VerticalAlignment="Stretch" Width="300" Margin="0,8,8,8"
+                    Background="#F0141920" BorderBrush="#FF1B98E0" BorderThickness="1" CornerRadius="6">
+                <Border.Effect>
+                    <DropShadowEffect Color="#FF000000" BlurRadius="16" ShadowDepth="4" Opacity="0.6"/>
+                </Border.Effect>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="14,12">
+                        <ContentControl Style="{StaticResource PanelHeaderBar}" ButtonBase.Click="ProfilePanelClose_Click">
+                            <TextBlock Text="Profile analysis"/>
+                        </ContentControl>
+                        <TextBlock Style="{StaticResource CephText}" Foreground="#FF8A9BB0"
+                                   Text="Soft-tissue landmarks on the photo profile and facial thirds as vertical distances in the NHP frame."/>
+                        <TextBlock x:Name="ProfileReasonText" Style="{StaticResource CephText}" Foreground="#FFFF9F43" Visibility="Collapsed"/>
+                        <Button x:Name="ProfileDetectButton" Content="Detect landmarks" Click="ProfileDetect_Click"
+                                Style="{StaticResource PrimaryBtn}" Margin="0,4,0,8" IsEnabled="False"/>
+                        <TextBlock x:Name="ProfileErrorText" Style="{StaticResource CephText}" Foreground="#FFFF5A5A" Visibility="Collapsed"/>
+
+                        <StackPanel x:Name="ProfileResultBlock" Visibility="Collapsed">
+                            <TextBlock x:Name="ProfileNhpWarning" Style="{StaticResource CephText}" Foreground="#FFFF9F43" Visibility="Collapsed"
+                                       Text="⚠ The photo is no longer NHP-oriented (rotated after NHP): press NHP again before reading the thirds."/>
+                            <TextBlock Text="FACIAL THIRDS (VERTICAL, NHP)" Style="{StaticResource SectionLabel}"/>
+                            <ItemsControl x:Name="ProfileThirdsList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,1,0,1">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="62"/>
+                                                <ColumnDefinition Width="38"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <TextBlock Text="{Binding Label}" Foreground="#FFCDD3DC" FontSize="11"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding MmText}" Foreground="White" FontSize="11"
+                                                       FontWeight="SemiBold" TextAlignment="Right"/>
+                                            <TextBlock Grid.Column="2" Text="{Binding PercentText}" Foreground="#FF8A9BB0" FontSize="11"
+                                                       TextAlignment="Right"/>
+                                            <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="{Binding Warning}" Foreground="#FFFF9F43"
+                                                       FontSize="10" TextWrapping="Wrap"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <CheckBox x:Name="ProfileShowThirds" Content="Show thirds" IsChecked="True" Foreground="#FFCDD3DC"
+                                      Margin="0,8,0,4" Checked="ProfileShowThirds_Changed" Unchecked="ProfileShowThirds_Changed"/>
+                            <TextBlock Text="LANDMARKS" Style="{StaticResource SectionLabel}"/>
+                            <ItemsControl x:Name="ProfileLandmarkList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" Foreground="#FFAAB4C0" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,2"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Style="{StaticResource CephText}" Foreground="#FF8A9BB0" Margin="0,6,0,0"
+                                       Text="White = automatic, orange = low confidence (check), blue = edited. Drag a point: it snaps to the profile (hold Alt to place it freely). Right-click a point: Reset to automatic."/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
 
             <!-- Ceph overlay panel: sibling of the viewport (its clicks never reach pan/tools) -->
             <Border Grid.Row="1" x:Name="CephOverlayPanel" Visibility="Collapsed"

@@ -18,7 +18,8 @@ public sealed class PhotoUndoHistory
 
     private sealed record PhotoState(
         IReadOnlyList<MeasurementCopy> Measurements, IReadOnlyList<LineCopy> Lines, IReadOnlyList<AngleCopy> Angles,
-        double PixelsPerMm, bool IsNormalized, double RotationAngle, CephOverlayState? CephOverlay);
+        double PixelsPerMm, bool IsNormalized, double RotationAngle, CephOverlayState? CephOverlay,
+        ProfileLandmarksViewModel? Landmarks);
 
     private sealed record Snapshot(
         string Action, IReadOnlyList<PhotoViewModel> Photos, PhotoViewModel? Active,
@@ -84,7 +85,7 @@ public sealed class PhotoUndoHistory
         p.Measurements.Select(m => new MeasurementCopy(m.Name, m.StartPoint, m.EndPoint, m.DistanceMm)).ToList(),
         p.LineAnnotations.Select(l => new LineCopy(l.StartPoint, l.EndPoint, l.Color)).ToList(),
         p.AngleAnnotations.Select(a => new AngleCopy(a.Name, a.L1Start, a.L1End, a.L2Start, a.L2End, a.AngleDeg)).ToList(),
-        p.PixelsPerMm, p.IsNormalized, p.RotationAngle, p.CephOverlay);
+        p.PixelsPerMm, p.IsNormalized, p.RotationAngle, p.CephOverlay, p.ProfileLandmarks);
 
     private static void Restore(PhotogrammetryViewModel vm, Snapshot s)
     {
@@ -117,5 +118,6 @@ public sealed class PhotoUndoHistory
         p.IsNormalized = st.IsNormalized;
         p.RotationAngle = st.RotationAngle;
         p.CephOverlay = st.CephOverlay;
+        p.ProfileLandmarks = st.Landmarks;   // immutable snapshot: the reference is enough
     }
 }

@@ -126,7 +126,7 @@ public partial class PhotogrammetryView
         {
             Points = new PointCollection(pts.Select(I2S)),
             Stroke = new SolidColorBrush(color),
-            StrokeThickness = 1.5,
+            StrokeThickness = 1.0,   // thin profile style shared with the Profile analysis layer
             IsHitTestVisible = false,
         };
         Panel.SetZIndex(line, CephProfileZ);
