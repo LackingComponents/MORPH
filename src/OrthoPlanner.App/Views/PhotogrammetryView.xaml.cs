@@ -17,8 +17,10 @@ namespace OrthoPlanner.App.Views;
 ///   Screen = MasterCanvas pixels (origin top-left of ViewportHost)
 ///   Image  = BitmapSource pixels (0..PixelWidth , 0..PixelHeight)
 ///
-///   screenPt = imagePt * _zoom + (_offX, _offY)
-///   imagePt  = (screenPt - (_offX, _offY)) / _zoom
+///   screenPt = R(rotation about the image centre)(imagePt) * _zoom + (_offX, _offY)
+///   imagePt  = inverse of the above (see ImageToScreen)
+///   The photo rotation (RotationAngle) is a true scene rotation: the photo, annotations, overlay and mouse
+///   input all go through ImageToScreen; only the grid stays screen-aligned.
 ///
 /// Mouse interaction model (unified 2-click for all tools):
 ///   • Pan  : left-drag as usual.
@@ -462,9 +464,26 @@ public partial class PhotogrammetryView : UserControl
     }
 
     // ── Coordinate helpers ────────────────────────────────────────────────────────
-    private Point I2S(Point p) => new(p.X * _zoom + _offX, p.Y * _zoom + _offY);
-    private Point S2I(Point p) => new((p.X - _offX) / Math.Max(1e-9, _zoom),
-                                      (p.Y - _offY) / Math.Max(1e-9, _zoom));
+    /// <summary>Image px -> screen px: rotate about the image centre (RotationAngle), then zoom and offset.</summary>
+    private Matrix ImageToScreen()
+    {
+        var m = Matrix.Identity;
+        if (Active is { ImageSource: { } img } photo && photo.RotationAngle != 0)
+            m.RotateAt(photo.RotationAngle, img.PixelWidth / 2.0, img.PixelHeight / 2.0);
+        m.Scale(_zoom, _zoom);
+        m.Translate(_offX, _offY);
+        return m;
+    }
+
+    private Point I2S(Point p) => ImageToScreen().Transform(p);
+
+    private Point S2I(Point p)
+    {
+        var m = ImageToScreen();
+        if (!m.HasInverse) return p;
+        m.Invert();
+        return m.Transform(p);
+    }
     private static Point Lerp(Point a, Point b) => new((a.X+b.X)/2,(a.Y+b.Y)/2);
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -783,7 +802,8 @@ public partial class PhotogrammetryView : UserControl
     // ── Horizon ───────────────────────────────────────────────────────────────────
     private static void ApplyHorizon(PhotoViewModel photo, Point p1, Point p2)
     {
-        double deg  = Math.Atan2(p2.Y - p1.Y, p2.X - p1.X) * (180.0/Math.PI);
+        // p1/p2 are image pixels (S2I removes the rotation): on-screen angle = image angle + current rotation
+        double deg  = Math.Atan2(p2.Y - p1.Y, p2.X - p1.X) * (180.0/Math.PI) + photo.RotationAngle;
         double corr = deg % 180.0;
         if (corr >  90) corr -= 180;
         if (corr < -90) corr += 180;

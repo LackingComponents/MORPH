@@ -85,7 +85,7 @@ public partial class PhotogrammetryView
     private void DrawCephOverlay(PhotoViewModel photo)
     {
         var state = photo.CephOverlay;
-        if (state == null || photo.RotationAngle != 0) return; // rotation is visual only: overlay would be misplaced
+        if (state == null) return;
         var result = state.Result;
 
         if (state.IsVisible && result.HasMatrix)
@@ -102,10 +102,9 @@ public partial class PhotogrammetryView
                 Stretch = Stretch.Fill,
                 Opacity = Math.Clamp(state.Opacity, 0, 1),
                 IsHitTestVisible = false,
-                // reference px -> photo px (matrix, mirror included) -> screen (zoom + offset)
-                RenderTransform = new MatrixTransform(new Matrix(
-                    m[0] * _zoom, m[3] * _zoom, m[1] * _zoom, m[4] * _zoom,
-                    m[2] * _zoom + _offX, m[5] * _zoom + _offY)),
+                // reference px -> photo px (matrix, mirror included) -> screen (rotation, zoom, offset)
+                RenderTransform = new MatrixTransform(
+                    new Matrix(m[0], m[3], m[1], m[4], m[2], m[5]) * ImageToScreen()),
             };
             Canvas.SetLeft(img, 0);
             Canvas.SetTop(img, 0);
@@ -292,6 +291,135 @@ public partial class PhotogrammetryView
         OverlayQuickSlider.Value = Math.Round(Math.Clamp(1 - y / h, 0, 1) * 100);
     }
 
+    // ── NHP pitch correction ──────────────────────────────────────────────────────
+    private const string NhpButtonTooltip = "Correct the pitch of the photo to the natural head position set in the 3D view. " +
+                                            "Measurements in mm are not changed by the rotation.";
+    private const string NhpNotSetMessage =
+        "Warning: the Natural Head Position (NHP) has not been set in the 3D view.\n" +
+        "Do you want to set it now?\n" +
+        "Yes: closes Photogrammetry and opens the NHP menu: set the NHP, press Commit, then come back and press NHP again.\n" +
+        "No: the photo is assumed to have been taken in NHP and will not be rotated.";
+    private const string NhpOpenedStatus = "Set the NHP, press Commit, then reopen Photogrammetry and press NHP.";
+    private const string NhpManualStatus = "Open the ✛ NHP menu in the top bar, set the NHP and press Commit.";
+
+    private (PhotoViewModel Photo, string Text)? _nhpNote;   // last NHP message, shown in the panel for that photo
+
+    private void UpdateNhpControls()
+    {
+        var photo = Active;
+        var result = photo?.CephOverlay?.Result;
+        BtnNhp.IsEnabled = !_cephBusy && result is { Reference: OverlayReference.SkinMesh, HasMatrix: true };
+        BtnNhp.ToolTip = result is { Reference: OverlayReference.Xray }
+            ? "NHP pitch correction uses the skin mesh reference" : NhpButtonTooltip;
+        bool show = _nhpNote is { } n && ReferenceEquals(n.Photo, photo);
+        CephNhpText.Text = show ? _nhpNote!.Value.Text : "";
+        CephNhpText.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async void Nhp_Click(object s, RoutedEventArgs e)
+    {
+        var photo = Active;
+        var vm = Vm;
+        if (photo == null || vm == null || _cephBusy) return;
+        if (vm.NhpProvider?.Invoke() is not { } nhp)
+        {
+            ShowNhpNote(photo, "NHP not applied: the NHP state of the 3D view is not available.");
+            return;
+        }
+        if (!nhp.IsSet) { AskToSetNhp(photo); return; }
+        if (vm.SoftTissueProvider?.Invoke() is not { } soft || !CephOverlayService.HasSkinMesh(soft))
+        {
+            ShowNhpNote(photo, "NHP not applied: no skin mesh (segment the soft tissue).");
+            return;
+        }
+
+        var notes = new List<string>();
+        var result = photo.CephOverlay?.Result;
+        if (result?.SkinAffine is not { } built || !built.AsSpan().SequenceEqual(CephOverlayService.SkinBuildAffine(soft)))
+        {
+            notes.Add("The skin model changed after the overlay: Auto-align was run again.");
+            bool aligned = await RunAutoAlignAsync(photo, OverlayReference.SkinMesh);
+            result = photo.CephOverlay?.Result;
+            if (!aligned || result is not { Reference: OverlayReference.SkinMesh, HasMatrix: true, SkinAffine: not null })
+            {
+                ShowNhpNote(photo, "NHP not applied: Auto-align on the new skin model failed (see the message above).");
+                return;
+            }
+        }
+        if (nhp.IsDirty) notes.Add("NHP has uncommitted changes: the last committed NHP is used.");
+
+        double pitch;
+        try
+        {
+            var committed = System.Windows.Media.Media3D.Matrix3D.Multiply(nhp.Committed, soft.LocalTransform.Value);
+            pitch = CephOverlayService.NhpPitchDegrees(result.Registration!.XrayToPhotoMatrix, result.SkinAffine!,
+                                                       CephOverlayService.ToAffine(committed));
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            ShowNhpNote(photo, $"NHP not applied: {ex.Message}.");
+            return;
+        }
+
+        vm.SaveUndo("NHP pitch");
+        photo.SetNhpOrientation(pitch, PhotoViewModel.NhpSource3D);
+        notes.Insert(0, $"Pitch corrected by {F(pitch, "+0.0;-0.0")}° (3D NHP).");
+        ShowNhpNote(photo, string.Join("\n", notes));
+        SetMainStatus($"NHP: pitch corrected by {F(pitch, "+0.0;-0.0")}°.");
+        FullRedraw();
+    }
+
+    private void ShowNhpNote(PhotoViewModel photo, string text)
+    {
+        _nhpNote = (photo, text);
+        UpdateCephPanel();
+    }
+
+    /// <summary>NHP not set: offer to open the NHP menu, otherwise mark the photo as assumed in NHP.</summary>
+    private void AskToSetNhp(PhotoViewModel photo)
+    {
+        var owner = Window.GetWindow(this);
+        var answer = owner != null
+            ? MessageBox.Show(owner, NhpNotSetMessage, "NHP not set", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No)
+            : MessageBox.Show(NhpNotSetMessage, "NHP not set", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes)
+        {
+            photo.SetNhpOrientation(null, PhotoViewModel.NhpSourceAssumed);
+            ShowNhpNote(photo, "Photo assumed in NHP: not rotated.");
+            return;
+        }
+
+        if (Application.Current?.MainWindow?.DataContext is not OrthoPlanner.App.ViewModels.MainViewModel main)
+        {
+            System.Diagnostics.Debug.WriteLine("PhotogrammetryView: main window view model not found; cannot close Photogrammetry.");
+            ShowNhpNote(photo, NhpManualStatus);
+            return;
+        }
+        main.ClosePhotogrammetryCommand.Execute(null);
+        // After the photo section has closed: open the NHP popup of the main toolbar (bound to the toggle's IsChecked).
+        Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            var window = Application.Current.MainWindow;
+            if (window?.FindName("NhpToggleButton") is System.Windows.Controls.Primitives.ToggleButton toggle)
+            {
+                toggle.IsChecked = true;
+                main.StatusText = NhpOpenedStatus;
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine("PhotogrammetryView: NhpToggleButton not found in " +
+                                                   (window?.GetType().Name ?? "(no main window)"));
+                main.StatusText = NhpManualStatus;
+            }
+        }), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+    }
+
+    private static void SetMainStatus(string text)
+    {
+        if (Application.Current?.MainWindow?.DataContext is OrthoPlanner.App.ViewModels.MainViewModel main) main.StatusText = text;
+        else System.Diagnostics.Debug.WriteLine($"PhotogrammetryView: status bar not available: {text}");
+    }
+
     // ── Panel ─────────────────────────────────────────────────────────────────────
     private void CephOverlayToggle_Changed(object s, RoutedEventArgs e)
     {
@@ -341,8 +469,6 @@ public partial class PhotogrammetryView
 
         FillResultBlock(reg, result);
         var warnings = result?.AllWarnings.ToList() ?? new List<string>();
-        if (state != null && photo!.RotationAngle != 0)
-            warnings.Insert(0, "The photo has been rotated: overlay hidden. Reset the rotation to 0° to see it.");
         CephWarningsList.ItemsSource = warnings;
 
         _cephPanelUpdating = true;
@@ -354,6 +480,7 @@ public partial class PhotogrammetryView
         _cephPanelUpdating = false;
 
         SyncOverlayQuickControls();
+        UpdateNhpControls();
         CephApplyButton.IsEnabled = !_cephBusy && result?.CanApplyScale == true;
         CephRemoveButton.IsEnabled = !_cephBusy && state != null;
         bool showStatus = _cephStatus is { } st && ReferenceEquals(st.Photo, photo);
@@ -396,16 +523,21 @@ public partial class PhotogrammetryView
 
     private async void CephAlign_Click(object s, RoutedEventArgs e)
     {
-        var photo = Active;
-        if (_cephBusy || photo == null) return;
+        if (Active is { } photo) await RunAutoAlignAsync(photo, SelectedReference);
+    }
+
+    /// <summary>Validates, runs and stores an overlay for <paramref name="photo"/>. True when a new overlay was stored.</summary>
+    private async Task<bool> RunAutoAlignAsync(PhotoViewModel photo, OverlayReference reference)
+    {
+        if (_cephBusy) return false;
         _cephTransientError = null;
-        var refusal = CephOverlayService.Validate(photo, SelectedReference, Vm?.CephXrayProvider?.Invoke(),
+        var refusal = CephOverlayService.Validate(photo, reference, Vm?.CephXrayProvider?.Invoke(),
                                                   Vm?.SoftTissueProvider?.Invoke(), SelectedFacing, out var input);
         if (refusal != null)
         {
             _cephTransientError = refusal.Message;
             UpdateCephPanel();
-            return;
+            return false;
         }
 
         _cephBusy = true;
@@ -415,10 +547,12 @@ public partial class PhotogrammetryView
             var result = await Task.Run(() => CephOverlayService.Run(input!));
             Vm?.SaveUndo("Auto-align");   // also a failed run: it replaces the previous overlay
             photo.CephOverlay = new CephOverlayState(result);
+            return true;
         }
         catch (Exception ex)
         {
             _cephTransientError = $"Overlay failed unexpectedly: {ex.Message}";
+            return false;
         }
         finally
         {

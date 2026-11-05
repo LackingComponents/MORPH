@@ -16,6 +16,12 @@ public enum PhotogrammetryToolMode
     Angle      // draw a line, read its angle from horizontal
 }
 
+/// <summary>
+/// NHP state of the 3D view as seen by the photo section. <see cref="Committed"/> is the NHP matrix of the active
+/// (committed) profile; <see cref="IsSet"/> is false when no NHP has been committed or it is all zeros.
+/// </summary>
+public sealed record NhpSnapshot(bool IsSet, System.Windows.Media.Media3D.Matrix3D Committed, bool IsDirty);
+
 public partial class PhotogrammetryViewModel : ObservableObject
 {
     public ObservableCollection<PhotoViewModel> Photos { get; } = new();
@@ -29,6 +35,9 @@ public partial class PhotogrammetryViewModel : ObservableObject
 
     /// <summary>Gives the Photo section access to the CT soft-tissue model (skin reference; set by MainViewModel).</summary>
     public Func<SegmentViewModel?>? SoftTissueProvider { get; set; }
+
+    /// <summary>Gives the Photo section the committed NHP of the 3D view (set by MainViewModel).</summary>
+    public Func<NhpSnapshot>? NhpProvider { get; set; }
 
     // ── Undo / redo (Photogrammetry only; the 3D history is separate) ──
     private readonly PhotoUndoHistory _history = new();

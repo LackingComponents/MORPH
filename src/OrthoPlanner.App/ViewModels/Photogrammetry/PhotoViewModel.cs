@@ -92,6 +92,42 @@ public partial class PhotoViewModel : ObservableObject
     [ObservableProperty] private double _pixelsPerMm = 0;
     [ObservableProperty] private bool   _isNormalized = false;
 
+    // NHP orientation (memory only): set by the NHP button, cleared by any other rotation change
+    public const string NhpSource3D = "3D NHP";
+    public const string NhpSourceAssumed = "Photo assumed in NHP";
+    [ObservableProperty] private bool _isNhpOriented;
+    [ObservableProperty] private string? _nhpSource;
+    private bool _applyingNhp;
+
+    /// <summary>Toolbar badge, or null when the photo is not NHP-oriented.</summary>
+    public string? NhpBadgeText => !IsNhpOriented ? null
+        : NhpSource == NhpSourceAssumed ? "NHP ✓ (assumed)" : "NHP ✓ (3D NHP)";
+
+    partial void OnIsNhpOrientedChanged(bool value) => OnPropertyChanged(nameof(NhpBadgeText));
+    partial void OnNhpSourceChanged(string? value) => OnPropertyChanged(nameof(NhpBadgeText));
+
+    // Rotate 90°, Horizon, undo or any other rotation change invalidates the NHP orientation.
+    partial void OnRotationAngleChanged(double value)
+    {
+        if (!_applyingNhp) IsNhpOriented = false;
+    }
+
+    /// <summary>Marks the photo as NHP-oriented; <paramref name="rotationDeg"/> null keeps the current rotation.</summary>
+    public void SetNhpOrientation(double? rotationDeg, string source)
+    {
+        _applyingNhp = true;
+        try
+        {
+            if (rotationDeg is double r) RotationAngle = (r % 360.0 + 360.0) % 360.0;
+        }
+        finally
+        {
+            _applyingNhp = false;
+        }
+        NhpSource = source;
+        IsNhpOriented = true;
+    }
+
     // Radiograph overlay for this photo (memory only, not saved in the project yet)
     [ObservableProperty] private CephOverlayState? _cephOverlay;
 

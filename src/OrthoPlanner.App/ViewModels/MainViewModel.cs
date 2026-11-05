@@ -29,6 +29,7 @@ public partial class MainViewModel : ObservableObject
         InitializeThreeDModelsPanel();
         PhotogrammetrySpace.CephXrayProvider = () => CephXray;
         PhotogrammetrySpace.SoftTissueProvider = () => SoftTissueModel;
+        PhotogrammetrySpace.NhpProvider = () => _activeNhpProfile is { IsCommitted: true } p && new[] { p.Lateral, p.Anteroposterior, p.Vertical, p.Roll, p.Pitch, p.Yaw }.Any(v => Math.Abs(v) > 0.01) ? new(true, BuildNhpMatrix(p.Lateral, p.Anteroposterior, p.Vertical, p.Roll, p.Pitch, p.Yaw), IsNhpDirty) : new(false, System.Windows.Media.Media3D.Matrix3D.Identity, IsNhpDirty);
     }
 
     // ÔöÇÔöÇÔöÇ Photogrammetry ÔöÇÔöÇÔöÇ

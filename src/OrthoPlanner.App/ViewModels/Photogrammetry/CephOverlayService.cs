@@ -53,6 +53,9 @@ public sealed record CephOverlayResult(
                              (Reference == OverlayReference.SkinMesh ? Skin?.Silhouette is not null : Xray is not null);
 
     public bool CanApplyScale => Registration is { Success: true } r && double.IsFinite(r.PhotoPixelsPerMm) && r.PhotoPixelsPerMm > 0;
+
+    /// <summary>Skin mesh only: transform the silhouette was built with (row-major 4x4, column vectors).</summary>
+    public double[]? SkinAffine { get; init; }
 }
 
 /// <summary>Per-photo overlay state, kept in memory only (saving it in the project is T4).</summary>
@@ -109,7 +112,7 @@ public static class CephOverlayService
             if (!HasSkinMesh(softTissue))
                 return CephOverlayResult.Refused(reference,
                     "No skin mesh: segment the soft tissue (Segmentation section) or choose X-ray.");
-            skin = new SkinInput(softTissue!, softTissue!.Vertices!, ToAffine(softTissue.Transform.Value));
+            skin = new SkinInput(softTissue!, softTissue!.Vertices!, SkinBuildAffine(softTissue));
         }
         else
         {
@@ -120,17 +123,23 @@ public static class CephOverlayService
             usedXray = xray;
             scale = s;
         }
+        // The view rotation is irrelevant: registration works on unrotated image pixels.
         if (photo?.ImageSource is not BitmapSource image) return CephOverlayResult.Refused(reference, "No photo.");
-        if (photo.RotationAngle != 0)
-            return CephOverlayResult.Refused(reference, "Reset the photo rotation to 0° before the overlay (rotation is " +
-                                             "visual only and would misplace the overlay).");
         if (!image.IsFrozen) image = (BitmapSource)image.GetCurrentValueAsFrozen();
         input = new Input(image, reference, facing, usedXray, scale, skin);
         return null;
     }
 
+    /// <summary>
+    /// Transform the skin silhouette is built with: the model's own LocalTransform, WITHOUT the NHP rotation. In the
+    /// CT frame the field-of-view cuts are horizontal, so SkinSilhouette trims them reliably (a tilted NHP frame
+    /// leaves the cut edges in the front chain and breaks Auto-align for pitches around 10 deg). The NHP is applied
+    /// afterwards by <see cref="NhpPitchDegrees"/>.
+    /// </summary>
+    public static double[] SkinBuildAffine(SegmentViewModel softTissue) => ToAffine(softTissue.LocalTransform.Value);
+
     /// <summary>WPF row-vector Matrix3D -> row-major 4x4 for column vectors (SkinSilhouette convention).</summary>
-    private static double[] ToAffine(Matrix3D m) => new[]
+    public static double[] ToAffine(Matrix3D m) => new[]
     {
         m.M11, m.M21, m.M31, m.OffsetX,
         m.M12, m.M22, m.M32, m.OffsetY,
@@ -172,7 +181,8 @@ public static class CephOverlayService
                                                SkinMeshScaleSource);
         string diag = $"Skin silhouette: {skin.TriangleCount} triangles, {skin.Width}x{skin.Height} px at " +
                       $"{skin.MmPerPixel.ToString("F2", CultureInfo.InvariantCulture)} mm/px, built in {skin.ElapsedMs} ms.";
-        return Finish(input.Reference, reg, photoRes.Contour!, skin.Contour!, null, skin, null, diag, sw);
+        return Finish(input.Reference, reg, photoRes.Contour!, skin.Contour!, null, skin, null, diag, sw)
+            with { SkinAffine = input.Skin!.Affine };
     }
 
     private static CephOverlayResult RunXray(Input input, Stopwatch sw)
@@ -205,6 +215,42 @@ public static class CephOverlayService
         string message = reg.Success ? "Aligned." : reg.FailureReason ?? "Registration failed without a reason.";
         return new CephOverlayResult(reg.Success, message, reference, reg, xray, skin, photoRoi, refRoi, rulerWarning, diag,
                                      sw.ElapsedMilliseconds);
+    }
+
+    /// <summary>
+    /// Photo rotation (degrees, view convention: positive = clockwise on screen) that makes the NHP true vertical
+    /// point straight down. The true inferior direction (0,0,-1) of the committed NHP frame is taken back to mesh
+    /// space (inverse of <paramref name="committedAffine"/>), forward into the frame the silhouette was built in
+    /// (<paramref name="buildAffine"/>), projected on the silhouette (column = Y, row = -Z) and mapped into photo
+    /// pixels by the linear part of <paramref name="refToPhoto"/> (mirror included). Pure function, no WPF types.
+    /// </summary>
+    public static double NhpPitchDegrees(IReadOnlyList<double> refToPhoto, double[] buildAffine, double[] committedAffine)
+    {
+        if (refToPhoto.Count != 6) throw new ArgumentException("registration matrix must have 6 values");
+        var u = Solve3(committedAffine, 0, 0, -1);
+        double wy = buildAffine[4] * u.X + buildAffine[5] * u.Y + buildAffine[6] * u.Z;
+        double wz = buildAffine[8] * u.X + buildAffine[9] * u.Y + buildAffine[10] * u.Z;
+        double sx = wy, sy = -wz;   // silhouette pixel direction (scale irrelevant)
+        double px = refToPhoto[0] * sx + refToPhoto[1] * sy, py = refToPhoto[3] * sx + refToPhoto[4] * sy;
+        if (Math.Abs(px) + Math.Abs(py) < 1e-12)
+            throw new InvalidOperationException("the NHP vertical is parallel to the projection direction");
+        double theta = 90.0 - Math.Atan2(py, px) * 180.0 / Math.PI;
+        theta %= 360.0;
+        if (theta > 180) theta -= 360;
+        if (theta <= -180) theta += 360;
+        return theta;
+    }
+
+    // Solves L·u = b for the linear 3x3 part of a row-major 4x4 (Cramer's rule).
+    private static (double X, double Y, double Z) Solve3(double[] a, double bx, double by, double bz)
+    {
+        double a00 = a[0], a01 = a[1], a02 = a[2], a10 = a[4], a11 = a[5], a12 = a[6], a20 = a[8], a21 = a[9], a22 = a[10];
+        double det = a00 * (a11 * a22 - a12 * a21) - a01 * (a10 * a22 - a12 * a20) + a02 * (a10 * a21 - a11 * a20);
+        if (Math.Abs(det) < 1e-12) throw new InvalidOperationException("the NHP transform is not invertible");
+        double x = (bx * (a11 * a22 - a12 * a21) - a01 * (by * a22 - a12 * bz) + a02 * (by * a21 - a11 * bz)) / det;
+        double y = (a00 * (by * a22 - a12 * bz) - bx * (a10 * a22 - a12 * a20) + a02 * (a10 * bz - by * a20)) / det;
+        double z = (a00 * (a11 * bz - by * a21) - a01 * (a10 * bz - by * a20) + bx * (a10 * a21 - a11 * a20)) / det;
+        return (x, y, z);
     }
 
     /// <summary>Cached skin silhouette for this model + vertex array + transform; built on the calling thread.</summary>

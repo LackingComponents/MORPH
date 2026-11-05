@@ -610,6 +610,14 @@
                             </StackPanel>
                         </ToggleButton>
 
+                        <!-- NHP pitch correction (skin mesh overlay only) + badge -->
+                        <Button x:Name="BtnNhp" Content="NHP" Style="{StaticResource PrimaryBtn}" Padding="12,4"
+                                Margin="6,0,0,0" IsEnabled="False" ToolTipService.ShowOnDisabled="True" Click="Nhp_Click"
+                                ToolTip="Correct the pitch of the photo to the natural head position set in the 3D view. Measurements in mm are not changed by the rotation."/>
+                        <TextBlock Text="{Binding ActivePhoto.NhpBadgeText}" Foreground="#FF4CAF50" FontSize="11" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" Margin="6,0,4,0"
+                                   Visibility="{Binding ActivePhoto.NhpBadgeText, Converter={StaticResource NotNullToVis}}"/>
+
                         <!-- Quick opacity popup (same control as the 3D models menu) -->
                         <Popup x:Name="OverlayQuickPopup" PlacementTarget="{Binding ElementName=BtnCephOverlay}"
                                Placement="Bottom" VerticalOffset="4" StaysOpen="False" AllowsTransparency="True">
@@ -842,6 +850,7 @@
                         <Button x:Name="CephRemoveButton" Content="Remove overlay" Click="CephRemove_Click"
                                 Style="{StaticResource PrimaryBtn}" Margin="0,0,0,6" IsEnabled="False"/>
                         <TextBlock x:Name="CephStatusText" Style="{StaticResource CephText}" Foreground="#FF4CAF50" Visibility="Collapsed"/>
+                        <TextBlock x:Name="CephNhpText" Style="{StaticResource CephText}" Foreground="#FF8FD3FF" Visibility="Collapsed"/>
                     </StackPanel>
                 </ScrollViewer>
             </Border>
