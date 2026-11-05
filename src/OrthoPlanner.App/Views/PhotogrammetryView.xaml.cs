@@ -77,6 +77,12 @@ public partial class PhotogrammetryView : UserControl
     // (see FocusViewport). Text boxes keep their own keys — the shortcut never fires while typing.
     private void View_PreviewKeyDown(object s, KeyEventArgs e)
     {
+        // O: show / hide the reference overlay, only while the photo viewport itself has focus
+        if (e.Key == Key.O && Keyboard.Modifiers == ModifierKeys.None && ViewportHost.IsKeyboardFocused)
+        {
+            if (ToggleOverlayVisibility()) e.Handled = true;
+            return;
+        }
         if (e.Key != Key.F || Keyboard.Modifiers != ModifierKeys.Control) return;
         if (e.OriginalSource is System.Windows.Controls.Primitives.TextBoxBase) return;
         if (!IsVisible || Active?.ImageSource == null) return;

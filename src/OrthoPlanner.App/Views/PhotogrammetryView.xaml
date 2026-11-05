@@ -6,7 +6,8 @@
              xmlns:conv="clr-namespace:OrthoPlanner.App.Converters"
              mc:Ignorable="d" 
              d:DesignHeight="800" d:DesignWidth="1200"
-             Background="#FF0C1018">
+             Background="#FF0C1018"
+             KeyDown="View_KeyDown">
 
     <UserControl.Resources>
         <BooleanToVisibilityConverter    x:Key="BoolToVis" />
@@ -230,6 +231,56 @@
                                 <Setter Property="Cursor" Value="Arrow"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Small "X" that closes a floating panel (Segoe MDL2 E711 ChromeClose) -->
+        <Style x:Key="PanelCloseBtn" TargetType="Button">
+            <Setter Property="Width"       Value="24"/>
+            <Setter Property="Height"      Value="24"/>
+            <Setter Property="FontFamily"  Value="Segoe MDL2 Assets"/>
+            <Setter Property="FontSize"    Value="10"/>
+            <Setter Property="Content"     Value="&#xE711;"/>
+            <Setter Property="Foreground"  Value="#FF8A94A6"/>
+            <Setter Property="Background"  Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor"      Value="Hand"/>
+            <Setter Property="ToolTip"     Value="Close panel (Esc)"/>
+            <Setter Property="Focusable"   Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="3">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#22FFFFFF"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Floating panel header: title (content) left, small X right. The X raises Button.Click on this control:
+             <ContentControl Style="{StaticResource PanelHeaderBar}" ButtonBase.Click="MyPanelClose_Click">Title</ContentControl> -->
+        <Style x:Key="PanelHeaderBar" TargetType="ContentControl">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize"   Value="12"/>
+            <Setter Property="Margin"     Value="0,0,0,8"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContentControl">
+                        <DockPanel LastChildFill="True">
+                            <Button DockPanel.Dock="Right" Style="{StaticResource PanelCloseBtn}" Margin="6,-4,-6,-4"
+                                    VerticalAlignment="Center"/>
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </DockPanel>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -541,15 +592,134 @@
                                      Command="{Binding SelectToolCommand}" CommandParameter="DrawLine"
                                      ToolTip="Draw a persistent annotation line."/>
 
+                        <!-- Reference overlay group: [eye] [Reference overlay] -->
+                        <ToggleButton x:Name="BtnOverlayEye" Style="{StaticResource ToolToggle}" IsEnabled="False"
+                                      Margin="0,0,2,0" Click="OverlayEye_Click"
+                                      ToolTip="Show / hide overlay (O)">
+                            <TextBlock x:Name="OverlayEyeGlyph" Text="&#xE7B3;" FontFamily="Segoe MDL2 Assets" FontSize="14"
+                                       VerticalAlignment="Center"/>
+                        </ToggleButton>
                         <ToggleButton x:Name="BtnCephOverlay"
                                       Style="{StaticResource ToolToggle}" IsEnabled="False"
                                       Checked="CephOverlayToggle_Changed" Unchecked="CephOverlayToggle_Changed"
-                                      ToolTip="Overlay the CT skin silhouette or the lateral radiograph on this profile photo (automatic, no points to click).">
+                                      Click="CephOverlayButton_Click" MouseRightButtonUp="CephOverlayButton_RightClick"
+                                      ToolTip="Reference overlay: click for opacity and settings (no overlay yet: opens the settings). Right-click: opacity.">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="⧉" FontFamily="Segoe UI Symbol" Margin="0,0,6,0" VerticalAlignment="Center"/>
                                 <TextBlock Text="Reference overlay" VerticalAlignment="Center"/>
                             </StackPanel>
                         </ToggleButton>
+
+                        <!-- Quick opacity popup (same control as the 3D models menu) -->
+                        <Popup x:Name="OverlayQuickPopup" PlacementTarget="{Binding ElementName=BtnCephOverlay}"
+                               Placement="Bottom" VerticalOffset="4" StaysOpen="False" AllowsTransparency="True">
+                            <Border Background="#FF1E222A" BorderBrush="#FF30343D" BorderThickness="1" CornerRadius="3" Padding="2">
+                                <Border.Resources>
+                                    <!-- Copied from ThreeDModelContextPanel.xaml -->
+                                    <DrawingBrush x:Key="TransparencyCheckerboard" TileMode="Tile"
+                                                  Viewport="0,0,8,8" ViewportUnits="Absolute">
+                                        <DrawingBrush.Drawing>
+                                            <DrawingGroup>
+                                                <GeometryDrawing Brush="#FF2A2E36">
+                                                    <GeometryDrawing.Geometry>
+                                                        <RectangleGeometry Rect="0,0,8,8"/>
+                                                    </GeometryDrawing.Geometry>
+                                                </GeometryDrawing>
+                                                <GeometryDrawing Brush="#FF3A4048">
+                                                    <GeometryDrawing.Geometry>
+                                                        <GeometryGroup>
+                                                            <RectangleGeometry Rect="0,0,4,4"/>
+                                                            <RectangleGeometry Rect="4,4,4,4"/>
+                                                        </GeometryGroup>
+                                                    </GeometryDrawing.Geometry>
+                                                </GeometryDrawing>
+                                            </DrawingGroup>
+                                        </DrawingBrush.Drawing>
+                                    </DrawingBrush>
+                                    <Style x:Key="InvisibleVerticalOpacitySlider" TargetType="Slider">
+                                        <Setter Property="Orientation" Value="Vertical"/>
+                                        <Setter Property="IsMoveToPointEnabled" Value="True"/>
+                                        <Setter Property="Background" Value="Transparent"/>
+                                        <Setter Property="Cursor" Value="SizeNS"/>
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="Slider">
+                                                    <Grid Background="Transparent">
+                                                        <Track x:Name="PART_Track">
+                                                            <Track.Thumb>
+                                                                <Thumb>
+                                                                    <Thumb.Template>
+                                                                        <ControlTemplate TargetType="Thumb">
+                                                                            <Border Background="Transparent"
+                                                                                    Width="{TemplateBinding Width}" Height="10"/>
+                                                                        </ControlTemplate>
+                                                                    </Thumb.Template>
+                                                                </Thumb>
+                                                            </Track.Thumb>
+                                                            <Track.DecreaseRepeatButton>
+                                                                <RepeatButton Command="Slider.DecreaseLarge">
+                                                                    <RepeatButton.Template>
+                                                                        <ControlTemplate TargetType="RepeatButton">
+                                                                            <Border Background="Transparent"/>
+                                                                        </ControlTemplate>
+                                                                    </RepeatButton.Template>
+                                                                </RepeatButton>
+                                                            </Track.DecreaseRepeatButton>
+                                                            <Track.IncreaseRepeatButton>
+                                                                <RepeatButton Command="Slider.IncreaseLarge">
+                                                                    <RepeatButton.Template>
+                                                                        <ControlTemplate TargetType="RepeatButton">
+                                                                            <Border Background="Transparent"/>
+                                                                        </ControlTemplate>
+                                                                    </RepeatButton.Template>
+                                                                </RepeatButton>
+                                                            </Track.IncreaseRepeatButton>
+                                                        </Track>
+                                                    </Grid>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </Border.Resources>
+                                <StackPanel Orientation="Horizontal">
+                                    <!-- Transparency: drag vertically anywhere on the square -->
+                                    <Border x:Name="OverlayQuickSquare" Width="46" Height="46" Margin="2"
+                                            BorderBrush="#FF505860" BorderThickness="1" CornerRadius="2" ClipToBounds="True"
+                                            ToolTip="Drag up/down to change the overlay opacity">
+                                        <Grid>
+                                            <Border Background="{StaticResource TransparencyCheckerboard}" IsHitTestVisible="False"/>
+                                            <Border x:Name="OverlayQuickFill" Background="#FF4DFFFF" Opacity="0.5" IsHitTestVisible="False"/>
+                                            <Border Background="#18000000" IsHitTestVisible="False"/>
+                                            <Viewbox Width="22" Height="22" HorizontalAlignment="Center"
+                                                     VerticalAlignment="Center" Margin="0,-8,0,10" IsHitTestVisible="False">
+                                                <Canvas Width="24" Height="24">
+                                                    <Ellipse Canvas.Left="3" Canvas.Top="11" Width="18" Height="9"
+                                                             Stroke="#E8FFFFFF" StrokeThickness="1.2" Fill="#30FFFFFF"/>
+                                                    <Ellipse Canvas.Left="5" Canvas.Top="7" Width="18" Height="9"
+                                                             Stroke="#F0FFFFFF" StrokeThickness="1.2" Fill="#55FFFFFF"/>
+                                                    <Ellipse Canvas.Left="7" Canvas.Top="3" Width="18" Height="9"
+                                                             Stroke="#FFFFFF" StrokeThickness="1.2" Fill="#80FFFFFF"/>
+                                                </Canvas>
+                                            </Viewbox>
+                                            <TextBlock x:Name="OverlayQuickText" Text="50"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       Margin="0,2,0,0" FontSize="10" Foreground="#E0FFFFFF"
+                                                       IsHitTestVisible="False"/>
+                                            <Slider x:Name="OverlayQuickSlider" Minimum="0" Maximum="100" Value="50"
+                                                    Style="{StaticResource InvisibleVerticalOpacitySlider}"
+                                                    ValueChanged="OverlayQuickSlider_ValueChanged"
+                                                    PreviewMouseLeftButtonDown="OverlayQuickSlider_MouseDown"
+                                                    PreviewMouseMove="OverlayQuickSlider_MouseMove"
+                                                    PreviewMouseLeftButtonUp="OverlayQuickSlider_MouseUp"/>
+                                        </Grid>
+                                    </Border>
+                                    <!-- Opens / closes the full overlay panel -->
+                                    <Button Width="46" Height="46" Margin="2" Padding="0" Style="{StaticResource PrimaryBtn}"
+                                            FontFamily="Segoe MDL2 Assets" FontSize="18" FontWeight="Normal" Content="&#xE713;"
+                                            ToolTip="Overlay settings…" Click="OverlaySettings_Click"/>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
 
                         <Separator Width="1" Background="#FF2D3340" Margin="8,4"/>
 
@@ -607,9 +777,11 @@
                 </Border.Effect>
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="14,12">
-                        <TextBlock Foreground="White" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,8">
-                            <Run Text="⧉" FontFamily="Segoe UI Symbol"/><Run Text=" Reference overlay"/>
-                        </TextBlock>
+                        <ContentControl Style="{StaticResource PanelHeaderBar}" ButtonBase.Click="CephPanelClose_Click">
+                            <TextBlock>
+                                <Run Text="⧉" FontFamily="Segoe UI Symbol"/><Run Text=" Reference overlay"/>
+                            </TextBlock>
+                        </ContentControl>
                         <TextBlock Text="REFERENCE" Style="{StaticResource SectionLabel}"/>
                         <ComboBox x:Name="CephReferenceCombo" Style="{StaticResource DarkCombo}" SelectedIndex="0"
                                   SelectionChanged="CephReference_Changed">

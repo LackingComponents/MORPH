@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
@@ -74,7 +75,11 @@ public partial class PhotogrammetryView
         if (_cephStateSub != null) _cephStateSub.PropertyChanged += OnCephStateChanged;
     }
 
-    private void OnCephStateChanged(object? s, PropertyChangedEventArgs e) => FullRedraw();
+    private void OnCephStateChanged(object? s, PropertyChangedEventArgs e)
+    {
+        FullRedraw();
+        SyncOverlayQuickControls();   // eye, popup square and panel controls follow the state both ways
+    }
 
     // ── Rendering (called by FullRedraw after ClearOverlays) ──────────────────────
     private void DrawCephOverlay(PhotoViewModel photo)
@@ -171,6 +176,122 @@ public partial class PhotogrammetryView
         return bmp;
     }
 
+    // ── Quick controls: eye toggle and opacity popup on the toolbar ───────────────
+    private const string EyeVisibleGlyph = "";   // Segoe MDL2 "View"
+    private const string EyeHiddenGlyph  = "";   // Segoe MDL2 "Hide"
+
+    /// <summary>Overlay of the active photo that can be shown (has a matrix), or null.</summary>
+    private CephOverlayState? ShowableOverlay =>
+        Active?.CephOverlay is { Result.HasMatrix: true } state ? state : null;
+
+    /// <summary>Copies the overlay state into the eye, the popup square and the panel controls.</summary>
+    private void SyncOverlayQuickControls()
+    {
+        var state = Active?.CephOverlay;
+        var showable = ShowableOverlay;
+        double opacity = Math.Clamp(state?.Opacity ?? 0.5, 0, 1);
+        bool visible = state?.IsVisible ?? true;
+
+        _cephPanelUpdating = true;
+        BtnOverlayEye.IsEnabled = showable != null;
+        BtnOverlayEye.IsChecked = showable != null && visible;
+        OverlayEyeGlyph.Text = visible ? EyeVisibleGlyph : EyeHiddenGlyph;
+
+        OverlayQuickSquare.IsEnabled = showable != null;
+        OverlayQuickSquare.Opacity = showable != null ? 1.0 : 0.45;
+        OverlayQuickSlider.Value = opacity * 100;
+        OverlayQuickFill.Opacity = opacity;
+        OverlayQuickText.Text = (opacity * 100).ToString("F0", Inv);
+
+        CephOpacitySlider.Value = opacity * 100;
+        CephOpacityText.Text = $"{CephOpacitySlider.Value:F0}%";
+        CephShowXray.IsChecked = visible;
+        _cephPanelUpdating = false;
+    }
+
+    /// <summary>Flips the overlay visibility (eye button and O key). False when there is nothing to show.</summary>
+    private bool ToggleOverlayVisibility()
+    {
+        if (ShowableOverlay is not { } state) return false;
+        state.IsVisible = !state.IsVisible;   // the state change redraws and syncs every control
+        return true;
+    }
+
+    private void OverlayEye_Click(object s, RoutedEventArgs e)
+    {
+        if (ShowableOverlay is { } state) state.IsVisible = BtnOverlayEye.IsChecked == true;
+        SyncOverlayQuickControls();
+    }
+
+    /// <summary>
+    /// Left click: with an overlay, opens the opacity popup (the panel stays as it was); without one, the click
+    /// opens / closes the panel (the ToggleButton already flipped IsChecked).
+    /// </summary>
+    private void CephOverlayButton_Click(object s, RoutedEventArgs e)
+    {
+        if (ShowableOverlay == null) return;
+        BtnCephOverlay.IsChecked = !(BtnCephOverlay.IsChecked == true);   // undo the automatic toggle
+        OpenOverlayQuickPopup();
+    }
+
+    private void CephOverlayButton_RightClick(object s, MouseButtonEventArgs e)
+    {
+        if (!BtnCephOverlay.IsEnabled) return;
+        OpenOverlayQuickPopup();
+        e.Handled = true;
+    }
+
+    private void OpenOverlayQuickPopup()
+    {
+        SyncOverlayQuickControls();
+        OverlayQuickPopup.IsOpen = true;
+    }
+
+    private void OverlaySettings_Click(object s, RoutedEventArgs e)
+    {
+        OverlayQuickPopup.IsOpen = false;
+        BtnCephOverlay.IsChecked = !(BtnCephOverlay.IsChecked == true);   // Checked/Unchecked show or hide the panel
+    }
+
+    private void OverlayQuickSlider_ValueChanged(object s, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (OverlayQuickFill == null) return;   // XAML initialisation
+        OverlayQuickFill.Opacity = e.NewValue / 100.0;
+        OverlayQuickText.Text = e.NewValue.ToString("F0", Inv);
+        if (_cephPanelUpdating || ShowableOverlay is not { } state) return;
+        state.Opacity = e.NewValue / 100.0;
+    }
+
+    // Drag anywhere on the square: top = 100 %, bottom = 0 %. Captured so the drag continues outside it.
+    private void OverlayQuickSlider_MouseDown(object s, MouseButtonEventArgs e)
+    {
+        OverlayQuickSlider.CaptureMouse();
+        SetQuickOpacityFromMouse(e);
+        e.Handled = true;
+    }
+
+    private void OverlayQuickSlider_MouseMove(object s, MouseEventArgs e)
+    {
+        if (!OverlayQuickSlider.IsMouseCaptured || e.LeftButton != MouseButtonState.Pressed) return;
+        SetQuickOpacityFromMouse(e);
+        e.Handled = true;
+    }
+
+    private void OverlayQuickSlider_MouseUp(object s, MouseButtonEventArgs e)
+    {
+        if (!OverlayQuickSlider.IsMouseCaptured) return;
+        OverlayQuickSlider.ReleaseMouseCapture();
+        e.Handled = true;
+    }
+
+    private void SetQuickOpacityFromMouse(MouseEventArgs e)
+    {
+        double h = OverlayQuickSlider.ActualHeight;
+        if (h <= 0) return;
+        double y = e.GetPosition(OverlayQuickSlider).Y;
+        OverlayQuickSlider.Value = Math.Round(Math.Clamp(1 - y / h, 0, 1) * 100);
+    }
+
     // ── Panel ─────────────────────────────────────────────────────────────────────
     private void CephOverlayToggle_Changed(object s, RoutedEventArgs e)
     {
@@ -178,6 +299,26 @@ public partial class PhotogrammetryView
         CephOverlayPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
         if (open) ApplyDefaultReference();   // the soft-tissue model may have been segmented meanwhile
         UpdateCephPanel();
+    }
+
+    /// <summary>Header X: hides the panel only (overlay, result, opacity and visibility untouched).</summary>
+    private void CephPanelClose_Click(object s, RoutedEventArgs e)
+    {
+        BtnCephOverlay.IsChecked = false;   // Unchecked hides the panel, like the toolbar toggle and the gear
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// Esc closes the open panel. Bubbling KeyDown: an open ComboBox handles Esc first (closes only itself);
+    /// text boxes keep Esc for their own use.
+    /// </summary>
+    private void View_KeyDown(object s, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape || CephOverlayPanel.Visibility != Visibility.Visible) return;
+        if (e.OriginalSource is System.Windows.Controls.Primitives.TextBoxBase) return;
+        if (CephReferenceCombo.IsDropDownOpen || CephFacingCombo.IsDropDownOpen) return;
+        BtnCephOverlay.IsChecked = false;
+        e.Handled = true;
     }
 
     private void UpdateCephPanel()
@@ -212,6 +353,7 @@ public partial class PhotogrammetryView
         CephShowProfiles.IsChecked = state?.ShowProfiles ?? true;
         _cephPanelUpdating = false;
 
+        SyncOverlayQuickControls();
         CephApplyButton.IsEnabled = !_cephBusy && result?.CanApplyScale == true;
         CephRemoveButton.IsEnabled = !_cephBusy && state != null;
         bool showStatus = _cephStatus is { } st && ReferenceEquals(st.Photo, photo);
