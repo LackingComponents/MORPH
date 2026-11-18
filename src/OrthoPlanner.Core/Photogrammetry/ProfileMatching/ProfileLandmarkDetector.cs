@@ -14,17 +14,20 @@ public sealed record DetectedProfileLandmark(ProfileLandmarkId Id, double X, dou
 /// <summary>Registered skin-mesh profile (silhouette px) and its silhouette-px -> photo-px matrix [a b tx; c d ty].</summary>
 public sealed record ProfileSkinAssist(ProfileContour SkinContour, IReadOnlyList<double> SkinToPhoto);
 
-/// <summary>Outcome of <see cref="ProfileLandmarkDetector.Detect"/>. On failure <see cref="FailureReason"/> is set.</summary>
+/// <summary>Outcome of <see cref="ProfileLandmarkDetector.Detect"/>. On failure <see cref="FailureReason"/> is set.
+/// <see cref="Contour"/> is the profile the landmark <c>ContourIndex</c> values refer to: the photo contour, or the
+/// hybrid photo + CT skin-mesh profile when the splice succeeded (null on early failures).</summary>
 public sealed record ProfileLandmarkResult(bool Success, string? FailureReason,
                                           IReadOnlyList<DetectedProfileLandmark> Landmarks,
                                           IReadOnlyList<ProfileLandmarkId> Missing,
-                                          IReadOnlyList<string> Diagnostics);
+                                          IReadOnlyList<string> Diagnostics,
+                                          ProfileContour? Contour = null);
 
 /// <summary>
 /// Automatic soft-tissue profile landmarks on the T1 photo contour, in the NHP frame (y = true vertical, nose +X).
 /// Rules validated on three QIU photos; every landmark carries a confidence and a short reason.
 /// </summary>
-public static class ProfileLandmarkDetector
+public static partial class ProfileLandmarkDetector
 {
     private const double MinConfidence = 0.05;
     private const double ShapeSigma = 8;          // samples, for "most anterior / deepest" searches
@@ -50,6 +53,7 @@ public static class ProfileLandmarkDetector
     private const double HairSkinFactor = 2.5;      // x median Delta E of the skin samples (brows and lashes inflate MAD)
     private const double HairMaxBehindGMm = 40;     // the frontal hairline is on the forehead, not over the skull
     private const int GlabellaLimitSamples = 3;
+    private const double HairMinAboveGMm = 15;      // eyebrows lie within this height above G': not the hairline
 
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
     private static string F(double v, string fmt = "F1") => v.ToString(fmt, Inv);
@@ -88,7 +92,21 @@ public static class ProfileLandmarkDetector
         if (rgb is null || rgb.Length < (long)stride * height) return Fail("photo pixels missing");
         try
         {
-            return DetectCore(photo, nhpRotationDeg, rgb, width, height, stride, pxPerMm, assist, diag);
+            if (assist != null)
+            {
+                var splice = Splice(photo, assist, nhpRotationDeg, pxPerMm);
+                diag.AddRange(splice.Diagnostics);
+                if (splice.Success)
+                {
+                    var hybrid = splice.Contour!;
+                    var r = DetectCore(hybrid, nhpRotationDeg, rgb, width, height, stride, pxPerMm, null, diag);
+                    var tagged = r.Landmarks.Select(l => l.ContourIndex >= splice.MeshStart && l.ContourIndex <= splice.MeshEnd
+                        ? l with { Reason = l.Reason.Replace(" (photo contour)", "") + " (CT skin-mesh profile)" } : l).ToList();
+                    return r with { Landmarks = tagged, Contour = hybrid };
+                }
+                diag.Add($"WARNING: profile not spliced: {splice.Reason}; photo contour used");
+            }
+            return DetectCore(photo, nhpRotationDeg, rgb, width, height, stride, pxPerMm, assist, diag) with { Contour = photo };
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -246,12 +264,9 @@ public static class ProfileLandmarkDetector
         ProfileSkinAssist assist, bool facingRight, double rot, double pxPerMm,
         Dictionary<ProfileLandmarkId, DetectedProfileLandmark> found, List<string> diag)
     {
-        var m = assist.SkinToPhoto;
-        if (m.Count != 6) { diag.Add("mesh assist skipped: invalid overlay matrix"); return; }
-        var mapped = assist.SkinContour.Points.Select(p => (X: m[0] * p.X + m[1] * p.Y + m[2], Y: m[3] * p.X + m[4] * p.Y + m[5])).ToList();
-        var conf = assist.SkinContour.Points.Select(_ => 1.0).ToList();
-        var sf = ToFrame(mapped, conf, facingRight, rot);
-        if (sf.N > 1 && sf.V[0] > sf.V[^1]) { mapped.Reverse(); sf = ToFrame(mapped, conf, facingRight, rot); }
+        var skin = MapSkin(assist, facingRight, rot);
+        if (skin is null) { diag.Add("mesh assist skipped: invalid overlay matrix"); return; }
+        var (mapped, sf) = skin.Value;
         int sPrn = Pronasale(sf), sN = sPrn < 0 ? -1 : Nasion(sf, sPrn);
         var (sG, sGChord) = sN < 0 ? (-1, false) : Glabella(sf, sN, sPrn);
         if (sN < 0) { diag.Add("mesh assist: nasion not found on the skin-mesh profile"); return; }
@@ -272,6 +287,19 @@ public static class ProfileLandmarkDetector
                 sGChord ? $"skin mesh, {GlabellaChordReason} ({why})" : $"skin mesh ({why})") with
                 { Confidence = sGChord ? LandmarkConfidence.Low : LandmarkConfidence.High };
         diag.Add($"mesh assist: N'{(sG >= 0 ? " and G'" : "")} taken from the skin mesh ({why})");
+    }
+
+    /// <summary>Skin-mesh profile mapped to photo px (SkinToPhoto, mirror included), ordered top -> bottom, and its frame.
+    /// Null when the matrix is invalid.</summary>
+    private static (List<(double X, double Y)> Points, Frame F)? MapSkin(ProfileSkinAssist assist, bool facingRight, double rot)
+    {
+        var m = assist.SkinToPhoto;
+        if (m.Count != 6 || assist.SkinContour.Points.Count < 2) return null;
+        var mapped = assist.SkinContour.Points.Select(p => (X: m[0] * p.X + m[1] * p.Y + m[2], Y: m[3] * p.X + m[4] * p.Y + m[5])).ToList();
+        var conf = mapped.Select(_ => 1.0).ToList();
+        var sf = ToFrame(mapped, conf, facingRight, rot);
+        if (sf.V[0] > sf.V[^1]) { mapped.Reverse(); sf = ToFrame(mapped, conf, facingRight, rot); }
+        return (mapped, sf);
     }
 
     private static DetectedProfileLandmark FromMesh(ProfileLandmarkId id, (double X, double Y) p,
@@ -381,7 +409,8 @@ public static class ProfileLandmarkDetector
     /// Walking up from G': first contour point where the Lab colour just inside the contour departs from the skin colour
     /// (median of the samples between G' and N') on at least 70% of the next 1 mm of contour. Threshold = max(15, 2.5 x
     /// the median Delta E of the skin samples to their own median): brows and lashes in that sample inflate its MAD, so
-    /// the median is used. Only points above G' and less than 40 mm behind it are searched. Returns -1 when not found.
+    /// the median is used. Only points at least 15 mm above G' (above the eyebrows) and less than 40 mm behind it are
+    /// searched. Returns -1 when not found.
     /// </summary>
     private static int Trichion(IReadOnlyList<(double X, double Y)> p, Frame f, bool facingRight, int g, int n,
                                 byte[] rgb, int width, int height, int stride, double pxPerMm, List<string> diag)
@@ -406,14 +435,14 @@ public static class ProfileLandmarkDetector
         double threshold = Math.Max(HairMinDeltaE, HairSkinFactor * m);
         diag.Add($"trichion: skin Lab ({F(med.L)}, {F(med.A)}, {F(med.B)}) from G'..N', skin dE median {F(m)}, " +
                  $"threshold {F(threshold)} = max({HairMinDeltaE}, {HairSkinFactor} x median); hair = >= {F(HairRunShare * 100, "F0")}% " +
-                 $"of {F(HairRunMm)} mm of contour above it; search above G' and < {F(HairMaxBehindGMm, "F0")} mm behind G'");
+                 $"of {F(HairRunMm)} mm of contour above it; search >= {F(HairMinAboveGMm, "F0")} mm above G' and < {F(HairMaxBehindGMm, "F0")} mm behind G'");
 
         // Candidates: from G' upward, above G', not far behind it (stop where the contour runs over the skull).
         var cand = new List<int>();
         for (int i = g - 1; i >= 0; i--)
         {
             if ((f.Us[g] - f.Us[i]) / pxPerMm > HairMaxBehindGMm) break;
-            if (f.V[i] < f.V[g]) cand.Add(i);
+            if ((f.V[g] - f.V[i]) / pxPerMm >= HairMinAboveGMm) cand.Add(i);
         }
         var hair = cand.Select(i => Patch(i) is { } c && De(c) > threshold).ToArray();
         double runPx = HairRunMm * pxPerMm;

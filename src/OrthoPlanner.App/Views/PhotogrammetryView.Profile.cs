@@ -155,7 +155,8 @@ public partial class PhotogrammetryView
             return (new ProfileLandmarkResult(false, $"photo profile: {extraction.FailureReason}", Array.Empty<DetectedProfileLandmark>(),
                                               Array.Empty<ProfileLandmarkId>(), extraction.Diagnostics), null);
         var result = ProfileLandmarkDetector.Detect(extraction.Contour!, rotation, rgb, w, h, stride, ppm, assist);
-        return (result, extraction.Contour);
+        // With a registered skin mesh the landmarks refer to the hybrid profile (CT above the nasal dorsum).
+        return (result, result.Contour ?? extraction.Contour);
     }
 
     // ── Drawing (called by FullRedraw) ────────────────────────────────────────────
@@ -167,7 +168,8 @@ public partial class PhotogrammetryView
         foreach (var p in lm.Points.Values) DrawLandmark(p, lm.FacingRight);
     }
 
-    // Photo profile, 1 px gold, from G' to a little below Me' (no hair, headband or neck).
+    // Profile, 1 px gold, from G' to a little below Me' (no hair, headband or neck): the photo contour, with the CT skin
+    // mesh above the nasal dorsum when the Skin mesh overlay is registered (no eyebrows, lashes or eye).
     private void DrawProfileLine(ProfileLandmarksViewModel lm, double ppm)
     {
         if (!lm.Points.TryGetValue(ProfileLandmarkId.G, out var g) || !lm.Points.TryGetValue(ProfileLandmarkId.Me, out var me)) return;
